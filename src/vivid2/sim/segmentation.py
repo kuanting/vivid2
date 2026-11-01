@@ -22,7 +22,7 @@ TARGET_ID_BASE = 1
 DISTRACTOR_ID_BASE = 101
 MAX_ID = 255
 MIN_VISIBLE_PX = 20  # below this a target is "partly visible": neither a hit nor a miss
-PALETTE_ORDER = "bgr"  # channel order of the palette entries as they appear in the decoded (BGR) image
+PALETTE_ORDER = "rgb"  # palette entries are RGB; decoded images are BGR (verified on Blocks: Hiker1 = (6, 108, 153))
 
 
 class SegmentationError(RuntimeError):
