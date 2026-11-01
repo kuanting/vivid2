@@ -1,14 +1,16 @@
 // Bring-up scenario on the Blocks map: one hiker proxy (scaled cube) in open ground.
 // Validates the full pipeline (scene build, spawn, annotations, flight, scoring).
+// Positions are checked against the BlocksMap layout: the NED origin sits inside two
+// 10 m cubes, block stacks reach 26 m, so the drone starts at (-12, 0) and flies at 35 m.
 {
   "id": "blocks_hiker_01",
   "mission": "forest_sar",
   "description": "Single stationary hiker proxy, clear midday, no wind.",
   "scene": {"base": "scene_forest_sar_blocks.jsonc", "robot_config": "robot_vivid_quad.jsonc", "camera": "Payload"},
-  "dut_start": {"ned": [0, 0, -1], "yaw_deg": 0},
-  "search_area": {"polygon_ne": [[-60, -60], [60, -60], [60, 60], [-60, 60]], "altitude_m": 30, "ground_down_m": 0},
+  "dut_start": {"ned": [-12, 0, -1], "yaw_deg": 0},
+  "search_area": {"polygon_ne": [[-60, -60], [60, -60], [60, 60], [-60, 60]], "altitude_m": 35, "ground_down_m": 0},
   "targets": [
-    {"id": "Hiker1", "asset": "1M_Cube", "ned": [35, 20, -0.85], "scale": [0.5, 0.5, 1.7],
+    {"id": "Hiker1", "asset": "1M_Cube", "ned": [-35, 25, -0.85], "scale": [0.5, 0.5, 1.7],
      "description": "hiker proxy (grey box, 1.7 m tall)"}
   ],
   "target_jitter_m": 15,

@@ -42,8 +42,13 @@
   not at the PlayerStart.
 - The camera optical frame is x forward, y right, z down, which is the Project
   AirSim convention. Image messages carry the camera's world pose.
-- Depth comes as 16-bit millimetres, so it saturates at 65.5 m. Geolocation
-  falls back to a flat-ground ray intersection beyond that.
+- Depth comes as 16-bit integers labelled millimetres (`16UC1`). The current
+  UE 5.8 plugin build actually packs whole metres, so the runner detects the
+  unit from the first frame taken above 5 m and records it in `meta.json`
+  (`depth_metres_per_unit`). Raw 0 and 65504 mean no data. Where depth is
+  missing, geolocation falls back to a flat-ground ray intersection.
+- Contacts on the home pad (within 5 m of the start, below 2 m AGL) are
+  takeoff/landing contacts (`ground_contacts`), not collisions.
 
 ## Controllers
 

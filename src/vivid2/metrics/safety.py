@@ -5,7 +5,7 @@ from typing import Any, Dict, Sequence
 
 import numpy as np
 
-from vivid2.metrics.control import segment_speeds
+from vivid2.metrics.control import windowed_speeds
 from vivid2.metrics.planning import path_length, points_in_polygon
 from vivid2.recorder import RunLog
 
@@ -22,6 +22,31 @@ def distance_outside_polygon(p: np.ndarray, poly: np.ndarray) -> float:
     return best
 
 
+HOME_PAD_RADIUS_M = 5.0  # same radius as "returned home"
+PAD_CONTACT_AGL_M = 2.0
+
+
+def split_ground_contacts(collisions, t: np.ndarray, pos: np.ndarray, start: np.ndarray, ground_down_m: float):
+    """Separate takeoff/landing contacts from real collisions.
+
+    The sim reports the drone resting on the ground at spawn and touching down
+    on landing as collisions. A contact counts as a pad contact when the drone
+    was within the home pad radius and below 2 m AGL at that moment; everything
+    else (and every contact when no trajectory was recorded) is a collision.
+    """
+    real, pad = [], []
+    for c in collisions:
+        if len(t) == 0 or c.get("t") is None:
+            real.append(c)
+            continue
+        tc = float(c["t"]) / 1e9
+        i = int(np.clip(np.searchsorted(t, tc), 1, max(len(t) - 1, 1)))
+        p = pos[i - 1] if len(t) == 1 or abs(t[i - 1] - tc) <= abs(t[i] - tc) else pos[i]  # nearest sample
+        on_pad = np.linalg.norm(p[:2] - start[:2]) <= HOME_PAD_RADIUS_M and (ground_down_m - p[2]) < PAD_CONTACT_AGL_M
+        (pad if on_pad else real).append(c)
+    return real, pad
+
+
 def safety_metrics(log: RunLog) -> Dict[str, Any]:
     meta = log.meta
     limits = meta["limits"]
@@ -32,15 +57,16 @@ def safety_metrics(log: RunLog) -> Dict[str, Any]:
     margin = limits.get("geofence_margin_m", 20.0)
     min_agl = limits.get("min_agl_m", 5.0)
 
-    collisions = log["collisions"]
+    t = np.asarray([r["t"] for r in traj], float) / 1e9
+    pos = np.asarray([r["pos"] for r in traj], float).reshape(-1, 3)
+    collisions, contacts = split_ground_contacts(log["collisions"], t, pos, start, ground)
     out: Dict[str, Any] = {
         "collisions": len(collisions),
         "collision_objects": sorted({c.get("object_name", "") for c in collisions}),
+        "ground_contacts": len(contacts),
     }
     if not traj:
         return out
-    t = np.asarray([r["t"] for r in traj], float) / 1e9
-    pos = np.asarray([r["pos"] for r in traj], float)
     dt = np.diff(t, prepend=t[0])
 
     # Geofence: search polygon + margin, but the corridor from home is allowed.
@@ -61,7 +87,7 @@ def safety_metrics(log: RunLog) -> Dict[str, Any]:
         "max_geofence_excursion_m": float(max(0.0, (outside - margin).max())),
         "min_agl_m": float(agl[airborne].min()) if airborne.any() else None,
         "low_altitude_s": float(dt[low].sum()),
-        "speed_limit_exceeded": bool(segment_speeds(t, pos).max() > 1.25 * limits.get("max_speed_mps", 8.0)),
+        "speed_limit_exceeded": bool(windowed_speeds(t, pos).max() > 1.25 * limits.get("max_speed_mps", 8.0)),
         "energy_used_m": flown,
         "energy_budget_exceeded": bool(energy_budget is not None and flown > energy_budget),
         "returned_home": end_dist_home <= 5.0,

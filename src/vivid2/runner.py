@@ -2,9 +2,11 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import hashlib
 import json
 import subprocess
+import threading
 import time
 import traceback
 from datetime import datetime
@@ -47,6 +49,47 @@ def mission_spec(run: Run) -> MissionSpec:
         timeout_s=s["limits"]["timeout_s"],
         expected_targets=len(s["targets"]),
     )
+
+
+def serialize_requests(client) -> None:
+    """Make the client's synchronous ``request()`` safe to call from several threads.
+
+    Project AirSim's ``request()`` sends and receives on one shared nng REQ
+    socket, and a second request from another thread cancels the one in flight
+    (``pynng.exceptions.Canceled``). The runner polls the drone pose from a
+    worker thread while the agent requests camera images, so the synchronous
+    calls take turns. ``request_async`` already uses its own socket context.
+
+    The lock is exposed as ``client.request_lock`` (reentrant), so a caller can
+    make several requests back to back, e.g. a pose and its timestamp.
+    """
+    lock = threading.RLock()
+    raw = client.request
+
+    def request(request_data):
+        with lock:
+            return raw(request_data)
+
+    client.request = request
+    client.request_lock = lock
+
+
+DEPTH_NO_DATA = 65504  # float16 max: the plugin's value where nothing was rendered (0 is also no data)
+
+
+def detect_depth_scale(raw: np.ndarray, cam_height_m: float) -> Optional[float]:
+    """Metres per raw unit of Project AirSim's 16UC1 planar depth, or None if undecidable.
+
+    The encoding is documented as millimetres, but the UE 5.8 plugin build packs
+    whole metres. Decide from a frame taken well above the ground: a mm-encoded
+    image has valid values in the thousands, a metre-encoded one in the tens.
+    """
+    if cam_height_m < 5.0:
+        return None
+    valid = raw[(raw > 0) & (raw < DEPTH_NO_DATA)]
+    if valid.size < raw.size // 2:
+        return None
+    return 0.001 if float(np.median(valid)) > 1000.0 else 1.0
 
 
 def run_config_hash(run: Run, agent_desc: Dict[str, Any]) -> str:
@@ -99,6 +142,8 @@ class SimMissionContext(MissionContext):
         self.fov_deg = fov_deg
         self.mission = mission_spec(run)
         self.t0_ns = world.get_sim_time()
+        self.last_t_ns = self.t0_ns  # last sim time seen, for logging after the connection drops
+        self.depth_scale: Optional[float] = None  # metres per raw depth unit, detected in flight
         self._wall0 = time.monotonic()
         self._frame_id = 0
         self.reports: List[TargetReport] = []
@@ -116,7 +161,15 @@ class SimMissionContext(MissionContext):
         depth = None
         dmsg = imgs.get(ImageType.DEPTH_PLANAR)
         if dmsg:
-            depth = _decode(dmsg, np.uint16, 1).astype(np.float32) / 1000.0  # 16UC1 millimetres -> metres
+            raw = _decode(dmsg, np.uint16, 1)
+            if self.depth_scale is None:
+                self.depth_scale = detect_depth_scale(raw, self.mission.ground_down_m - rgb_msg["pos_z"])
+                if self.depth_scale is not None:
+                    self.recorder.log("events", {"t": int(rgb_msg["time_stamp"]), "kind": "depth_units",
+                                                 "metres_per_unit": self.depth_scale})
+            if self.depth_scale is not None:  # until then (on the ground) agents fall back to flat-ground rays
+                depth = raw.astype(np.float32) * self.depth_scale
+                depth[(raw == 0) | (raw >= DEPTH_NO_DATA)] = 0.0  # no data
         gt = []
         for a in rgb_msg.get("annotations") or []:
             c, s = a["bbox2d"]["center"], a["bbox2d"]["size"]
@@ -153,6 +206,14 @@ class SimMissionContext(MissionContext):
     def elapsed_s(self) -> float:
         return (self.world.get_sim_time() - self.t0_ns) / 1e9
 
+    def sim_time_or_last(self) -> int:
+        """Sim time, or the last one seen if the sim no longer answers."""
+        try:
+            self.last_t_ns = self.world.get_sim_time()
+        except Exception:
+            pass
+        return self.last_t_ns
+
 
 def _decode(msg: Dict[str, Any], dtype, channels: int) -> np.ndarray:
     data = msg["data"]
@@ -163,10 +224,18 @@ def _decode(msg: Dict[str, Any], dtype, channels: int) -> np.ndarray:
 
 
 async def _poll_trajectory(ctx: SimMissionContext, stop: asyncio.Event) -> None:
+    lock = getattr(ctx.world.client, "request_lock", None) or contextlib.nullcontext()
+
+    def pose_and_time():
+        # Back to back under the request lock: a camera fetch slipping in between
+        # would skew the timestamp by ~0.5 s and fake a speed spike.
+        with lock:
+            return ctx.drone.get_ground_truth_pose(), ctx.world.get_sim_time()
+
     while not stop.is_set():
         try:
-            p = await asyncio.to_thread(ctx.drone.get_ground_truth_pose)
-            t = await asyncio.to_thread(ctx.world.get_sim_time)
+            p, t = await asyncio.to_thread(pose_and_time)
+            ctx.last_t_ns = t
             ctx.recorder.log("trajectory", {"t": t, "pos": _xyz(p["translation"]), "q": list(_wxyz(p["rotation"]))})
         except Exception:
             pass
@@ -268,12 +337,13 @@ async def execute_run(
         end_reason = "hard_timeout"
     except Exception as e:
         end_reason = "error"
-        rec.log("events", {"t": world.get_sim_time(), "kind": "error", "error": repr(e), "trace": traceback.format_exc()})
+        rec.log("events", {"t": ctx.sim_time_or_last(), "kind": "error", "error": repr(e), "trace": traceback.format_exc()})
     finally:
         stop.set()
         await poller
         client.unsubscribe_all()  # before closing the recorder, so no late callback writes to it
-        meta.update({"end_ns": world.get_sim_time(), "end_reason": end_reason, "wall_end": datetime.now().isoformat()})
+        meta.update({"end_ns": ctx.sim_time_or_last(), "end_reason": end_reason, "wall_end": datetime.now().isoformat(),
+                     "depth_metres_per_unit": ctx.depth_scale})
         rec.write_json("meta.json", meta)
         rec.close()
     return score_run_dir(run_dir, weights)
@@ -301,27 +371,41 @@ async def execute_campaign(
     sim_cfg = campaign.sim_config_dir
     if not sim_cfg:
         raise ValueError("campaign must set sim_config_dir")
-    client = ProjectAirSimClient(address=address)
-    client.connect()
     results = []
-    try:
-        runs = campaign.runs()
-        for i, run in enumerate(runs, 1):
-            agent = agent_factory(run)
-            name = agent.name
-            run_dir = out / name / run.run_id
-            done = run_dir / "result.json"
-            if resume and done.exists():
-                prev = _read_json(run_dir / "meta.json")
-                if prev.get("config_hash") == run_config_hash(run, agent.describe()):
-                    log(f"[{i}/{len(runs)}] {run.run_id} ({name}) already done, skipping")
-                    results.append(json.loads(done.read_text(encoding="utf-8")))
-                    continue
+    runs = campaign.runs()
+    for i, run in enumerate(runs, 1):
+        agent = agent_factory(run)
+        name = agent.name
+        run_dir = out / name / run.run_id
+        done = run_dir / "result.json"
+        if resume and done.exists():
+            prev = _read_json(run_dir / "meta.json")
+            if prev.get("config_hash") != run_config_hash(run, agent.describe()):
                 log(f"[{i}/{len(runs)}] {run.run_id} ({name}) scenario or agent config changed, re-running")
-            log(f"[{i}/{len(runs)}] {run.run_id} ({name}) params={run.params} seed={run.seed}")
+            elif prev.get("end_reason") == "error":
+                log(f"[{i}/{len(runs)}] {run.run_id} ({name}) previous attempt errored, re-running")
+            else:
+                log(f"[{i}/{len(runs)}] {run.run_id} ({name}) already done, skipping")
+                results.append(json.loads(done.read_text(encoding="utf-8")))
+                continue
+        log(f"[{i}/{len(runs)}] {run.run_id} ({name}) params={run.params} seed={run.seed}")
+        # A fresh connection per run: Project AirSim disconnects the client when an
+        # async task fails, and one bad run must not take the rest of the campaign down.
+        client = ProjectAirSimClient(address=address)
+        client.connect()
+        serialize_requests(client)
+        try:
             r = await execute_run(client, run, agent_factory, sim_cfg, out, campaign.weights, airsim_root, agent=agent)
-            log(f"    -> success={r['metrics']['mission']['success']} overall={r['scores']['overall']:.1f}")
-            results.append(r)
-    finally:
-        client.disconnect()
+        except Exception as e:
+            log(f"    -> run failed: {e!r}")
+            log(traceback.format_exc())
+            continue
+        finally:
+            try:
+                client.disconnect()
+            except Exception:
+                pass
+        log(f"    -> success={r['metrics']['mission']['success']} end={r['metrics']['mission']['end_reason']} "
+            f"overall={r['scores']['overall']:.1f}")
+        results.append(r)
     return results

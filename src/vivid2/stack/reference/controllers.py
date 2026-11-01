@@ -11,6 +11,9 @@ from typing import Any, Callable, Dict, List, Optional, Sequence
 
 from vivid2.stack.base import Controller
 
+DESCENT_MPS = 3.0
+LAND_FROM_M = 2.0  # height above the start point where the final, slow landing begins
+
 
 class AirSimController(Controller):
     name = "airsim_api"
@@ -66,6 +69,10 @@ class AirSimController(Controller):
         pose = self.drone.get_ground_truth_pose()["translation"]
         self._event("rtl", home=list(home_ned))
         await (await self.drone.move_to_position_async(home_ned[0], home_ned[1], pose["z"], velocity=speed_mps))
+        # land_async descends slowly (~0.2 m/s); come down at a moderate rate first.
+        hover_z = home_ned[2] - LAND_FROM_M
+        if pose["z"] < hover_z:
+            await (await self.drone.move_to_position_async(home_ned[0], home_ned[1], hover_z, velocity=DESCENT_MPS))
         await (await self.drone.land_async())
         self.drone.disarm()
         self.drone.disable_api_control()

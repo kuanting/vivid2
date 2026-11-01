@@ -89,6 +89,82 @@ def test_swept_values_are_validated(root):
         Scenario(dict(spec, sweep={"limits.timout_s": [60]})).expand()
 
 
+def test_sim_requests_are_serialized_across_threads():
+    import threading
+    import time
+
+    from vivid2.runner import serialize_requests
+
+    class OneSocketClient:
+        """Like Project AirSim's client: overlapping requests break each other."""
+
+        def __init__(self):
+            self.in_flight = 0
+            self.overlaps = 0
+
+        def request(self, data):
+            self.in_flight += 1
+            if self.in_flight > 1:
+                self.overlaps += 1
+            time.sleep(0.01)
+            self.in_flight -= 1
+            return data
+
+    client = OneSocketClient()
+    serialize_requests(client)
+    threads = [threading.Thread(target=lambda: [client.request(i) for i in range(5)]) for _ in range(4)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+    assert client.overlaps == 0
+    assert client.request({"x": 1}) == {"x": 1}
+
+
+def test_depth_units_are_detected_from_an_airborne_frame():
+    import numpy as np
+
+    from vivid2.runner import DEPTH_NO_DATA, detect_depth_scale
+
+    metres = np.full((10, 10), 33, np.uint16)  # what the UE 5.8 plugin build sends at 34 m
+    millis = np.full((10, 10), 34_480, np.uint16)
+    assert detect_depth_scale(metres, 34.5) == 1.0
+    assert detect_depth_scale(millis, 34.5) == 0.001
+    assert detect_depth_scale(metres, 1.0) is None  # on the ground: undecidable
+    assert detect_depth_scale(np.full((10, 10), DEPTH_NO_DATA, np.uint16), 34.5) is None
+
+
+def test_pad_contacts_are_not_collisions():
+    import numpy as np
+
+    from vivid2.metrics.safety import split_ground_contacts
+
+    t = np.array([0.0, 10.0, 20.0, 30.0])
+    pos = np.array([[0, 0, -0.4], [0, 0, -35], [40, 0, -35], [1, 1, -0.5]], float)
+    hits = [{"t": 0.5e9, "object_name": "Ground"},    # resting on the pad at spawn
+            {"t": 20e9, "object_name": "Block"},      # mid-flight: real
+            {"t": 30e9, "object_name": "Ground"}]     # touchdown back home
+    real, pad = split_ground_contacts(hits, t, pos, np.zeros(3), 0.0)
+    assert [c["object_name"] for c in real] == ["Block"] and len(pad) == 2
+    real, _ = split_ground_contacts(hits, np.array([]), np.zeros((0, 3)), np.zeros(3), 0.0)
+    assert len(real) == 3  # without a trajectory every contact counts
+
+
+def test_speed_ignores_sample_jitter_but_catches_speeding():
+    import numpy as np
+
+    from vivid2.metrics.control import windowed_speeds
+
+    # 6 m/s flight sampled at ~10 Hz, but every 10th sample's position lags 0.5 m
+    # behind (as around camera captures): consecutive-sample speeds spike to ~11 m/s.
+    t = np.arange(0, 20, 0.1)
+    pos = np.stack([6.0 * t, np.zeros_like(t), np.full_like(t, -35.0)], axis=1)
+    pos[::10, 0] -= 0.5
+    assert windowed_speeds(t, pos).max() < 7.5
+    fast = np.stack([10.0 * t, np.zeros_like(t), np.zeros_like(t)], axis=1)
+    assert windowed_speeds(t, fast).max() == pytest.approx(10.0, rel=0.05)
+
+
 def test_cli_agent_choices_come_from_registry(capsys):
     from vivid2.cli import main
 

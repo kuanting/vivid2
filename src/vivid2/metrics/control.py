@@ -18,14 +18,22 @@ def point_to_polyline(p: np.ndarray, line: np.ndarray) -> float:
     return best
 
 
-def segment_speeds(t_s: np.ndarray, pos: np.ndarray, min_dt_s: float = 0.02) -> np.ndarray:
-    """Speed per trajectory sample; samples closer than ``min_dt_s`` to the
-    previous one (duplicate timestamps) get 0 instead of a huge spike."""
-    speed = np.zeros(len(pos))
-    if len(pos) > 1:
-        dt = np.diff(t_s)
-        dist = np.linalg.norm(np.diff(pos, axis=0), axis=1)
-        speed[1:] = np.where(dt >= min_dt_s, dist / np.maximum(dt, min_dt_s), 0.0)
+def windowed_speeds(t_s: np.ndarray, pos: np.ndarray, window_s: float = 1.0) -> np.ndarray:
+    """Average speed over the ``window_s`` following each trajectory sample.
+
+    The sim's pose and clock update unevenly around camera captures, so speeds
+    between consecutive 10 Hz samples spike to nearly twice the true value.
+    Averaging over a second removes that jitter but still catches sustained
+    speeding. Samples less than one window from the end get 0.
+    """
+    n = len(pos)
+    speed = np.zeros(n)
+    if n < 2:
+        return speed
+    j = np.searchsorted(t_s, t_s + window_s)
+    i = np.nonzero(j < n)[0]
+    jj = j[i]
+    speed[i] = np.linalg.norm(pos[jj] - pos[i], axis=1) / (t_s[jj] - t_s[i])
     return speed
 
 
@@ -36,7 +44,7 @@ def control_metrics(log: RunLog) -> Optional[Dict[str, Any]]:
         return None
     t = np.asarray([r["t"] for r in traj], float) / 1e9
     pos = np.asarray([r["pos"] for r in traj], float)
-    speed = segment_speeds(t, pos)
+    speed = windowed_speeds(t, pos)
 
     out: Dict[str, Any] = {
         "max_speed_mps": float(speed.max()),
