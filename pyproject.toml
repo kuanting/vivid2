@@ -1,0 +1,42 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "vivid2"
+version = "0.1.0"
+description = "VIVID 2 - Virtual Validation for AI Drones, built on Project AirSim"
+readme = "README.md"
+license = { text = "MIT" }
+authors = [{ name = "K. T. Lai" }]
+requires-python = ">=3.9"
+dependencies = [
+    "numpy>=1.23",
+    "commentjson>=0.9",
+    "jsonschema>=4.0",
+    "pillow>=9.0",
+]
+
+[project.optional-dependencies]
+# The Project AirSim client is installed editable from the sibling fork:
+#   pip install -e ../ProjectAirSim/client/python/projectairsim
+sim = ["projectairsim"]
+claude = ["anthropic>=0.60", "pydantic>=2"]
+local-vlm = ["openai>=1.40"]
+# Google Drive downloads of the prebuilt UE plugin zip
+setup = ["gdown>=5"]
+dev = ["pytest>=7"]
+
+[project.scripts]
+vivid2 = "vivid2.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+vivid2 = ["schema/*.json", "vlm/prompts/*.md"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+markers = ["sim: requires a running Project AirSim server"]
+addopts = "-m 'not sim'"

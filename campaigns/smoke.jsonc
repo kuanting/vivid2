@@ -1,0 +1,6 @@
+// Quick end-to-end check on the Blocks map (3 runs).
+{
+  "name": "smoke",
+  "sim_config_dir": "../sim_config",
+  "scenarios": ["../scenarios/forest_sar/blocks_hiker_01.jsonc"]
+}

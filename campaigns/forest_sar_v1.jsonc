@@ -1,0 +1,7 @@
+// Forest S&R benchmark v1 on the VIVID2Env ForestSAR map.
+{
+  "name": "forest_sar_v1",
+  "sim_config_dir": "../sim_config",
+  "scenarios": ["../scenarios/forest_sar/forest_*.jsonc"],
+  "weights": {"mission": 0.35, "perception": 0.15, "reasoning": 0.15, "planning": 0.10, "control": 0.05, "safety": 0.20}
+}

@@ -1,0 +1,34 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+.pytest_cache/
+build/
+dist/
+
+# VIVID 2 outputs
+runs/
+*.log
+
+# Unreal
+unreal/**/Binaries/
+unreal/**/DerivedDataCache/
+unreal/**/Intermediate/
+unreal/**/Saved/
+unreal/**/.vs/
+unreal/**/*.sln
+unreal/**/*.VC.db
+# Created by `vivid2 unreal setup`: plugin junctions, engine-specific uproject, setup record
+unreal/VIVID2Env/Plugins/ProjectAirSim
+unreal/VIVID2Env/Plugins/Drone
+unreal/VIVID2Env/VIVID2Env.uproject
+unreal/VIVID2Env/.vivid2-setup.json
+# Third-party content (Fab, Megascans, marketplace packs) can't be redistributed
+# as source assets. Only VIVID 2's own content is committed; the packs a map
+# needs are listed in docs/environments.md.
+unreal/VIVID2Env/Content/*
+!unreal/VIVID2Env/Content/VIVID2/
+
+# Local Claude Code settings
+.claude/settings.local.json

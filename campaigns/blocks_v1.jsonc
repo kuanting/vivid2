@@ -1,0 +1,6 @@
+// All Blocks bring-up scenarios with their full sweeps.
+{
+  "name": "blocks_v1",
+  "sim_config_dir": "../sim_config",
+  "scenarios": ["../scenarios/forest_sar/blocks_*.jsonc"]
+}

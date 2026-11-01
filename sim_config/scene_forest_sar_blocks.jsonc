@@ -1,0 +1,23 @@
+// VIVID 2 base scene for the Blocks environment (Phase 0 bring-up).
+// The scene builder overrides the robot actor's origin and robot-config and
+// adds the scenario's targets under "spawn-objects".
+{
+  "id": "VIVID2ForestSARBlocks",
+  "actors": [
+    {
+      "type": "robot",
+      "name": "Drone1",
+      "origin": {"xyz": "0.0 0.0 -1.0", "rpy-deg": "0 0 0"},
+      "robot-config": "robot_vivid_quad.jsonc"
+    }
+  ],
+  "clock": {
+    "type": "steppable",
+    "step-ns": 3000000,
+    "real-time-update-rate": 3000000,
+    "pause-on-start": false
+  },
+  "home-geo-point": {"latitude": 24.1426, "longitude": 121.2712, "altitude": 2000.0},
+  "segmentation": {"initialize-ids": true, "ignore-existing": false, "use-owner-name": true},
+  "scene-type": "UnrealNative"
+}

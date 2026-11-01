@@ -1,0 +1,19 @@
+// ForestSAR map: two separated hikers at dusk with valley fog.
+{
+  "id": "forest_hiker_02",
+  "mission": "forest_sar",
+  "description": "Two hikers separated after dark; one on a scree slope, one under dense canopy. Dusk and fog sweep.",
+  "scene": {"base": "scene_forest_sar.jsonc", "robot_config": "robot_vivid_quad.jsonc", "camera": "Payload"},
+  "dut_start": {"ned": [0, 0, -1], "yaw_deg": 0},
+  "search_area": {"polygon_ne": [[-200, -150], [200, -150], [200, 150], [-200, 150]], "altitude_m": 50, "ground_down_m": 0},
+  "targets": [
+    {"id": "Hiker1", "asset": "SKM_Manny", "ned": [140, -90, 0], "yaw_deg": 0, "description": "adult, yellow jacket, sitting"},
+    {"id": "Hiker2", "asset": "SKM_Manny", "ned": [-120, 110, 0], "yaw_deg": 120, "description": "teenager, dark blue hoodie"}
+  ],
+  "target_jitter_m": 25,
+  "brief": "A father (yellow rain jacket) and his teenage son (dark blue hoodie) became separated while descending at dusk. Search for both; either may be sitting or lying down.",
+  "environment": {"time_of_day": "2026-09-28 17:30:00", "weather": {"fog": 0.2}, "wind_ned": [4, 2, 0]},
+  "limits": {"timeout_s": 1500, "max_speed_mps": 8, "min_agl_m": 25, "geofence_margin_m": 25, "energy_budget_m": 12000},
+  "success": {"localization_tolerance_m": 10, "require_all_targets": true},
+  "sweep": {"environment.weather.fog": [0.0, 0.2, 0.4], "seeds": 3}
+}

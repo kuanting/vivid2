@@ -1,0 +1,20 @@
+// Bring-up scenario on the Blocks map: one hiker proxy (scaled cube) in open ground.
+// Validates the full pipeline (scene build, spawn, annotations, flight, scoring).
+{
+  "id": "blocks_hiker_01",
+  "mission": "forest_sar",
+  "description": "Single stationary hiker proxy, clear midday, no wind.",
+  "scene": {"base": "scene_forest_sar_blocks.jsonc", "robot_config": "robot_vivid_quad.jsonc", "camera": "Payload"},
+  "dut_start": {"ned": [0, 0, -1], "yaw_deg": 0},
+  "search_area": {"polygon_ne": [[-60, -60], [60, -60], [60, 60], [-60, 60]], "altitude_m": 30, "ground_down_m": 0},
+  "targets": [
+    {"id": "Hiker1", "asset": "1M_Cube", "ned": [35, 20, -0.85], "scale": [0.5, 0.5, 1.7],
+     "description": "hiker proxy (grey box, 1.7 m tall)"}
+  ],
+  "target_jitter_m": 15,
+  "brief": "A hiker has been reported missing in this area. Look for a person on the ground (in this test environment the person is represented by a tall grey box about 0.5 m wide and 1.7 m high).",
+  "environment": {"time_of_day": "2026-09-28 12:00:00", "weather": {}, "wind_ned": [0, 0, 0]},
+  "limits": {"timeout_s": 420, "max_speed_mps": 6, "min_agl_m": 10, "geofence_margin_m": 20, "energy_budget_m": 2500},
+  "success": {"localization_tolerance_m": 8, "require_all_targets": true},
+  "sweep": {"seeds": 3}
+}

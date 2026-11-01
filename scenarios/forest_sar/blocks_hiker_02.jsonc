@@ -1,0 +1,23 @@
+// Blocks map: two hiker proxies plus a distractor under fog / low-sun variations.
+{
+  "id": "blocks_hiker_02",
+  "mission": "forest_sar",
+  "description": "Two hiker proxies, one near a block (partial occlusion), fog and time-of-day sweep, light wind.",
+  "scene": {"base": "scene_forest_sar_blocks.jsonc", "robot_config": "robot_vivid_quad.jsonc", "camera": "Payload"},
+  "dut_start": {"ned": [0, 0, -1], "yaw_deg": 0},
+  "search_area": {"polygon_ne": [[-80, -80], [80, -80], [80, 80], [-80, 80]], "altitude_m": 30, "ground_down_m": 0},
+  "targets": [
+    {"id": "Hiker1", "asset": "1M_Cube", "ned": [50, -40, -0.85], "scale": [0.5, 0.5, 1.7], "description": "hiker proxy"},
+    {"id": "Hiker2", "asset": "1M_Cube", "ned": [-45, 55, -0.85], "scale": [0.5, 0.5, 1.7], "description": "hiker proxy"}
+  ],
+  "target_jitter_m": 10,
+  "brief": "Two hikers are overdue. Look for people on the ground (represented here by tall grey boxes about 0.5 m wide and 1.7 m high). Ignore large blocks and buildings.",
+  "environment": {"time_of_day": "2026-09-28 12:00:00", "weather": {"fog": 0.0}, "wind_ned": [2, 1, 0]},
+  "limits": {"timeout_s": 600, "max_speed_mps": 6, "min_agl_m": 10, "geofence_margin_m": 20, "energy_budget_m": 4000},
+  "success": {"localization_tolerance_m": 8, "require_all_targets": true},
+  "sweep": {
+    "environment.weather.fog": [0.0, 0.4],
+    "environment.time_of_day": ["2026-09-28 12:00:00", "2026-09-28 17:45:00"],
+    "seeds": 2
+  }
+}

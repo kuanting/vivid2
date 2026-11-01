@@ -1,0 +1,34 @@
+{
+  "_comment": "Per-engine profiles for unreal/VIVID2Env. 'vivid2 unreal setup --engine <ver>' renders VIVID2Env.uproject from VIVID2Env/VIVID2Env.uproject.template.json plus 'extra_plugins'. Fill plugin_zip.url/sha256/size after uploading a zip made with 'vivid2 unreal pack-plugin'.",
+  "default": "5.8",
+  "engines": {
+    "5.7": {
+      "extra_plugins": [],
+      "editor_maps": false,
+      "plugin_sources": ["airsim-root", "plugin-dir", "plugin-zip"],
+      "notes": "Upstream Project AirSim builds for 5.7 as-is. VIVID 2 maps are authored in 5.8; 5.7 users run packaged environment builds.",
+      "plugin_zip": null
+    },
+    "5.8": {
+      "extra_plugins": [
+        "ModelContextProtocol",
+        "EditorToolset",
+        "PCGToolset",
+        "MetaHumanGenerator",
+        "NiagaraToolsets",
+        "ConfigSettingsToolset"
+      ],
+      "editor_maps": true,
+      "plugin_sources": ["download", "plugin-zip", "airsim-root", "plugin-dir"],
+      "patch": "patches/projectairsim-ue5.8.patch",
+      "notes": "Project AirSim needs the UE 5.8 compatibility patch (or the prebuilt plugin zip).",
+      "plugin_zip": {
+        "url": "",
+        "provider": "gdrive",
+        "sha256": "",
+        "size": 0,
+        "file_name": "ProjectAirSim-Plugins-UE5.8-Win64.zip"
+      }
+    }
+  }
+}
