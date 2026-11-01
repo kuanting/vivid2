@@ -25,6 +25,7 @@ from vivid2.sim.scene_builder import build_scene, camera_settings, captures
 from vivid2.sim.segmentation import SegmentationError, assign_ids, palette, visibility
 from vivid2.stack.base import Agent, Frame, GTAnnotation, MissionContext, MissionSpec, TargetReport
 from vivid2.stack.reference.controllers import AirSimController
+from vivid2.terrain import load_for_run
 from vivid2.unreal_setup import status as unreal_status
 from vivid2.vlm.base import JPEG_MAX_SIDE, JPEG_QUALITY, encode_jpeg_bytes, sha256_hex
 
@@ -40,18 +41,22 @@ def _wxyz(d: Dict[str, float]) -> Tuple[float, float, float, float]:
     return (d["w"], d["x"], d["y"], d["z"])
 
 
-def mission_spec(run: Run) -> MissionSpec:
+def mission_spec(run: Run, start_ned=None) -> MissionSpec:
     s = run.spec
+    lim = s["limits"]
     return MissionSpec(
         mission=s["mission"],
         brief=s["brief"],
         search_polygon_ne=s["search_area"]["polygon_ne"],
         altitude_m=s["search_area"]["altitude_m"],
         ground_down_m=s["search_area"].get("ground_down_m", 0.0),
-        start_ned=s["dut_start"]["ned"],
-        max_speed_mps=s["limits"].get("max_speed_mps", 8.0),
-        timeout_s=s["limits"]["timeout_s"],
+        start_ned=list(start_ned) if start_ned is not None else s["dut_start"]["ned"],
+        max_speed_mps=lim.get("max_speed_mps", 8.0),
+        timeout_s=lim["timeout_s"],
         expected_targets=len(s["targets"]),
+        min_agl_m=lim.get("min_agl_m", 5.0),
+        geofence_margin_m=lim.get("geofence_margin_m", 20.0),
+        energy_budget_m=lim.get("energy_budget_m"),
     )
 
 
@@ -162,7 +167,7 @@ def write_bank_files(run_dir: Path, frame_id: int, jpeg: bytes, depth_m: Optiona
 class SimMissionContext(MissionContext):
     def __init__(self, run: Run, world, drone, camera_id: str, recorder: Recorder, controller: AirSimController,
                  fov_deg: float, frame_bank: str = "off", seg_ids: Optional[Dict[str, int]] = None,
-                 target_ids: Optional[List[str]] = None):
+                 target_ids: Optional[List[str]] = None, start_ned=None):
         if frame_bank not in FRAME_BANK_MODES:
             raise ValueError(f"frame_bank must be one of {FRAME_BANK_MODES}")
         self.frame_bank = frame_bank
@@ -176,7 +181,7 @@ class SimMissionContext(MissionContext):
         self.recorder = recorder
         self.controller = controller
         self.fov_deg = fov_deg
-        self.mission = mission_spec(run)
+        self.mission = mission_spec(run, start_ned)
         self.t0_ns = world.get_sim_time()
         self.last_t_ns = self.t0_ns  # last sim time seen, for logging after the connection drops
         self.depth_scale: Optional[float] = None  # metres per raw depth unit, detected in flight
@@ -380,10 +385,12 @@ async def execute_run(
 
     agent = agent or agent_factory(run)
     run_dir = Path(out_dir) / agent.name / run.run_id
-    targets = run.resolved_targets()
+    terrain, terrain_meta = load_for_run(sim_config_dir, run.spec)
+    targets = run.resolved_targets(terrain)
+    distractors = run.resolved_distractors(terrain)
+    start_ned = run.resolved_start(terrain)
     sc = run.spec["scene"]
-    distractors = run.spec.get("distractors", [])
-    scene = build_scene(run, sim_config_dir, targets, distractors)
+    scene = build_scene(run, sim_config_dir, targets, distractors, start_ned)
     cam = camera_settings(scene, sc.get("camera", "Payload"), sc.get("drone_name", "Drone1"))
 
     try:
@@ -412,12 +419,12 @@ async def execute_run(
 
     controller = AirSimController(drone, world.get_sim_time, rec.log)
     ctx = SimMissionContext(run, world, drone, sc.get("camera", "Payload"), rec, controller, cam["fov-degrees"], frame_bank,
-                            seg_ids=seg_ids, target_ids=[t["id"] for t in targets])
+                            seg_ids=seg_ids, target_ids=[t["id"] for t in targets], start_ned=start_ned)
     meta = {
         "run_id": run.run_id, "scenario_id": run.scenario_id, "seed": run.seed, "params": run.params,
         "mission": run.spec["mission"], "agent": agent.describe(), "targets": targets,
         "search_area": run.spec["search_area"], "limits": run.spec["limits"], "success": run.spec.get("success", {}),
-        "start_ned": run.spec["dut_start"]["ned"], "t0_ns": ctx.t0_ns, "wall_start": datetime.now().isoformat(),
+        "start_ned": start_ned, "terrain": terrain_meta, "t0_ns": ctx.t0_ns, "wall_start": datetime.now().isoformat(),
         "projectairsim_commit": projectairsim_commit(airsim_root), "scenario_source": run.source,
         "unreal": unreal_status(), "weights": weights or {},
         "config_hash": run_config_hash(run, agent.describe()),

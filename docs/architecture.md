@@ -55,6 +55,11 @@
   missing, geolocation falls back to a flat-ground ray intersection.
 - Contacts on the home pad (within 5 m of the start, below 2 m AGL) are
   takeoff/landing contacts (`ground_contacts`), not collisions.
+- Terrain: flat maps use `search_area.ground_down_m`. A map with relief ships a
+  terrain model (`sim_config/maps/<map>/terrain_dtm.npz`, see `vivid2/terrain.py`).
+  Targets and the drone start keep their authored height above ground but sit
+  on the real terrain, and safety measures height above it. `meta.json` records
+  the file and its hash for rescoring.
 
 ## Controllers
 

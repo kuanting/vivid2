@@ -45,10 +45,9 @@ cache.
 
 Subclass `vivid2.stack.base.Agent` and implement `async run(ctx)`. Use:
 
-- `ctx.mission`: brief, search polygon, altitude, start position, speed limit,
-  timeout and the number of people to find (no ground truth). Minimum AGL,
-  geofence margin and energy budget are scored but not yet passed in; Phase 1
-  adds them.
+- `ctx.mission`: brief, search polygon, altitude, start position, the number
+  of people to find, and the limits you are scored on: speed, timeout, minimum
+  height above ground, geofence margin and energy budget (no ground truth).
 - `await ctx.get_frame()`: the latest payload-camera frame with its pose and
   depth, or `None` if no image is ready yet.
 - `ctx.controller`: `takeoff`, `fly_path` (returns immediately; poll

@@ -108,6 +108,10 @@ class MissionSpec:
     max_speed_mps: float
     timeout_s: float
     expected_targets: int
+    # The limits the stack is scored on, so it can respect them.
+    min_agl_m: float = 5.0
+    geofence_margin_m: float = 20.0
+    energy_budget_m: Optional[float] = None  # path-length proxy for the battery
 
 
 class Perception(abc.ABC):

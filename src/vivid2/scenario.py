@@ -60,8 +60,12 @@ class Run:
     def rng(self) -> np.random.Generator:
         return np.random.default_rng(self.seed)
 
-    def resolved_targets(self) -> List[Dict]:
-        """Targets with seeded position jitter applied (horizontal only)."""
+    @property
+    def authored_ground_down_m(self) -> float:
+        return float(self.spec["search_area"].get("ground_down_m", 0.0))
+
+    def resolved_targets(self, terrain=None) -> List[Dict]:
+        """Targets with seeded horizontal jitter, then (given a terrain model) set on the ground there."""
         jitter = float(self.spec.get("target_jitter_m", 0.0))
         rng = self.rng
         out = []
@@ -71,8 +75,27 @@ class Run:
                 r = jitter * np.sqrt(rng.uniform())
                 a = rng.uniform(0, 2 * np.pi)
                 t["ned"] = [t["ned"][0] + r * np.cos(a), t["ned"][1] + r * np.sin(a), t["ned"][2]]
+            if terrain is not None:
+                t["ned"] = _snap(t["ned"], terrain, self.authored_ground_down_m)
             out.append(t)
         return out
+
+    def resolved_distractors(self, terrain=None) -> List[Dict]:
+        out = copy.deepcopy(self.spec.get("distractors", []))
+        if terrain is not None:
+            for d in out:
+                d["ned"] = _snap(d["ned"], terrain, self.authored_ground_down_m)
+        return out
+
+    def resolved_start(self, terrain=None) -> List[float]:
+        ned = list(self.spec["dut_start"]["ned"])
+        return _snap(ned, terrain, self.authored_ground_down_m) if terrain is not None else ned
+
+
+def _snap(ned, terrain, authored_ground_down_m: float) -> List[float]:
+    from vivid2.terrain import snap_to_ground
+
+    return snap_to_ground(ned, terrain, authored_ground_down_m)
 
 
 def validate_scenario(spec: Dict, where: str = "") -> None:

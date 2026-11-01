@@ -21,7 +21,7 @@ def _fmt3(v) -> str:
 
 
 def build_scene(run: Run, sim_config_dir: str, targets: List[Dict[str, Any]],
-                distractors: Optional[List[Dict[str, Any]]] = None) -> Dict[str, Any]:
+                distractors: Optional[List[Dict[str, Any]]] = None, start_ned=None) -> Dict[str, Any]:
     spec = run.spec
     sc = spec["scene"]
     scene = load_jsonc(os.path.join(sim_config_dir, sc["base"]))
@@ -31,7 +31,7 @@ def build_scene(run: Run, sim_config_dir: str, targets: List[Dict[str, Any]],
     actor = next((a for a in scene["actors"] if a["type"] == "robot" and a["name"] == drone_name), None)
     if actor is None:
         raise ValueError(f"base scene {sc['base']} has no robot actor named {drone_name}")
-    actor["origin"] = {"xyz": _fmt3(spec["dut_start"]["ned"]), "rpy-deg": f"0 0 {spec['dut_start'].get('yaw_deg', 0.0)}"}
+    actor["origin"] = {"xyz": _fmt3(start_ned if start_ned is not None else spec["dut_start"]["ned"]), "rpy-deg": f"0 0 {spec['dut_start'].get('yaw_deg', 0.0)}"}
     actor["robot-config"] = _annotate(robot, sc.get("camera", "Payload"), [t["id"] for t in targets])
 
     spawn = scene.setdefault("spawn-objects", {}).setdefault("sim-packaged", [])
