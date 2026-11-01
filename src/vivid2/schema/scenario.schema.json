@@ -68,7 +68,23 @@
       }
     },
     "target_jitter_m": {"type": "number", "minimum": 0, "default": 0},
-    "distractors": {"type": "array", "items": {"type": "object"}},
+    "distractors": {
+      "type": "array",
+      "description": "objects that look like targets but aren't (backpacks, tents, red debris); reports near them are false alarms",
+      "items": {
+        "type": "object",
+        "required": ["id", "asset", "ned"],
+        "additionalProperties": false,
+        "properties": {
+          "id": {"type": "string"},
+          "asset": {"type": "string"},
+          "ned": {"$ref": "#/$defs/vec3"},
+          "yaw_deg": {"type": "number", "default": 0},
+          "scale": {"$ref": "#/$defs/vec3"},
+          "description": {"type": "string"}
+        }
+      }
+    },
     "brief": {"type": "string"},
     "environment": {
       "type": "object",

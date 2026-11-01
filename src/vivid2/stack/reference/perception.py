@@ -1,8 +1,9 @@
 """Reference perception layers.
 
-GroundTruthPerception: oracle upper bound built from simulator annotations,
-with a depth-based occlusion test (sim bbox annotations ignore occluders such
-as tree canopy).
+GroundTruthPerception: oracle upper bound built from simulator ground truth.
+With segmentation pixel counts (ground truth v2) it reports exactly the
+visible targets, boxed around their visible pixels; otherwise it falls back
+to a depth-based occlusion test (sim boxes ignore occluders such as canopy).
 
 OnnxYoloDetector: any YOLOv8/YOLO11-format ONNX person detector (COCO class 0),
 run with onnxruntime. Stand-in for a vendor's onboard detector.
@@ -14,6 +15,7 @@ from typing import Dict, List, Optional, Sequence
 import numpy as np
 
 from vivid2.geo import world_to_pixel
+from vivid2.sim.segmentation import MIN_VISIBLE_PX
 from vivid2.stack.base import Detection, Frame, Perception
 
 
@@ -42,11 +44,14 @@ class GroundTruthPerception(Perception):
         return float(np.mean(patch >= expected - self.margin)) >= 0.25
 
     def detect(self, frame: Frame) -> List[Detection]:
-        return [
-            Detection(self.label, tuple(a.bbox), 1.0)
-            for a in frame.gt
-            if self._visible(frame, a.object_id, a.bbox)
-        ]
+        dets = []
+        for a in frame.gt:
+            if a.visible_px is not None:  # ground truth v2: segmentation says exactly what is visible
+                if a.visible_px >= MIN_VISIBLE_PX and a.bbox_vis is not None:
+                    dets.append(Detection(self.label, tuple(a.bbox_vis), 1.0))
+            elif self._visible(frame, a.object_id, a.bbox):
+                dets.append(Detection(self.label, tuple(a.bbox), 1.0))
+        return dets
 
 
 class OnnxYoloDetector(Perception):

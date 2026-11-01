@@ -1,4 +1,9 @@
-"""Perception metrics against simulator ground-truth bounding boxes."""
+"""Perception metrics against simulator ground truth.
+
+With ground truth v2, boxes are the tight box around each target's visible
+pixels (the sim's own box covers the whole object, occluded or not, which is
+too loose for IoU against a detector's box).
+"""
 from __future__ import annotations
 
 from collections import defaultdict
@@ -7,6 +12,7 @@ from typing import Any, Dict, List, Optional, Sequence
 import numpy as np
 
 from vivid2.recorder import RunLog
+from vivid2.sim.segmentation import visibility_state
 
 
 def iou(a: Sequence[float], b: Sequence[float]) -> float:
@@ -55,7 +61,12 @@ def perception_metrics(
 
     evaluated = [fid for fid in frames if fid in dets_by_frame]
     for fid in evaluated:
-        gts = frames[fid].get("gt", [])
+        # Visible targets are matched against the box around their visible pixels; partly
+        # visible or hidden ones are ignore regions: a detection there is neither a hit nor a false alarm.
+        gts, ignore = [], []
+        for g in frames[fid].get("gt", []):
+            box = g.get("bbox_vis") or g["bbox"]
+            (gts if visibility_state(g) == "visible" else ignore).append({**g, "box": box})
         n_gt += len(gts)
         used = set()
         for det in sorted(dets_by_frame[fid], key=lambda d: -d["score"]):
@@ -63,10 +74,12 @@ def perception_metrics(
             for j, gt in enumerate(gts):
                 if j in used:
                     continue
-                v = iou(det["bbox"], gt["bbox"])
+                v = iou(det["bbox"], gt["box"])
                 if v >= best_iou:
                     best_j, best_iou = j, v
             hit = best_j >= 0
+            if not hit and any(iou(det["bbox"], g["box"]) >= iou_thr for g in ignore):
+                continue
             if hit:
                 used.add(best_j)
                 oid = gts[best_j]["object_id"]

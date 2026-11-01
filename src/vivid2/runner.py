@@ -21,7 +21,8 @@ from vivid2.preflight import PreflightError, run_preflight, scenario_map
 from vivid2.recorder import Recorder, RunLog
 from vivid2.scenario import Campaign, Run
 from vivid2.scoring import layer_scores, overall_score, reasoning_score
-from vivid2.sim.scene_builder import build_scene, camera_settings
+from vivid2.sim.scene_builder import build_scene, camera_settings, captures
+from vivid2.sim.segmentation import SegmentationError, assign_ids, palette, visibility
 from vivid2.stack.base import Agent, Frame, GTAnnotation, MissionContext, MissionSpec, TargetReport
 from vivid2.stack.reference.controllers import AirSimController
 from vivid2.unreal_setup import status as unreal_status
@@ -160,10 +161,14 @@ def write_bank_files(run_dir: Path, frame_id: int, jpeg: bytes, depth_m: Optiona
 
 class SimMissionContext(MissionContext):
     def __init__(self, run: Run, world, drone, camera_id: str, recorder: Recorder, controller: AirSimController,
-                 fov_deg: float, frame_bank: str = "off"):
+                 fov_deg: float, frame_bank: str = "off", seg_ids: Optional[Dict[str, int]] = None,
+                 target_ids: Optional[List[str]] = None):
         if frame_bank not in FRAME_BANK_MODES:
             raise ValueError(f"frame_bank must be one of {FRAME_BANK_MODES}")
         self.frame_bank = frame_bank
+        self.seg_ids = seg_ids or {}  # segmentation ID per target/distractor; empty = no visibility ground truth
+        self.target_ids = set(target_ids or [])
+        self._seg_colours = palette() if self.seg_ids else None
         self.run = run
         self.world = world
         self.drone = drone
@@ -184,7 +189,8 @@ class SimMissionContext(MissionContext):
     async def get_frame(self) -> Optional[Frame]:
         from projectairsim.types import ImageType
 
-        imgs = await asyncio.to_thread(self.drone.get_images, self.camera_id, [ImageType.SCENE, ImageType.DEPTH_PLANAR])
+        types = [ImageType.SCENE, ImageType.DEPTH_PLANAR] + ([ImageType.SEGMENTATION] if self.seg_ids else [])
+        imgs = await asyncio.to_thread(self.drone.get_images, self.camera_id, types)
         rgb_msg = imgs.get(ImageType.SCENE)
         if not rgb_msg:
             return None
@@ -201,10 +207,22 @@ class SimMissionContext(MissionContext):
             if self.depth_scale is not None:  # until then (on the ground) agents fall back to flat-ground rays
                 depth = raw.astype(np.float32) * self.depth_scale
                 depth[(raw == 0) | (raw >= DEPTH_NO_DATA)] = 0.0  # no data
+        vis: Dict[str, Dict[str, Any]] = {}
+        smsg = imgs.get(ImageType.SEGMENTATION) if self.seg_ids else None
+        if smsg:
+            vis = await asyncio.to_thread(visibility, _decode(smsg, np.uint8, 3), self.seg_ids, self._seg_colours)
         gt = []
         for a in rgb_msg.get("annotations") or []:
             c, s = a["bbox2d"]["center"], a["bbox2d"]["size"]
-            gt.append(GTAnnotation(a["object_id"], (c["x"] - s["x"] / 2, c["y"] - s["y"] / 2, c["x"] + s["x"] / 2, c["y"] + s["y"] / 2)))
+            v = vis.get(a["object_id"], {})
+            gt.append(GTAnnotation(a["object_id"], (c["x"] - s["x"] / 2, c["y"] - s["y"] / 2, c["x"] + s["x"] / 2, c["y"] + s["y"] / 2),
+                                   v.get("visible_px"), tuple(v["bbox_vis"]) if v.get("bbox_vis") else None))
+        annotated = {g.object_id for g in gt}
+        for oid, v in vis.items():  # seen in segmentation but outside the annotation's frustum test
+            if oid in self.target_ids and oid not in annotated and v["visible_px"]:
+                gt.append(GTAnnotation(oid, tuple(v["bbox_vis"]), v["visible_px"], tuple(v["bbox_vis"])))
+        distractors_seen = {oid: v["visible_px"] for oid, v in vis.items()
+                            if oid not in self.target_ids and v["visible_px"]}
         self._frame_id += 1
         jpeg = await asyncio.to_thread(encode_jpeg_bytes, rgb)  # encoded once; VLMs are sent exactly these bytes
         frame = Frame(
@@ -220,7 +238,8 @@ class SimMissionContext(MissionContext):
         self.recorder.log("frames", {
             "t": frame.t_ns, "frame_id": frame.frame_id, "cam_pos": frame.cam_pos, "cam_q": list(frame.cam_q),
             "width": frame.width, "height": frame.height, "fov_deg": frame.fov_deg,
-            "gt": [{"object_id": g.object_id, "bbox": list(g.bbox)} for g in gt], **bank,
+            "gt": [_gt_record(g) for g in gt], **bank,
+            **({"distractors_visible": distractors_seen} if distractors_seen else {}),
         })
         return frame
 
@@ -249,6 +268,14 @@ class SimMissionContext(MissionContext):
         except Exception:
             pass
         return self.last_t_ns
+
+
+def _gt_record(g: GTAnnotation) -> Dict[str, Any]:
+    rec: Dict[str, Any] = {"object_id": g.object_id, "bbox": list(g.bbox)}
+    if g.visible_px is not None:
+        rec["visible_px"] = g.visible_px
+        rec["bbox_vis"] = list(g.bbox_vis) if g.bbox_vis else None
+    return rec
 
 
 def _decode(msg: Dict[str, Any], dtype, channels: int) -> np.ndarray:
@@ -355,7 +382,8 @@ async def execute_run(
     run_dir = Path(out_dir) / agent.name / run.run_id
     targets = run.resolved_targets()
     sc = run.spec["scene"]
-    scene = build_scene(run, sim_config_dir, targets)
+    distractors = run.spec.get("distractors", [])
+    scene = build_scene(run, sim_config_dir, targets, distractors)
     cam = camera_settings(scene, sc.get("camera", "Payload"), sc.get("drone_name", "Drone1"))
 
     try:
@@ -365,7 +393,13 @@ async def execute_run(
             f"loading the scene failed ({e!r}). Check that map {sc.get('map', '?')!r} is open and that it has "
             f"the assets {sorted({t['asset'] for t in targets})}."
         ) from e
-    preflight = run_preflight(world, run.spec, targets)  # raises PreflightError before anything is recorded
+    preflight = run_preflight(world, run.spec, targets + distractors)  # raises PreflightError before anything is recorded
+    seg_ids: Dict[str, int] = {}
+    if captures(scene, sc.get("camera", "Payload"), 3, sc.get("drone_name", "Drone1")):
+        try:
+            seg_ids = assign_ids(world, targets, distractors)
+        except SegmentationError as e:
+            raise PreflightError(str(e)) from e
 
     rec = Recorder(run_dir)
     drone = Drone(client, world, sc.get("drone_name", "Drone1"))
@@ -377,7 +411,8 @@ async def execute_run(
     apply_environment(world, run.spec.get("environment", {}))
 
     controller = AirSimController(drone, world.get_sim_time, rec.log)
-    ctx = SimMissionContext(run, world, drone, sc.get("camera", "Payload"), rec, controller, cam["fov-degrees"], frame_bank)
+    ctx = SimMissionContext(run, world, drone, sc.get("camera", "Payload"), rec, controller, cam["fov-degrees"], frame_bank,
+                            seg_ids=seg_ids, target_ids=[t["id"] for t in targets])
     meta = {
         "run_id": run.run_id, "scenario_id": run.scenario_id, "seed": run.seed, "params": run.params,
         "mission": run.spec["mission"], "agent": agent.describe(), "targets": targets,
@@ -388,6 +423,8 @@ async def execute_run(
         "config_hash": run_config_hash(run, agent.describe()),
         "map": sc.get("map"), "preflight": preflight,
         "mission_spec": asdict(ctx.mission),  # what the DUT was told; open-loop evaluation reuses it
+        "distractors": distractors, "segmentation_ids": seg_ids,
+        "gt_version": 2 if seg_ids else 1,  # 2: ground truth carries per-target visible pixels
         "frame_bank": {"mode": frame_bank, "jpeg_quality": JPEG_QUALITY, "jpeg_max_side": JPEG_MAX_SIDE,
                        "depth": "uint16 mm, half resolution, 0 = no data"},
     }

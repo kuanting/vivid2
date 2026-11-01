@@ -366,7 +366,7 @@
           "width": 960,
           "height": 720,
           "fov-degrees": 80,
-          "capture-enabled": false,
+          "capture-enabled": true,
           "streaming-enabled": false,
           "pixels-as-float": false,
           "compress": false
