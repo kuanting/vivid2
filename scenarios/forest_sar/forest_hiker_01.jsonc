@@ -4,7 +4,7 @@
   "id": "forest_hiker_01",
   "mission": "forest_sar",
   "description": "Injured hiker in a red jacket lying 30-60 m off the trail, mixed conifer canopy.",
-  "scene": {"base": "scene_forest_sar.jsonc", "robot_config": "robot_vivid_quad.jsonc", "camera": "Payload"},
+  "scene": {"base": "scene_forest_sar.jsonc", "robot_config": "robot_vivid_quad.jsonc", "camera": "Payload", "map": "ForestSAR"},
   "dut_start": {"ned": [0, 0, -1], "yaw_deg": 0},
   "search_area": {"polygon_ne": [[-150, -100], [150, -100], [150, 100], [-150, 100]], "altitude_m": 45, "ground_down_m": 0},
   "targets": [

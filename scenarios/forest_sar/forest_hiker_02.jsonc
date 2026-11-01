@@ -3,7 +3,7 @@
   "id": "forest_hiker_02",
   "mission": "forest_sar",
   "description": "Two hikers separated after dark; one on a scree slope, one under dense canopy. Dusk and fog sweep.",
-  "scene": {"base": "scene_forest_sar.jsonc", "robot_config": "robot_vivid_quad.jsonc", "camera": "Payload"},
+  "scene": {"base": "scene_forest_sar.jsonc", "robot_config": "robot_vivid_quad.jsonc", "camera": "Payload", "map": "ForestSAR"},
   "dut_start": {"ned": [0, 0, -1], "yaw_deg": 0},
   "search_area": {"polygon_ne": [[-200, -150], [200, -150], [200, 150], [-200, 150]], "altitude_m": 50, "ground_down_m": 0},
   "targets": [

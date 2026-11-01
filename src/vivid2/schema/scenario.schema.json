@@ -16,7 +16,18 @@
         "base": {"type": "string"},
         "robot_config": {"type": "string"},
         "drone_name": {"type": "string", "default": "Drone1"},
-        "camera": {"type": "string", "default": "Payload"}
+        "camera": {"type": "string", "default": "Payload"},
+        "map": {"type": "string", "description": "Unreal map the scenario needs (e.g. BlocksMap, ForestSAR); runs are grouped by map"},
+        "map_check": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["actors"],
+          "description": "How preflight recognises the map. Default: an actor matching BP_VIVID2Map_<map>.*",
+          "properties": {
+            "actors": {"type": "array", "minItems": 1, "items": {"type": "string"},
+                       "description": "actor-name regexes (full match); each must match an actor in the open level"}
+          }
+        }
       }
     },
     "dut_start": {

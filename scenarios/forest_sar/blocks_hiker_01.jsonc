@@ -6,7 +6,8 @@
   "id": "blocks_hiker_01",
   "mission": "forest_sar",
   "description": "Single stationary hiker proxy, clear midday, no wind.",
-  "scene": {"base": "scene_forest_sar_blocks.jsonc", "robot_config": "robot_vivid_quad.jsonc", "camera": "Payload"},
+  "scene": {"base": "scene_forest_sar_blocks.jsonc", "robot_config": "robot_vivid_quad.jsonc", "camera": "Payload",
+            "map": "BlocksMap", "map_check": {"actors": ["TemplateCube_Rounded_1", "TemplateCube_Rounded_102"]}},
   "dut_start": {"ned": [-12, 0, -1], "yaw_deg": 0},
   "search_area": {"polygon_ne": [[-60, -60], [60, -60], [60, 60], [-60, 60]], "altitude_m": 35, "ground_down_m": 0},
   "targets": [

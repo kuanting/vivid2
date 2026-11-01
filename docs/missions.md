@@ -37,3 +37,9 @@ road-blockage recall, and a rubric score for the VLM's situation report.
 See `src/vivid2/schema/scenario.schema.json`. Any field can be swept with a
 dotted path, for example `"environment.weather.fog": [0, 0.3]`. `seeds` sets the
 number of seeded repetitions.
+
+Set `scene.map` to the Unreal map the scenario needs. Campaigns run grouped by
+map, and before each run a preflight check confirms that map is the one open
+(by its `BP_VIVID2Map_<map>` marker actor, or the actors listed in
+`scene.map_check.actors`) and that every target spawned under its own name.
+If not, the runs for that map are skipped with a message saying what to fix.

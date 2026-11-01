@@ -25,7 +25,7 @@ def cmd_list(args) -> int:
     runs = c.runs()
     print(f"campaign {c.name}: {len(c.scenarios)} scenarios, {len(runs)} runs (sim_config_dir={c.sim_config_dir})")
     for r in runs:
-        print(f"  {r.run_id:40s} seed={r.seed} params={json.dumps(r.params)}")
+        print(f"  {r.run_id:40s} map={r.spec['scene'].get('map', '?'):12s} seed={r.seed} params={json.dumps(r.params)}")
     return 0
 
 

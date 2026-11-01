@@ -16,6 +16,7 @@ from typing import Any, Callable, Dict, List, Optional, Tuple
 import numpy as np
 
 from vivid2 import metrics as vmetrics
+from vivid2.preflight import PreflightError, run_preflight, scenario_map
 from vivid2.recorder import Recorder, RunLog
 from vivid2.scenario import Campaign, Run
 from vivid2.scoring import layer_scores, overall_score
@@ -298,13 +299,21 @@ async def execute_run(
 
     agent = agent or agent_factory(run)
     run_dir = Path(out_dir) / agent.name / run.run_id
-    rec = Recorder(run_dir)
     targets = run.resolved_targets()
     sc = run.spec["scene"]
     scene = build_scene(run, sim_config_dir, targets)
     cam = camera_settings(scene, sc.get("camera", "Payload"), sc.get("drone_name", "Drone1"))
 
-    world = load_world(client, scene, sim_config_dir)
+    try:
+        world = load_world(client, scene, sim_config_dir)
+    except Exception as e:
+        raise PreflightError(
+            f"loading the scene failed ({e!r}). Check that map {sc.get('map', '?')!r} is open and that it has "
+            f"the assets {sorted({t['asset'] for t in targets})}."
+        ) from e
+    preflight = run_preflight(world, run.spec, targets)  # raises PreflightError before anything is recorded
+
+    rec = Recorder(run_dir)
     drone = Drone(client, world, sc.get("drone_name", "Drone1"))
     client.subscribe(
         drone.robot_info["collision_info"],
@@ -323,6 +332,7 @@ async def execute_run(
         "projectairsim_commit": projectairsim_commit(airsim_root), "scenario_source": run.source,
         "unreal": unreal_status(), "weights": weights or {},
         "config_hash": run_config_hash(run, agent.describe()),
+        "map": sc.get("map"), "preflight": preflight,
     }
     rec.write_json("meta.json", meta)
 
@@ -349,6 +359,11 @@ async def execute_run(
     return score_run_dir(run_dir, weights)
 
 
+def order_runs(runs: List[Run]) -> List[Run]:
+    """Group runs by Unreal map (then scenario), so a campaign switches maps as rarely as possible."""
+    return sorted(runs, key=lambda r: (scenario_map(r.spec) or "", r.scenario_id))
+
+
 def _read_json(path: Path) -> Dict[str, Any]:
     try:
         return json.loads(Path(path).read_text(encoding="utf-8"))
@@ -372,8 +387,13 @@ async def execute_campaign(
     if not sim_cfg:
         raise ValueError("campaign must set sim_config_dir")
     results = []
-    runs = campaign.runs()
+    runs = order_runs(campaign.runs())
+    blocked_maps: Dict[Optional[str], str] = {}  # map -> why its runs can't start
     for i, run in enumerate(runs, 1):
+        map_name = scenario_map(run.spec)
+        if map_name in blocked_maps:
+            log(f"[{i}/{len(runs)}] {run.run_id} skipped: {blocked_maps[map_name]}")
+            continue
         agent = agent_factory(run)
         name = agent.name
         run_dir = out / name / run.run_id
@@ -396,6 +416,10 @@ async def execute_campaign(
         serialize_requests(client)
         try:
             r = await execute_run(client, run, agent_factory, sim_cfg, out, campaign.weights, airsim_root, agent=agent)
+        except PreflightError as e:
+            log(f"    -> preflight failed: {e}")
+            blocked_maps[map_name] = f"map {map_name!r} failed preflight"
+            continue
         except Exception as e:
             log(f"    -> run failed: {e!r}")
             log(traceback.format_exc())

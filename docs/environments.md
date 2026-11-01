@@ -19,7 +19,10 @@ packaged builds. See [unreal_versions.md](unreal_versions.md).
    Claude Code sessions started in the VIVID2 folder.
 3. Create maps under `/Game/VIVID2/Maps/`: `ForestSAR`, `Wildfire`, `Landslide`.
    In each map, set World Settings → GameMode Override to `ProjectAirSimGameMode`.
-4. Put a PlayerStart at the world origin (0, 0, 0). Project AirSim measures NED
+4. Place a marker actor named `BP_VIVID2Map_<map>` (for example
+   `BP_VIVID2Map_ForestSAR`, any empty blueprint). The runner's preflight check
+   uses it to confirm the right map is open.
+5. Put a PlayerStart at the world origin (0, 0, 0). Project AirSim measures NED
    coordinates from the Unreal world origin, not from the PlayerStart.
 
 ## Targets (hikers)
