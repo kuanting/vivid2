@@ -30,8 +30,16 @@ vllm serve Qwen/Qwen2.5-VL-7B-Instruct --port 8001   # port 8000 is taken by the
 vivid2 run --campaign campaigns/smoke.jsonc --agent vlm --vlm local --vlm-model Qwen/Qwen2.5-VL-7B-Instruct
 ```
 
+To compare models on identical images, record frames once and evaluate each
+model offline; see "Comparing VLMs on identical frames" in the README. For
+Ollama, use `--vlm-base-url http://localhost:11434/v1`, and add
+`--vlm-point-format pixels` if the model answers with pixel coordinates.
+
 For anything else, subclass `vivid2.vlm.base.VLMProvider` and implement
-`query(images, prompt, schema, system) -> (dict, UsageStats)`.
+`query(images, prompt, schema, system) -> (dict, UsageStats)`. Images arrive as
+JPEG bytes (or BGR arrays); send them as they are. Override `fingerprint()` to
+add every setting that changes the answers, because it keys the record/replay
+cache.
 
 ## Full custom agent
 

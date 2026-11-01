@@ -4,6 +4,8 @@
     vivid2 run --campaign campaigns/smoke.jsonc --agent coverage_gt
     vivid2 run --campaign campaigns/smoke.jsonc --agent vlm --vlm anthropic
     vivid2 run --campaign campaigns/smoke.jsonc --agent vlm --vlm local --vlm-model Qwen/Qwen2.5-VL-7B-Instruct
+    vivid2 run --campaign campaigns/blocks_v1.jsonc --agent survey --frame-bank rgb
+    vivid2 eval-frames runs/blocks_v1/survey --vlm anthropic --vlm-model claude-sonnet-5-5
     vivid2 rescore runs/smoke
     vivid2 report runs/smoke
     vivid2 unreal setup --engine 5.8 --download
@@ -45,10 +47,53 @@ def cmd_run(args) -> int:
         print(f"error: {e}", file=sys.stderr)
         return 2
     results = asyncio.run(execute_campaign(campaign, factory, Path(args.out), address=args.address,
-                                           resume=not args.no_resume, airsim_root=args.airsim_root))
+                                           resume=not args.no_resume, airsim_root=args.airsim_root,
+                                           frame_bank=args.frame_bank))
     ok = sum(r["metrics"]["mission"]["success"] for r in results)
     print(f"{factory.name}: {ok}/{len(results)} runs successful")
     print(f"scorecard: {write_report(Path(args.out) / campaign.name)}")
+    return 0
+
+
+def _add_vlm_args(s) -> None:
+    s.add_argument("--vlm", choices=["anthropic", "local"])
+    s.add_argument("--vlm-model")
+    s.add_argument("--vlm-base-url")
+    s.add_argument("--vlm-effort", choices=["low", "medium", "high", "xhigh", "max"])
+    s.add_argument("--vlm-point-format", choices=["norm1000", "pixels"],
+                   help="local VLMs: how the model writes the target point (Qwen-VL tends to use pixels)")
+    s.add_argument("--vlm-cache", help="JSONL cache of VLM answers")
+    s.add_argument("--vlm-cache-mode", choices=["record", "replay"],
+                   help="record (default): call the model and save answers; replay: answer from the cache only")
+
+
+def cmd_eval_frames(args) -> int:
+    from vivid2.openloop import evaluate_runs, find_banked_runs
+    from vivid2.registry import make_vlm, vlm_agent_name
+    from vivid2.stack.reference.reasoners import VLMReasoner
+
+    runs = find_banked_runs([Path(p) for p in args.runs])
+    if not runs:
+        print("error: no runs with a frame bank under " + ", ".join(args.runs)
+              + " (record one with: vivid2 run ... --agent survey --frame-bank rgb)", file=sys.stderr)
+        return 1
+    opts = {k: v for k, v in vars(args).items() if k.startswith("vlm") and v is not None}
+    try:
+        vlm = make_vlm(opts)
+    except ValueError as e:
+        print(f"error: {e}", file=sys.stderr)
+        return 2
+    reasoner = VLMReasoner(vlm)
+    name = vlm_agent_name("vlm", vlm)
+    desc = {"agent": name, "mode": "open_loop", "reasoner": reasoner.name, "reasoner_model": vlm.model,
+            "provider": vlm.fingerprint()}
+    print(f"{name}: evaluating {len(runs)} runs")
+    results = evaluate_runs(runs, reasoner, name, desc, Path(args.out) if args.out else None, args.concurrency)
+    decisions = sum(r["metrics"]["reasoning"]["decisions"] for r in results if r["metrics"]["reasoning"])
+    errors = sum(r["metrics"]["reasoning"]["errors"] for r in results if r["metrics"]["reasoning"])
+    cost = sum(r["metrics"]["reasoning"]["cost_usd"] for r in results if r["metrics"]["reasoning"])
+    print(f"{name}: {decisions} frames assessed, {errors} errors, ${cost:.2f}")
+    print("scorecard: vivid2 report <campaign dir> (open-loop results are listed in their own table)")
     return 0
 
 
@@ -133,15 +178,20 @@ def main(argv=None) -> int:
     s.add_argument("--no-resume", action="store_true")
     s.add_argument("--airsim-root", default=str(Path(__file__).resolve().parents[3] / "ProjectAirSim"),
                    help="ProjectAirSim checkout, used to stamp the build commit into run metadata")
-    s.add_argument("--vlm", choices=["anthropic", "local", "replay"])
-    s.add_argument("--vlm-model")
-    s.add_argument("--vlm-base-url")
-    s.add_argument("--vlm-effort", choices=["low", "medium", "high", "xhigh", "max"])
-    s.add_argument("--vlm-cache", help="JSONL record/replay cache for VLM calls")
+    _add_vlm_args(s)
     s.add_argument("--yolo-model", help="ONNX YOLO person detector for coverage_yolo / hybrid")
     s.add_argument("--sidelap", type=float)
     s.add_argument("--frame-period-s", dest="frame_period_s", type=float)
+    s.add_argument("--frame-bank", choices=["off", "rgb", "rgbd"], default="rgb",
+                   help="save each frame the agent fetches (the exact JPEG sent to VLMs; rgbd adds depth)")
     s.set_defaults(fn=cmd_run)
+
+    s = sub.add_parser("eval-frames", help="evaluate a VLM offline on the saved frames of recorded runs")
+    s.add_argument("runs", nargs="+", help="run, agent or campaign directories containing frame banks")
+    _add_vlm_args(s)
+    s.add_argument("--concurrency", type=int, default=4, help="parallel VLM calls (use 1 for a local model)")
+    s.add_argument("--out", help="default: <campaign>/openloop next to the source runs")
+    s.set_defaults(fn=cmd_eval_frames)
 
     s = sub.add_parser("rescore", help="recompute metrics/scores from recorded logs")
     s.add_argument("runs")
@@ -175,7 +225,7 @@ def main(argv=None) -> int:
     u.set_defaults(fn=cmd_unreal_pack)
 
     args = p.parse_args(argv)
-    if getattr(args, "vlm", None) is None and getattr(args, "agent", None) in ("vlm", "hybrid"):
+    if getattr(args, "vlm", None) is None and (getattr(args, "agent", None) in ("vlm", "hybrid") or args.cmd == "eval-frames"):
         args.vlm = "anthropic"
     return args.fn(args)
 

@@ -27,6 +27,17 @@ def _clamp(x: float) -> float:
     return float(max(0.0, min(100.0, x)))
 
 
+def reasoning_score(r: Optional[Dict[str, Any]]) -> Optional[float]:
+    """0-100 from F1, hallucination rate and grounding, scaled down by the share of abstentions."""
+    if not r:
+        return None
+    f1 = r["f1"] if r["f1"] is not None else (1.0 if r["confusion"]["fp"] == 0 else 0.0)
+    halluc = r["hallucination_rate"] or 0.0
+    grounding = r["grounding_accuracy"] if r["grounding_accuracy"] is not None else 1.0
+    quality = 0.6 * f1 + 0.2 * (1.0 - halluc) + 0.2 * grounding
+    return _clamp(100.0 * (1.0 - r.get("error_rate", 0.0)) * quality)  # abstentions earn nothing
+
+
 def layer_scores(m: Dict[str, Any]) -> Dict[str, Optional[float]]:
     mi = m["mission"]
     timeout = mi["timeout_s"]
@@ -37,14 +48,7 @@ def layer_scores(m: Dict[str, Any]) -> Dict[str, Optional[float]]:
     if m.get("perception") and not math.isnan(m["perception"]["ap50"]):
         perception = 100.0 * m["perception"]["ap50"]
 
-    reasoning = None
-    r = m.get("reasoning")
-    if r:
-        f1 = r["f1"] if r["f1"] is not None else (1.0 if r["confusion"]["fp"] == 0 else 0.0)
-        halluc = r["hallucination_rate"] or 0.0
-        grounding = r["grounding_accuracy"] if r["grounding_accuracy"] is not None else 1.0
-        quality = 0.6 * f1 + 0.2 * (1.0 - halluc) + 0.2 * grounding
-        reasoning = 100.0 * (1.0 - r.get("error_rate", 0.0)) * quality  # abstentions earn nothing
+    reasoning = reasoning_score(m.get("reasoning"))
 
     planning = m["planning"]["coverage_pct"]
 

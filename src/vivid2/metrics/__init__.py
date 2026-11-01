@@ -25,4 +25,4 @@ def compute_all(log_or_dir: Union[RunLog, str, Path]) -> Dict[str, Any]:
     }
 
 
-__all__ = ["compute_all"]
+__all__ = ["compute_all", "reasoning_metrics"]

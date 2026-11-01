@@ -38,6 +38,7 @@ class Frame:
     fov_deg: float
     depth: Optional[np.ndarray] = None  # H x W planar depth (m)
     gt: List[GTAnnotation] = field(default_factory=list)  # evaluation only; stacks must not read it
+    jpeg: Optional[bytes] = None  # the frame as encoded once by the runner; VLMs are sent exactly these bytes
 
     @property
     def width(self) -> int:

@@ -36,6 +36,8 @@ src/vivid2/          Python package
   stack/reference/   baseline layers and the reference SearchAgent
   vlm/               VLM providers: Claude API, OpenAI-compatible local servers, record/replay cache
   metrics/           offline per-layer metrics over recorded logs
+  openloop.py        evaluate a VLM on a run's saved frames (vivid2 eval-frames)
+  preflight.py       checks the open map and spawned targets before each run
   scoring.py         0-100 layer scores, safety gate, bootstrap CIs
   report.py          HTML scorecard
   runner.py, cli.py  execute campaigns against a live sim
@@ -72,10 +74,24 @@ vivid2 run --campaign campaigns\smoke.jsonc --agent vlm --vlm local --vlm-model 
 vivid2 report runs\smoke                                                 # -> runs\smoke\scorecard.html
 ```
 
-Add `--vlm-cache runs\vlm_cache.jsonl` to record VLM answers. A later run with
-`--vlm replay --vlm-cache ...` answers from the cache at no cost. Replay only hits
-on byte-identical frames, and live re-renders usually differ, so exact offline
-reproduction arrives with saved-frame evaluation in Phase 1.
+### Comparing VLMs on identical frames
+
+Each run saves the frames its agent fetched (`--frame-bank rgb`, the default):
+the exact JPEGs a VLM is sent. To compare models fairly, record the frames once
+with the `survey` agent, then evaluate every model offline on them. A local
+model can then use the whole GPU with Unreal closed.
+
+```powershell
+vivid2 run --campaign campaigns\blocks_v1.jsonc --agent survey
+vivid2 eval-frames runs\blocks_v1\survey --vlm anthropic --vlm-model claude-sonnet-5-5
+vivid2 eval-frames runs\blocks_v1\survey --vlm local --vlm-model qwen2.5vl:7b --vlm-base-url http://localhost:11434/v1 --vlm-point-format pixels --concurrency 1
+vivid2 report runs\blocks_v1                                              # adds an open-loop comparison table
+```
+
+Add `--vlm-cache runs\vlm_cache.jsonl` to save every answer. Rerunning the same
+command with `--vlm-cache-mode replay` answers from the cache without calling the
+model and reproduces open-loop results exactly. Closed-loop runs re-render
+every frame, so their replays mostly miss (a miss is scored as an abstention).
 
 ## Reference stacks
 
@@ -85,6 +101,7 @@ reproduction arrives with saved-frame evaluation in Phase 1.
 | `coverage_yolo` | ONNX YOLO (`--yolo-model`) | Threshold | Classic CV baseline |
 | `vlm` | none | VLM on raw frames | VLM-only baseline |
 | `hybrid` | ONNX YOLO | VLM verifies candidates | Detector + VLM |
+| `survey` | none | none | Records the frame bank for `eval-frames` |
 
 To plug in your own stack, see [docs/adding_a_dut.md](docs/adding_a_dut.md).
 

@@ -12,10 +12,8 @@ import json
 import time
 from typing import Any, Dict, List, Optional, Tuple
 
-import numpy as np
-
 from vivid2.stack.base import UsageStats
-from vivid2.vlm.base import VLMError, VLMProvider, encode_jpeg
+from vivid2.vlm.base import ImageInput, VLMError, VLMProvider, encode_jpeg
 
 # USD per 1M tokens (input, output) at Anthropic first-party rates; used only
 # for the cost column of reports. Haiku 5.5 is the <=100K-token prompt rate.
@@ -56,9 +54,13 @@ class AnthropicVLM(VLMProvider):
         self.max_image_side = max_image_side
         self.fallbacks = fallbacks
 
+    def fingerprint(self) -> Dict[str, Any]:
+        return {**super().fingerprint(), "effort": self.effort, "max_tokens": self.max_tokens,
+                "max_image_side": self.max_image_side, "fallbacks": self.fallbacks}
+
     def query(
         self,
-        images: List[np.ndarray],
+        images: List[ImageInput],
         prompt: str,
         schema: Dict[str, Any],
         system: Optional[str] = None,

@@ -31,6 +31,12 @@
 - **Reproducible runs.** A run is identified by (scenario, swept params, seed).
   Target jitter comes from the seed. The ProjectAirSim commit hash is stored in
   `meta.json`. VLM answers can be recorded and replayed.
+- **Same frames for every model.** The runner JPEG-encodes each camera frame
+  once and sends those exact bytes to the VLM. With a frame bank
+  (`--frame-bank rgb`), the bytes are saved under `frames/` with their SHA-256,
+  and `vivid2 eval-frames` replays them through any model offline (open loop).
+  Open-loop results are scored on the reasoning layer only and listed in their
+  own scorecard table.
 - **Missing layers are not zero.** If a stack doesn't expose separate
   detections, its perception score is `n/a` and the layer is left out of the
   weighted overall score.

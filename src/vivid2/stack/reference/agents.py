@@ -1,4 +1,4 @@
-"""Reference search agent: modular Perception -> Reasoner -> Planner -> Controller."""
+"""Reference agents: a modular search agent (Perception -> Reasoner -> Planner -> Controller) and a survey agent."""
 from __future__ import annotations
 
 import asyncio
@@ -7,7 +7,7 @@ from typing import Any, Dict, List, Optional
 import numpy as np
 
 from vivid2.geo import pixel_ray_to_ground, pixel_to_world
-from vivid2.stack.base import Agent, Frame, MissionContext, Perception, Planner, Reasoner, TargetReport
+from vivid2.stack.base import Agent, Assessment, Frame, MissionContext, Perception, Planner, Reasoner, TargetReport, UsageStats
 
 DEPTH_SATURATION_M = 65.0  # 16-bit millimetre depth saturates at 65.535 m
 NO_FRAME_RETRY_S = 0.1
@@ -73,7 +73,7 @@ class SearchAgent(Agent):
             "params": {
                 "planner": _scalar_params(self.planner),
                 "reasoner": _scalar_params(self.reasoner),
-                "provider": _scalar_params(provider),
+                "provider": provider.fingerprint() if hasattr(provider, "fingerprint") else _scalar_params(provider),
                 "perception": _scalar_params(self.perception),
             },
         }
@@ -105,18 +105,7 @@ class SearchAgent(Agent):
                 })
 
             assessment, usage = await asyncio.to_thread(self.reasoner.assess, frame, dets, m)
-            ctx.log("decisions", {
-                "t": frame.t_ns, "frame_id": frame.frame_id, "layer": "reasoner",
-                "output": {
-                    "target_found": assessment.target_found, "confidence": assessment.confidence,
-                    "pixel": list(assessment.pixel) if assessment.pixel else None,
-                    "description": assessment.description, "hazards": assessment.hazards,
-                    "next_action": assessment.next_action, **({"error": assessment.raw["error"]} if "error" in assessment.raw else {}),
-                },
-                "latency_s": usage.latency_s, "input_tokens": usage.input_tokens,
-                "output_tokens": usage.output_tokens, "cost_usd": usage.cost_usd, "model": usage.model,
-                **({"fallback": True} if usage.fallback else {}),
-            })
+            ctx.log("decisions", decision_record(frame, assessment, usage))
 
             if assessment.target_found and assessment.pixel and assessment.confidence >= self.min_confidence:
                 ned = geolocate(frame, assessment.pixel[0], assessment.pixel[1], m.ground_down_m)
@@ -134,4 +123,60 @@ class SearchAgent(Agent):
             if wait > 0:
                 await asyncio.sleep(wait)
 
+        await ctx.controller.return_and_land(m.start_ned, m.max_speed_mps)
+
+
+def decision_record(frame: Frame, assessment: Assessment, usage: UsageStats) -> Dict[str, Any]:
+    """The ``decisions`` stream record for one reasoner call (closed or open loop)."""
+    raw = assessment.raw or {}
+    out: Dict[str, Any] = {
+        "target_found": assessment.target_found, "confidence": assessment.confidence,
+        "pixel": list(assessment.pixel) if assessment.pixel else None,
+        "description": assessment.description, "hazards": assessment.hazards,
+        "next_action": assessment.next_action,
+    }
+    for k in ("error", "point_raw"):
+        if k in raw:
+            out[k] = raw[k]
+    rec = {
+        "t": frame.t_ns, "frame_id": frame.frame_id, "layer": "reasoner", "output": out,
+        "latency_s": usage.latency_s, "input_tokens": usage.input_tokens,
+        "output_tokens": usage.output_tokens, "cost_usd": usage.cost_usd, "model": usage.model,
+    }
+    if usage.fallback:
+        rec["fallback"] = True
+    return rec
+
+
+class SurveyAgent(Agent):
+    """Fly the coverage pattern and record every frame; makes no decisions.
+
+    Used with ``--frame-bank`` to record the frames that VLMs are then compared
+    on offline (``vivid2 eval-frames``), so every model sees identical images.
+    """
+
+    def __init__(self, name: str, planner: Planner, frame_period_s: float = 1.0):
+        self.name = name
+        self.planner = planner
+        self.frame_period_s = frame_period_s
+
+    def describe(self) -> Dict[str, Any]:
+        return {"agent": self.name, "planner": self.planner.name, "frame_period_s": self.frame_period_s,
+                "params": {"planner": _scalar_params(self.planner)}}
+
+    async def run(self, ctx: MissionContext) -> None:
+        m = ctx.mission
+        probe = await ctx.get_frame()
+        wh = (probe.width, probe.height) if probe else (640, 480)
+        path = self.planner.plan(m, probe.fov_deg if probe else 90.0, wh)
+        await ctx.controller.takeoff(m.ground_down_m - m.altitude_m)
+        await ctx.controller.fly_path(path, m.max_speed_mps)
+        while not ctx.should_stop() and not ctx.controller.path_done():
+            t_loop = asyncio.get_running_loop().time()
+            if await ctx.get_frame() is None:
+                await asyncio.sleep(NO_FRAME_RETRY_S)
+                continue
+            wait = self.frame_period_s - (asyncio.get_running_loop().time() - t_loop)
+            if wait > 0:
+                await asyncio.sleep(wait)
         await ctx.controller.return_and_land(m.start_ned, m.max_speed_mps)

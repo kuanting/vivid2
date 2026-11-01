@@ -9,6 +9,7 @@ import subprocess
 import threading
 import time
 import traceback
+from dataclasses import asdict
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Tuple
@@ -19,11 +20,12 @@ from vivid2 import metrics as vmetrics
 from vivid2.preflight import PreflightError, run_preflight, scenario_map
 from vivid2.recorder import Recorder, RunLog
 from vivid2.scenario import Campaign, Run
-from vivid2.scoring import layer_scores, overall_score
+from vivid2.scoring import layer_scores, overall_score, reasoning_score
 from vivid2.sim.scene_builder import build_scene, camera_settings
 from vivid2.stack.base import Agent, Frame, GTAnnotation, MissionContext, MissionSpec, TargetReport
 from vivid2.stack.reference.controllers import AirSimController
 from vivid2.unreal_setup import status as unreal_status
+from vivid2.vlm.base import JPEG_MAX_SIDE, JPEG_QUALITY, encode_jpeg_bytes, sha256_hex
 
 TRAJECTORY_HZ = 10.0
 RTL_GRACE_S = 180.0
@@ -132,8 +134,36 @@ def projectairsim_commit(airsim_root: Optional[str]) -> Optional[str]:
         return None
 
 
+FRAME_BANK_MODES = ("off", "rgb", "rgbd")
+
+
+def write_bank_files(run_dir: Path, frame_id: int, jpeg: bytes, depth_m: Optional[np.ndarray]) -> Dict[str, Any]:
+    """Save one frame to the run's frame bank; returns the ``frames`` record fields that point at it.
+
+    RGB is the exact JPEG the VLM is sent. Depth (``rgbd``) is stored at half
+    resolution as 16-bit millimetres (0 = no data).
+    """
+    from PIL import Image
+
+    bank = Path(run_dir) / "frames"
+    bank.mkdir(exist_ok=True)
+    rel = f"frames/{frame_id:06d}.jpg"
+    (Path(run_dir) / rel).write_bytes(jpeg)
+    out: Dict[str, Any] = {"rgb": rel, "rgb_sha256": sha256_hex(jpeg)}
+    if depth_m is not None:
+        mm = np.clip(np.nan_to_num(depth_m[::2, ::2]) * 1000.0, 0, 65535).astype(np.uint16)
+        drel = f"frames/{frame_id:06d}_d.png"
+        Image.fromarray(mm).save(Path(run_dir) / drel)
+        out["depth"] = drel
+    return out
+
+
 class SimMissionContext(MissionContext):
-    def __init__(self, run: Run, world, drone, camera_id: str, recorder: Recorder, controller: AirSimController, fov_deg: float):
+    def __init__(self, run: Run, world, drone, camera_id: str, recorder: Recorder, controller: AirSimController,
+                 fov_deg: float, frame_bank: str = "off"):
+        if frame_bank not in FRAME_BANK_MODES:
+            raise ValueError(f"frame_bank must be one of {FRAME_BANK_MODES}")
+        self.frame_bank = frame_bank
         self.run = run
         self.world = world
         self.drone = drone
@@ -176,16 +206,21 @@ class SimMissionContext(MissionContext):
             c, s = a["bbox2d"]["center"], a["bbox2d"]["size"]
             gt.append(GTAnnotation(a["object_id"], (c["x"] - s["x"] / 2, c["y"] - s["y"] / 2, c["x"] + s["x"] / 2, c["y"] + s["y"] / 2)))
         self._frame_id += 1
+        jpeg = await asyncio.to_thread(encode_jpeg_bytes, rgb)  # encoded once; VLMs are sent exactly these bytes
         frame = Frame(
             t_ns=int(rgb_msg["time_stamp"]), frame_id=self._frame_id, rgb=rgb, depth=depth,
             cam_pos=np.array([rgb_msg["pos_x"], rgb_msg["pos_y"], rgb_msg["pos_z"]]),
             cam_q=(rgb_msg["rot_w"], rgb_msg["rot_x"], rgb_msg["rot_y"], rgb_msg["rot_z"]),
-            fov_deg=self.fov_deg, gt=gt,
+            fov_deg=self.fov_deg, gt=gt, jpeg=jpeg,
         )
+        bank: Dict[str, Any] = {}
+        if self.frame_bank != "off":
+            bank = await asyncio.to_thread(write_bank_files, self.recorder.run_dir, frame.frame_id, jpeg,
+                                           depth if self.frame_bank == "rgbd" else None)
         self.recorder.log("frames", {
             "t": frame.t_ns, "frame_id": frame.frame_id, "cam_pos": frame.cam_pos, "cam_q": list(frame.cam_q),
             "width": frame.width, "height": frame.height, "fov_deg": frame.fov_deg,
-            "gt": [{"object_id": g.object_id, "bbox": list(g.bbox)} for g in gt],
+            "gt": [{"object_id": g.object_id, "bbox": list(g.bbox)} for g in gt], **bank,
         })
         return frame
 
@@ -269,6 +304,8 @@ def score_run_dir(run_dir: Path, weights: Optional[Dict[str, float]] = None) -> 
     Without explicit ``weights``, the campaign weights stored in meta.json are used.
     """
     log = RunLog.load(run_dir)
+    if log.meta.get("mode") == "open_loop":
+        return _score_open_loop(run_dir, log)
     if weights is None:
         weights = log.meta.get("weights")
     m = vmetrics.compute_all(log)
@@ -285,6 +322,22 @@ def score_run_dir(run_dir: Path, weights: Optional[Dict[str, float]] = None) -> 
     return result
 
 
+def _score_open_loop(run_dir: Path, log: RunLog) -> Dict[str, Any]:
+    """Open-loop runs (saved frames replayed through a reasoner) score the reasoning layer only."""
+    r = vmetrics.reasoning_metrics(log)
+    score = reasoning_score(r)
+    meta = log.meta
+    result = {
+        "mode": "open_loop", "run_id": meta["run_id"], "scenario_id": meta["scenario_id"],
+        "agent": meta["agent"]["agent"], "agent_config": meta["agent"], "seed": meta["seed"], "params": meta["params"],
+        "source_run": meta.get("source_run"), "metrics": {"reasoning": r},
+        "scores": {"reasoning": score, "overall": score}, "reasoning_summary": r,
+    }
+    with open(Path(run_dir) / "result.json", "w", encoding="utf-8") as f:
+        json.dump(result, f, indent=2, default=lambda o: o.tolist() if hasattr(o, "tolist") else str(o))
+    return result
+
+
 async def execute_run(
     client,
     run: Run,
@@ -294,6 +347,7 @@ async def execute_run(
     weights: Optional[Dict[str, float]] = None,
     airsim_root: Optional[str] = None,
     agent: Optional[Agent] = None,
+    frame_bank: str = "off",
 ) -> Dict[str, Any]:
     from projectairsim import Drone
 
@@ -323,7 +377,7 @@ async def execute_run(
     apply_environment(world, run.spec.get("environment", {}))
 
     controller = AirSimController(drone, world.get_sim_time, rec.log)
-    ctx = SimMissionContext(run, world, drone, sc.get("camera", "Payload"), rec, controller, cam["fov-degrees"])
+    ctx = SimMissionContext(run, world, drone, sc.get("camera", "Payload"), rec, controller, cam["fov-degrees"], frame_bank)
     meta = {
         "run_id": run.run_id, "scenario_id": run.scenario_id, "seed": run.seed, "params": run.params,
         "mission": run.spec["mission"], "agent": agent.describe(), "targets": targets,
@@ -333,6 +387,9 @@ async def execute_run(
         "unreal": unreal_status(), "weights": weights or {},
         "config_hash": run_config_hash(run, agent.describe()),
         "map": sc.get("map"), "preflight": preflight,
+        "mission_spec": asdict(ctx.mission),  # what the DUT was told; open-loop evaluation reuses it
+        "frame_bank": {"mode": frame_bank, "jpeg_quality": JPEG_QUALITY, "jpeg_max_side": JPEG_MAX_SIDE,
+                       "depth": "uint16 mm, half resolution, 0 = no data"},
     }
     rec.write_json("meta.json", meta)
 
@@ -379,6 +436,7 @@ async def execute_campaign(
     resume: bool = True,
     airsim_root: Optional[str] = None,
     log: Callable[[str], None] = print,
+    frame_bank: str = "off",
 ) -> List[Dict[str, Any]]:
     from projectairsim import ProjectAirSimClient
 
@@ -415,7 +473,8 @@ async def execute_campaign(
         client.connect()
         serialize_requests(client)
         try:
-            r = await execute_run(client, run, agent_factory, sim_cfg, out, campaign.weights, airsim_root, agent=agent)
+            r = await execute_run(client, run, agent_factory, sim_cfg, out, campaign.weights, airsim_root, agent=agent,
+                                  frame_bank=frame_bank)
         except PreflightError as e:
             log(f"    -> preflight failed: {e}")
             blocked_maps[map_name] = f"map {map_name!r} failed preflight"

@@ -7,7 +7,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List
 
-from vivid2.scoring import DEFAULT_WEIGHTS, aggregate
+from vivid2.scoring import DEFAULT_WEIGHTS, aggregate, bootstrap_ci
 
 LAYERS = list(DEFAULT_WEIGHTS) + ["overall"]
 
@@ -42,7 +42,40 @@ def _score_cell(ci: Dict[str, Any]) -> str:
     return f'<td class="num bar"><span style="width:{pct:.0f}%"></span><b>{ci["mean"]:.1f}</b>{rng}</td>'
 
 
+def _open_loop_section(results: List[Dict[str, Any]]) -> str:
+    """One row per model evaluated offline on saved frames (reasoning layer only)."""
+    if not results:
+        return ""
+    by_agent: Dict[str, List[Dict[str, Any]]] = {}
+    for r in results:
+        by_agent.setdefault(r["agent"], []).append(r)
+    rows = []
+    for agent, rs in sorted(by_agent.items(), key=lambda kv: -(bootstrap_ci(r["scores"]["reasoning"] for r in kv[1])["mean"] or 0)):
+        ms = [r["metrics"]["reasoning"] for r in rs if r["metrics"]["reasoning"]]
+        n = sum(m["decisions"] for m in ms)
+        conf = {k: sum(m["confusion"][k] for m in ms) for k in ("tp", "fp", "tn", "fn")}
+        prec = conf["tp"] / (conf["tp"] + conf["fp"]) if conf["tp"] + conf["fp"] else None
+        rec = conf["tp"] / (conf["tp"] + conf["fn"]) if conf["tp"] + conf["fn"] else None
+        hall = conf["fp"] / (conf["fp"] + conf["tn"]) if conf["fp"] + conf["tn"] else None
+        err = sum(m["errors"] for m in ms) / n if n else None
+        lat = sum(m["latency_mean_s"] * m["decisions"] for m in ms) / n if n else None
+        cost = sum(m["cost_usd"] for m in ms)
+        rows.append(
+            f"<tr><td><b>{html.escape(agent)}</b></td><td class='num'>{len(rs)}</td><td class='num'>{n}</td>"
+            f"{_score_cell(bootstrap_ci(r['scores']['reasoning'] for r in rs))}"
+            f"<td class='num'>{_fmt(prec, 2)}</td><td class='num'>{_fmt(rec, 2)}</td><td class='num'>{_fmt(hall, 3)}</td>"
+            f"<td class='num'>{_fmt(err, 3)}</td><td class='num'>{_fmt(lat, 2)}</td><td class='num'>{_fmt(cost, 2)}</td></tr>"
+        )
+    return f"""<h2>Open-loop VLM comparison</h2>
+<div class="wrap"><table><tr><th>Model</th><th>Runs</th><th>Frames</th><th>Reasoning</th><th>Precision</th><th>Recall</th>
+<th>Halluc.</th><th>Error rate</th><th>Latency s</th><th>Cost $</th></tr>{''.join(rows)}</table></div>
+<p class="muted">Every model assessed the same saved frames (<code>vivid2 eval-frames</code>). Errors are abstentions and scale the
+reasoning score down. Latency of local models was measured with Unreal closed (uncontended GPU).</p>"""
+
+
 def render(results: List[Dict[str, Any]], title: str) -> str:
+    open_loop = [r for r in results if r.get("mode") == "open_loop"]
+    results = [r for r in results if r.get("mode") != "open_loop"]
     summary = aggregate(results)
     rows = []
     for agent, s in sorted(summary.items(), key=lambda kv: -(kv[1]["scores"]["overall"]["mean"] or 0)):
@@ -74,7 +107,7 @@ def render(results: List[Dict[str, Any]], title: str) -> str:
 <meta name="viewport" content="width=device-width,initial-scale=1"><title>{html.escape(title)}</title><style>{CSS}</style></head>
 <body><main>
 <h1>{html.escape(title)}</h1>
-<div class="muted">VIVID 2 scorecard · {len(results)} runs · generated {datetime.now():%Y-%m-%d %H:%M}</div>
+<div class="muted">VIVID 2 scorecard · {len(results)} flown runs{f" · {len(open_loop)} open-loop evaluations" if open_loop else ""} · generated {datetime.now():%Y-%m-%d %H:%M}</div>
 <h2>Stacks</h2>
 <div class="wrap"><table><tr><th>Stack</th><th>Runs</th><th>Success</th><th>Collision runs</th>{head}</tr>{''.join(rows)}</table></div>
 <p class="muted">Layer scores are 0–100 means with a 95% bootstrap interval over runs. "n/a" means the stack does not expose that layer.
@@ -82,6 +115,7 @@ Overall is the weighted mean of available layers, capped at 25 for any run with 
 <h2>Runs</h2>
 <div class="wrap"><table><tr><th>Run</th><th>Stack</th><th>Params</th><th>Result</th><th>Found</th><th>TTF s</th><th>Loc err m</th>
 <th>False alarms</th><th>Collisions</th><th>Coverage %</th><th>VLM $</th><th>Overall</th></tr>{''.join(run_rows)}</table></div>
+{_open_loop_section(open_loop)}
 </main></body></html>"""
 
 

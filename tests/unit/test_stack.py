@@ -66,13 +66,21 @@ def test_vlm_reasoner_survives_provider_error(blocks_run):
 
 
 def test_replay_record_then_replay(tmp_path):
+    import pytest
+
     inner = FakeVLM()
     cache = tmp_path / "vlm.jsonl"
-    rec = ReplayVLM(str(cache), "record", inner)
+    rec = ReplayVLM(str(cache), inner, "record")
     img = np.ones((4, 4, 3), np.uint8)
-    out1, _ = rec.query([img], "p", ASSESSMENT_SCHEMA)
-    rep = ReplayVLM(str(cache), "replay")
-    out2, usage = rep.query([img], "p", ASSESSMENT_SCHEMA)
-    assert out1 == out2 and inner.calls == 1 and usage.cost_usd == 0.0
-    miss = ReplayVLM(str(cache), "replay", miss={"target_found": False})
-    assert miss.query([img * 2], "p", ASSESSMENT_SCHEMA)[0] == {"target_found": False}
+    out1, u1 = rec.query([img], "p", ASSESSMENT_SCHEMA)
+    replayer = FakeVLM()
+    rep = ReplayVLM(str(cache), replayer, "replay")
+    out2, u2 = rep.query([img], "p", ASSESSMENT_SCHEMA)
+    assert out1 == out2 and inner.calls == 1 and replayer.calls == 0
+    assert (u2.input_tokens, u2.latency_s, u2.model) == (u1.input_tokens, u1.latency_s, u1.model)  # recorded usage
+    with pytest.raises(VLMError):
+        rep.query([img * 2], "p", ASSESSMENT_SCHEMA)  # a different frame is a miss
+    other = FakeVLM()
+    other.model = "another-model"
+    with pytest.raises(VLMError):
+        ReplayVLM(str(cache), other, "replay").query([img], "p", ASSESSMENT_SCHEMA)  # so is another model

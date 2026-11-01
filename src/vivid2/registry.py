@@ -4,22 +4,25 @@
     coverage_yolo  lawnmower + ONNX YOLO detector + threshold        (classic CV stack)
     vlm            lawnmower + VLM reasoner on raw frames            (VLM-only stack)
     hybrid         lawnmower + ONNX YOLO detector + VLM verification (detector proposes, VLM decides)
+    survey         lawnmower, records every frame, no decisions      (frame bank for offline VLM comparison)
 """
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, field
 from typing import Any, Dict
 
 from vivid2.scenario import Run
 from vivid2.stack.base import Agent
-from vivid2.stack.reference.agents import SearchAgent
+from vivid2.stack.reference.agents import SearchAgent, SurveyAgent
 from vivid2.stack.reference.planners import LawnmowerPlanner
 from vivid2.stack.reference.reasoners import DetectionThresholdReasoner, VLMReasoner
 
-AGENTS = ("coverage_gt", "coverage_yolo", "vlm", "hybrid")
+AGENTS = ("coverage_gt", "coverage_yolo", "vlm", "hybrid", "survey")
 
 
 def make_vlm(opts: Dict[str, Any]):
+    """Build the VLM provider from CLI options, wrapped in the record/replay cache if one is given."""
     kind = opts.get("vlm", "anthropic")
     if kind == "anthropic":
         from vivid2.vlm.anthropic_provider import DEFAULT_MODEL, AnthropicVLM
@@ -30,22 +33,27 @@ def make_vlm(opts: Dict[str, Any]):
 
         if not opts.get("vlm_model"):
             raise ValueError("--vlm local needs --vlm-model (e.g. Qwen/Qwen2.5-VL-7B-Instruct)")
-        inner = OpenAICompatVLM(model=opts["vlm_model"], base_url=opts.get("vlm_base_url") or "http://localhost:8001/v1")
+        inner = OpenAICompatVLM(model=opts["vlm_model"], base_url=opts.get("vlm_base_url") or "http://localhost:8001/v1",
+                                point_format=opts.get("vlm_point_format", "norm1000"))
     elif kind == "replay":
-        from vivid2.vlm.replay import ReplayVLM
-
-        if not opts.get("vlm_cache"):
-            raise ValueError("--vlm replay needs --vlm-cache path/to/cache.jsonl (recorded by an earlier --vlm-cache run)")
-        return ReplayVLM(opts["vlm_cache"], mode="replay",
-                         miss={"target_found": False, "confidence": 0.0, "point": [-1, -1],
-                               "description": "cache miss", "hazards": [], "next_action": "continue"})
+        raise ValueError("--vlm replay was replaced: rerun with the original --vlm/--vlm-model settings plus "
+                         "--vlm-cache CACHE --vlm-cache-mode replay")
     else:
         raise ValueError(f"unknown VLM backend {kind!r}")
+    mode = opts.get("vlm_cache_mode", "record")
     if opts.get("vlm_cache"):
         from vivid2.vlm.replay import ReplayVLM
 
-        return ReplayVLM(opts["vlm_cache"], mode="record", inner=inner)
+        return ReplayVLM(opts["vlm_cache"], inner, mode=mode)
+    if mode == "replay":
+        raise ValueError("--vlm-cache-mode replay needs --vlm-cache path/to/cache.jsonl")
     return inner
+
+
+def vlm_agent_name(kind: str, vlm) -> str:
+    """``vlm-claude-opus-5-5``; replayed answers get a ``-replay`` suffix so they never overwrite live runs."""
+    name = f"{kind}-{re.sub(r'[^A-Za-z0-9._-]+', '_', vlm.model)}"
+    return name + "-replay" if getattr(vlm, "mode", None) == "replay" else name
 
 
 @dataclass
@@ -63,9 +71,7 @@ class AgentFactory:
 
     @property
     def name(self) -> str:
-        if self._vlm is not None:
-            return f"{self.kind}-{self._vlm.model.replace('/', '_').replace(':', '_')}"
-        return self.kind
+        return vlm_agent_name(self.kind, self._vlm) if self._vlm is not None else self.kind
 
     def _yolo(self):
         if self._detector is None:
@@ -80,6 +86,8 @@ class AgentFactory:
     def __call__(self, run: Run) -> Agent:
         planner = LawnmowerPlanner(sidelap=float(self.opts.get("sidelap", 0.2)))
         period = float(self.opts.get("frame_period_s", 1.0 if self._vlm is None else 2.0))
+        if self.kind == "survey":
+            return SurveyAgent(self.name, planner, frame_period_s=period)
         if self.kind == "coverage_gt":
             from vivid2.stack.reference.perception import GroundTruthPerception
 

@@ -58,7 +58,8 @@ class VLMReasoner(Reasoner):
 
     def assess(self, frame: Frame, detections: List[Detection], mission: MissionSpec) -> Tuple[Assessment, UsageStats]:
         try:
-            out, usage = self.provider.query([frame.rgb], self._prompt(frame, detections, mission), ASSESSMENT_SCHEMA, self.system)
+            image = frame.jpeg if frame.jpeg is not None else frame.rgb
+            out, usage = self.provider.query([image], self._prompt(frame, detections, mission), ASSESSMENT_SCHEMA, self.system)
         except VLMError as e:
             return Assessment(False, 0.0, raw={"error": str(e)}), UsageStats(model=self.provider.model)
         try:
