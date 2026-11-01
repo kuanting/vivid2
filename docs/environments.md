@@ -12,12 +12,15 @@ packaged builds. See [unreal_versions.md](unreal_versions.md).
 2. Open `unreal\VIVID2Env\VIVID2Env.uproject` with UE 5.8 and let it compile the
    module. For 5.8, the project enables the MCP server and toolsets
    (ModelContextProtocol, EditorToolset, PCGToolset, MetaHumanGenerator,
-   NiagaraToolsets, ConfigSettingsToolset). The editor serves MCP at
-   `http://127.0.0.1:8000/mcp`. The repo's `.mcp.json` registers it as `unreal-mcp`
-   for Claude Code sessions started in the VIVID2 folder.
+   NiagaraToolsets, ConfigSettingsToolset). Start the server from the editor
+   console with `ModelContextProtocol.StartServer`; it then serves MCP at
+   `http://127.0.0.1:8000/mcp`. Only one editor can use the port, so close other
+   UE projects first. The repo's `.mcp.json` registers it as `unreal-mcp` for
+   Claude Code sessions started in the VIVID2 folder.
 3. Create maps under `/Game/VIVID2/Maps/`: `ForestSAR`, `Wildfire`, `Landslide`.
    In each map, set World Settings → GameMode Override to `ProjectAirSimGameMode`.
-4. Put a PlayerStart at the NED origin. The drone spawns relative to it.
+4. Put a PlayerStart at the world origin (0, 0, 0). Project AirSim measures NED
+   coordinates from the Unreal world origin, not from the PlayerStart.
 
 ## Targets (hikers)
 

@@ -1,4 +1,4 @@
-// Blocks map: two hiker proxies plus a distractor under fog / low-sun variations.
+// Blocks map: two hiker proxies, one partly occluded by a block, under fog / low-sun variations.
 {
   "id": "blocks_hiker_02",
   "mission": "forest_sar",

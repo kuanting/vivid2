@@ -38,7 +38,8 @@
 
 ## Coordinate conventions
 
-- World is NED in metres, with the origin at the scene's player start.
+- World is NED in metres, with the origin at the Unreal world origin (0, 0, 0),
+  not at the PlayerStart.
 - The camera optical frame is x forward, y right, z down, which is the Project
   AirSim convention. Image messages carry the camera's world pose.
 - Depth comes as 16-bit millimetres, so it saturates at 65.5 m. Geolocation

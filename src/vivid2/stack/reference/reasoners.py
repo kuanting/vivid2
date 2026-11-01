@@ -4,6 +4,8 @@ from __future__ import annotations
 from importlib import resources
 from typing import Any, Dict, List, Tuple
 
+import numpy as np
+
 from vivid2.stack.base import Assessment, Detection, Frame, MissionSpec, Reasoner, UsageStats
 from vivid2.vlm.base import VLMError, VLMProvider
 
@@ -59,22 +61,60 @@ class VLMReasoner(Reasoner):
             out, usage = self.provider.query([frame.rgb], self._prompt(frame, detections, mission), ASSESSMENT_SCHEMA, self.system)
         except VLMError as e:
             return Assessment(False, 0.0, raw={"error": str(e)}), UsageStats(model=self.provider.model)
-        pt = out.get("point") or [-1, -1]
-        pixel = None
-        if out.get("target_found") and len(pt) == 2 and min(pt) >= 0:
-            pixel = (pt[0] / 1000.0 * frame.width, pt[1] / 1000.0 * frame.height)
-        return (
-            Assessment(
-                target_found=bool(out.get("target_found")),
-                confidence=float(out.get("confidence", 0.0)),
-                pixel=pixel,
-                description=str(out.get("description", "")),
-                hazards=list(out.get("hazards", [])),
-                next_action=str(out.get("next_action", "continue")),
-                raw=out,
-            ),
-            usage,
-        )
+        try:
+            return parse_assessment(out, frame.width, frame.height), usage
+        except ValueError as e:
+            # Unusable reply: an abstention (scored as an error), not a "no target" answer.
+            return Assessment(False, 0.0, raw={"error": f"invalid reply: {e}", "reply": out}), usage
+
+
+NEXT_ACTIONS = set(ASSESSMENT_SCHEMA["properties"]["next_action"]["enum"])
+
+
+def _as_bool(v: Any) -> bool:
+    if isinstance(v, bool):
+        return v
+    if isinstance(v, (int, float)):
+        return v != 0
+    if isinstance(v, str) and v.strip().lower() in ("true", "yes", "1", "false", "no", "0"):
+        return v.strip().lower() in ("true", "yes", "1")
+    raise ValueError(f"target_found is not a boolean: {v!r}")
+
+
+def _as_float(v: Any, default: float = 0.0) -> float:
+    try:
+        x = float(v)
+    except (TypeError, ValueError):
+        return default
+    return x if np.isfinite(x) else default
+
+
+def parse_assessment(out: Any, width: int, height: int) -> Assessment:
+    """Turn a VLM reply into an Assessment, tolerating loosely typed fields.
+
+    Raises ValueError only when the decision itself (``target_found``) is
+    missing or unreadable; other bad fields fall back to safe defaults.
+    """
+    if not isinstance(out, dict) or "target_found" not in out:
+        raise ValueError("reply has no target_found field")
+    found = _as_bool(out["target_found"])
+    pixel = None
+    pt = out.get("point")
+    if found and isinstance(pt, (list, tuple)) and len(pt) == 2:
+        u, v = _as_float(pt[0], -1.0), _as_float(pt[1], -1.0)
+        if u >= 0 and v >= 0:
+            pixel = (u / 1000.0 * width, v / 1000.0 * height)
+    hazards = out.get("hazards")
+    action = out.get("next_action")
+    return Assessment(
+        target_found=found,
+        confidence=min(max(_as_float(out.get("confidence")), 0.0), 1.0),
+        pixel=pixel,
+        description=str(out.get("description") or ""),
+        hazards=[str(h) for h in hazards] if isinstance(hazards, list) else [],
+        next_action=action if action in NEXT_ACTIONS else "continue",
+        raw=out,
+    )
 
 
 class DetectionThresholdReasoner(Reasoner):

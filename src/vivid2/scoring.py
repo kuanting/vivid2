@@ -43,7 +43,8 @@ def layer_scores(m: Dict[str, Any]) -> Dict[str, Optional[float]]:
         f1 = r["f1"] if r["f1"] is not None else (1.0 if r["confusion"]["fp"] == 0 else 0.0)
         halluc = r["hallucination_rate"] or 0.0
         grounding = r["grounding_accuracy"] if r["grounding_accuracy"] is not None else 1.0
-        reasoning = 100.0 * (0.6 * f1 + 0.2 * (1.0 - halluc) + 0.2 * grounding)
+        quality = 0.6 * f1 + 0.2 * (1.0 - halluc) + 0.2 * grounding
+        reasoning = 100.0 * (1.0 - r.get("error_rate", 0.0)) * quality  # abstentions earn nothing
 
     planning = m["planning"]["coverage_pct"]
 

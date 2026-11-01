@@ -78,7 +78,8 @@ class UsageStats:
     input_tokens: int = 0
     output_tokens: int = 0
     cost_usd: float = 0.0
-    model: str = ""
+    model: str = ""  # the model that served the reply (may differ from the one requested)
+    fallback: bool = False  # True when a server-side refusal fallback answered
 
 
 @dataclass

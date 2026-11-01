@@ -9,8 +9,8 @@ person and report each one's position, then return home.
 - **Mission score:** for each target, 1 − 0.5 × (time-to-find / timeout) if
   found, otherwise 0. The mean over targets is multiplied by 100, then 10
   points are subtracted per false alarm.
-- **Variation axes:** target jitter (seeded), fog, time of day, wind, and
-  (on ForestSAR) canopy density and distractors.
+- **Variation axes:** target jitter (seeded), fog, time of day and wind. Canopy
+  density and distractors arrive with the ForestSAR map in Phase 1.
 
 | Scenario | Map | Targets | Sweep |
 |---|---|---|---|

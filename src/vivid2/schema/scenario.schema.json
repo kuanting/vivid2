@@ -3,6 +3,7 @@
   "title": "VIVID 2 scenario",
   "type": "object",
   "required": ["id", "mission", "scene", "dut_start", "search_area", "targets", "brief", "limits"],
+  "additionalProperties": false,
   "properties": {
     "id": {"type": "string", "pattern": "^[A-Za-z0-9_.-]+$"},
     "mission": {"type": "string", "enum": ["forest_sar", "wildfire_sar", "landslide"]},
@@ -10,6 +11,7 @@
     "scene": {
       "type": "object",
       "required": ["base", "robot_config"],
+      "additionalProperties": false,
       "properties": {
         "base": {"type": "string"},
         "robot_config": {"type": "string"},
@@ -20,6 +22,7 @@
     "dut_start": {
       "type": "object",
       "required": ["ned"],
+      "additionalProperties": false,
       "properties": {
         "ned": {"$ref": "#/$defs/vec3"},
         "yaw_deg": {"type": "number", "default": 0}
@@ -28,6 +31,7 @@
     "search_area": {
       "type": "object",
       "required": ["polygon_ne", "altitude_m"],
+      "additionalProperties": false,
       "properties": {
         "polygon_ne": {"type": "array", "minItems": 3, "items": {"$ref": "#/$defs/vec2"}},
         "altitude_m": {"type": "number", "exclusiveMinimum": 0},
@@ -40,6 +44,7 @@
       "items": {
         "type": "object",
         "required": ["id", "asset", "ned"],
+        "additionalProperties": false,
         "properties": {
           "id": {"type": "string"},
           "asset": {"type": "string"},
@@ -56,9 +61,15 @@
     "brief": {"type": "string"},
     "environment": {
       "type": "object",
+      "additionalProperties": false,
       "properties": {
         "time_of_day": {"type": ["string", "null"]},
-        "weather": {"type": "object", "additionalProperties": {"type": "number", "minimum": 0, "maximum": 1}},
+        "weather": {
+          "type": "object",
+          "description": "Project AirSim weather effects (WeatherParameter names, lowercase), each 0..1",
+          "propertyNames": {"enum": ["rain", "road_wetness", "snow", "road_snow", "maple_leaf", "road_leaf", "dust", "fog"]},
+          "additionalProperties": {"type": "number", "minimum": 0, "maximum": 1}
+        },
         "wind_ned": {"$ref": "#/$defs/vec3"},
         "sunlight_intensity": {"type": ["number", "null"]},
         "cloud_shadow_strength": {"type": ["number", "null"]}
@@ -67,6 +78,7 @@
     "limits": {
       "type": "object",
       "required": ["timeout_s"],
+      "additionalProperties": false,
       "properties": {
         "timeout_s": {"type": "number", "exclusiveMinimum": 0},
         "max_speed_mps": {"type": "number", "default": 8},
@@ -77,6 +89,7 @@
     },
     "success": {
       "type": "object",
+      "additionalProperties": false,
       "properties": {
         "localization_tolerance_m": {"type": "number", "default": 10},
         "require_all_targets": {"type": "boolean", "default": true}

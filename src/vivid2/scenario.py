@@ -75,6 +75,16 @@ class Run:
         return out
 
 
+def validate_scenario(spec: Dict, where: str = "") -> None:
+    """Raise jsonschema.ValidationError if ``spec`` isn't a valid scenario."""
+    try:
+        jsonschema.validate(spec, _load_schema("scenario.schema.json"))
+    except jsonschema.ValidationError as e:
+        if where:
+            e.message = f"{where}: {e.message}"
+        raise
+
+
 def make_run_id(scenario_id: str, params: Dict[str, Any], seed: int) -> str:
     blob = json.dumps({"s": scenario_id, "p": params, "seed": seed}, sort_keys=True)
     return f"{scenario_id}-{hashlib.sha1(blob.encode()).hexdigest()[:8]}"
@@ -82,7 +92,7 @@ def make_run_id(scenario_id: str, params: Dict[str, Any], seed: int) -> str:
 
 class Scenario:
     def __init__(self, spec: Dict, source: Optional[str] = None):
-        jsonschema.validate(spec, _load_schema("scenario.schema.json"))
+        validate_scenario(spec)
         self.spec = spec
         self.source = source
 
@@ -113,6 +123,9 @@ class Scenario:
             base.pop("sweep", None)
             for k, v in params.items():
                 set_path(base, k, v)
+            # Sweeps write by dotted path, so a typo'd path or out-of-range value
+            # only shows up in the expanded spec.
+            validate_scenario(base, f"scenario {self.id} with sweep {params}")
             for seed in seed_list:
                 runs.append(
                     Run(

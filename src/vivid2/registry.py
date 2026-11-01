@@ -22,9 +22,9 @@ AGENTS = ("coverage_gt", "coverage_yolo", "vlm", "hybrid")
 def make_vlm(opts: Dict[str, Any]):
     kind = opts.get("vlm", "anthropic")
     if kind == "anthropic":
-        from vivid2.vlm.anthropic_provider import AnthropicVLM
+        from vivid2.vlm.anthropic_provider import DEFAULT_MODEL, AnthropicVLM
 
-        inner = AnthropicVLM(model=opts.get("vlm_model") or "claude-opus-5", effort=opts.get("vlm_effort", "low"))
+        inner = AnthropicVLM(model=opts.get("vlm_model") or DEFAULT_MODEL, effort=opts.get("vlm_effort", "low"))
     elif kind == "local":
         from vivid2.vlm.openai_compat import OpenAICompatVLM
 
@@ -34,6 +34,8 @@ def make_vlm(opts: Dict[str, Any]):
     elif kind == "replay":
         from vivid2.vlm.replay import ReplayVLM
 
+        if not opts.get("vlm_cache"):
+            raise ValueError("--vlm replay needs --vlm-cache path/to/cache.jsonl (recorded by an earlier --vlm-cache run)")
         return ReplayVLM(opts["vlm_cache"], mode="replay",
                          miss={"target_found": False, "confidence": 0.0, "point": [-1, -1],
                                "description": "cache miss", "hazards": [], "next_action": "continue"})

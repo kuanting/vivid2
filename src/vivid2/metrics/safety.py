@@ -66,6 +66,6 @@ def safety_metrics(log: RunLog) -> Dict[str, Any]:
         "energy_budget_exceeded": bool(energy_budget is not None and flown > energy_budget),
         "returned_home": end_dist_home <= 5.0,
         "end_distance_from_home_m": end_dist_home,
-        "timed_out": meta.get("end_reason") == "timeout",
+        "timed_out": meta.get("end_reason") in ("timeout", "hard_timeout"),
     })
     return out

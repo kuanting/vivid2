@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
 import subprocess
 import time
@@ -46,6 +47,17 @@ def mission_spec(run: Run) -> MissionSpec:
         timeout_s=s["limits"]["timeout_s"],
         expected_targets=len(s["targets"]),
     )
+
+
+def run_config_hash(run: Run, agent_desc: Dict[str, Any]) -> str:
+    """Fingerprint of everything that determines a run's outcome.
+
+    The run id stays (scenario, swept params, seed) so different agents can be
+    paired on the same run; this hash also covers the resolved scenario spec and
+    the agent's configuration, so editing either forces a re-run on resume.
+    """
+    blob = json.dumps({"spec": run.spec, "seed": run.seed, "agent": agent_desc}, sort_keys=True, default=str)
+    return hashlib.sha1(blob.encode()).hexdigest()[:12]
 
 
 def apply_environment(world, env: Dict[str, Any]) -> None:
@@ -182,8 +194,13 @@ def load_world(client, scene: Dict[str, Any], sim_config_dir: str):
 
 
 def score_run_dir(run_dir: Path, weights: Optional[Dict[str, float]] = None) -> Dict[str, Any]:
-    """(Re)compute metrics and scores for a recorded run; writes result.json."""
+    """(Re)compute metrics and scores for a recorded run; writes result.json.
+
+    Without explicit ``weights``, the campaign weights stored in meta.json are used.
+    """
     log = RunLog.load(run_dir)
+    if weights is None:
+        weights = log.meta.get("weights")
     m = vmetrics.compute_all(log)
     scores = layer_scores(m)
     scores["overall"] = overall_score({k: v for k, v in scores.items()}, m["safety"]["collisions"], weights)
@@ -206,10 +223,11 @@ async def execute_run(
     out_dir: Path,
     weights: Optional[Dict[str, float]] = None,
     airsim_root: Optional[str] = None,
+    agent: Optional[Agent] = None,
 ) -> Dict[str, Any]:
     from projectairsim import Drone
 
-    agent = agent_factory(run)
+    agent = agent or agent_factory(run)
     run_dir = Path(out_dir) / agent.name / run.run_id
     rec = Recorder(run_dir)
     targets = run.resolved_targets()
@@ -234,7 +252,8 @@ async def execute_run(
         "search_area": run.spec["search_area"], "limits": run.spec["limits"], "success": run.spec.get("success", {}),
         "start_ned": run.spec["dut_start"]["ned"], "t0_ns": ctx.t0_ns, "wall_start": datetime.now().isoformat(),
         "projectairsim_commit": projectairsim_commit(airsim_root), "scenario_source": run.source,
-        "unreal": unreal_status(),
+        "unreal": unreal_status(), "weights": weights or {},
+        "config_hash": run_config_hash(run, agent.describe()),
     }
     rec.write_json("meta.json", meta)
 
@@ -253,11 +272,18 @@ async def execute_run(
     finally:
         stop.set()
         await poller
+        client.unsubscribe_all()  # before closing the recorder, so no late callback writes to it
         meta.update({"end_ns": world.get_sim_time(), "end_reason": end_reason, "wall_end": datetime.now().isoformat()})
         rec.write_json("meta.json", meta)
         rec.close()
-        client.unsubscribe_all()
     return score_run_dir(run_dir, weights)
+
+
+def _read_json(path: Path) -> Dict[str, Any]:
+    try:
+        return json.loads(Path(path).read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
 
 
 async def execute_campaign(
@@ -281,14 +307,19 @@ async def execute_campaign(
     try:
         runs = campaign.runs()
         for i, run in enumerate(runs, 1):
-            name = agent_factory.name
-            done = out / name / run.run_id / "result.json"
+            agent = agent_factory(run)
+            name = agent.name
+            run_dir = out / name / run.run_id
+            done = run_dir / "result.json"
             if resume and done.exists():
-                log(f"[{i}/{len(runs)}] {run.run_id} ({name}) already done, skipping")
-                results.append(json.loads(done.read_text(encoding="utf-8")))
-                continue
+                prev = _read_json(run_dir / "meta.json")
+                if prev.get("config_hash") == run_config_hash(run, agent.describe()):
+                    log(f"[{i}/{len(runs)}] {run.run_id} ({name}) already done, skipping")
+                    results.append(json.loads(done.read_text(encoding="utf-8")))
+                    continue
+                log(f"[{i}/{len(runs)}] {run.run_id} ({name}) scenario or agent config changed, re-running")
             log(f"[{i}/{len(runs)}] {run.run_id} ({name}) params={run.params} seed={run.seed}")
-            r = await execute_run(client, run, agent_factory, sim_cfg, out, campaign.weights, airsim_root)
+            r = await execute_run(client, run, agent_factory, sim_cfg, out, campaign.weights, airsim_root, agent=agent)
             log(f"    -> success={r['metrics']['mission']['success']} overall={r['scores']['overall']:.1f}")
             results.append(r)
     finally:

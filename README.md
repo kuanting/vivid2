@@ -42,7 +42,7 @@ src/vivid2/          Python package
 scenarios/           mission catalog (JSONC)
 campaigns/           sets of scenarios to run together
 sim_config/          Project AirSim scene/robot configs used by the scenarios
-unreal/VIVID2Env/    environment project for UE 5.8 (maps, MCP toolsets) or 5.7 (ForestSAR, Wildfire, Landslide)
+unreal/VIVID2Env/    environment project (maps authored in UE 5.8; UE 5.7 users run packaged builds)
 unreal/engines.json  per-engine profiles (UE 5.7 / 5.8) and the prebuilt plugin download
 patches/             Project AirSim UE 5.8 compatibility patch
 tools/               packaging script
@@ -59,7 +59,7 @@ pytest                                   # unit tests, no simulator needed
 # 2. Simulator. Either run a packaged VIVID2Env build (any user, no Unreal needed),
 #    or set up the editor project for your engine (see docs/unreal_versions.md):
 pip install -e ".[setup]"                                   # gdown, for the Google Drive download
-vivid2 unreal setup --engine 5.8 --download                # prebuilt Project AirSim plugin for UE 5.8
+vivid2 unreal setup --engine 5.8 --download                # prebuilt plugin for UE 5.8 (once published; until then use --plugin-dir)
 vivid2 unreal setup --engine 5.8 --airsim-root ..\ProjectAirSim --apply-patch   # or: upgrade your own checkout
 vivid2 unreal setup --engine 5.7 --airsim-root ..\ProjectAirSim                 # UE 5.7 (upstream as-is)
 #    then open unreal\VIVID2Env\VIVID2Env.uproject and press Play.
@@ -73,7 +73,9 @@ vivid2 report runs\smoke                                                 # -> ru
 ```
 
 Add `--vlm-cache runs\vlm_cache.jsonl` to record VLM answers. A later run with
-`--vlm replay --vlm-cache ...` reproduces the run at no cost, which is useful in CI.
+`--vlm replay --vlm-cache ...` answers from the cache at no cost. Replay only hits
+on byte-identical frames, and live re-renders usually differ, so exact offline
+reproduction arrives with saved-frame evaluation in Phase 1.
 
 ## Reference stacks
 

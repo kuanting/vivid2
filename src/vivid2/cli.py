@@ -39,7 +39,11 @@ def cmd_run(args) -> int:
     if args.seeds is not None:
         campaign.seeds = args.seeds
     opts = {k: v for k, v in vars(args).items() if k.startswith(("vlm", "yolo", "sidelap", "frame_period")) and v is not None}
-    factory = AgentFactory(args.agent, opts)
+    try:
+        factory = AgentFactory(args.agent, opts)
+    except ValueError as e:
+        print(f"error: {e}", file=sys.stderr)
+        return 2
     results = asyncio.run(execute_campaign(campaign, factory, Path(args.out), address=args.address,
                                            resume=not args.no_resume, airsim_root=args.airsim_root))
     ok = sum(r["metrics"]["mission"]["success"] for r in results)
@@ -53,7 +57,7 @@ def cmd_rescore(args) -> int:
 
     n = 0
     for meta in sorted(Path(args.runs).rglob("meta.json")):
-        score_run_dir(meta.parent)
+        score_run_dir(meta.parent)  # uses the campaign weights recorded in meta.json
         n += 1
     print(f"rescored {n} runs")
     return 0
@@ -111,6 +115,8 @@ def cmd_unreal_pack(args) -> int:
 
 
 def main(argv=None) -> int:
+    from vivid2.registry import AGENTS
+
     p = argparse.ArgumentParser(prog="vivid2", description="VIVID 2 - Virtual Validation for AI Drones")
     sub = p.add_subparsers(dest="cmd", required=True)
 
@@ -120,7 +126,7 @@ def main(argv=None) -> int:
 
     s = sub.add_parser("run", help="run a campaign against a live Project AirSim server")
     s.add_argument("--campaign", required=True)
-    s.add_argument("--agent", required=True, choices=["coverage_gt", "coverage_yolo", "vlm", "hybrid"])
+    s.add_argument("--agent", required=True, choices=list(AGENTS))
     s.add_argument("--out", default="runs")
     s.add_argument("--address", default="127.0.0.1")
     s.add_argument("--seeds", type=int, help="override seed count")

@@ -17,22 +17,31 @@ import numpy as np
 from vivid2.stack.base import UsageStats
 from vivid2.vlm.base import VLMError, VLMProvider, encode_jpeg
 
-# USD per 1M tokens (input, output); used only for the cost column of reports.
+# USD per 1M tokens (input, output) at Anthropic first-party rates; used only
+# for the cost column of reports. Haiku 5.5 is the <=100K-token prompt rate.
 PRICES = {
-    "claude-opus-5": (5.0, 25.0),
-    "claude-opus-5-5": (4.0, 20.0),
-    "claude-sonnet-5": (2.0, 10.0),
-    "claude-haiku-4-5": (1.0, 5.0),
     "claude-fable-5-1": (10.0, 50.0),
+    "claude-fable-5": (10.0, 50.0),
+    "claude-opus-5-5": (4.0, 20.0),
+    "claude-opus-5": (5.0, 25.0),
+    "claude-opus-4-8": (5.0, 25.0),
+    "claude-opus-4-7": (5.0, 25.0),
+    "claude-opus-4-6": (5.0, 25.0),
+    "claude-sonnet-5-5": (2.0, 10.0),
+    "claude-sonnet-5": (2.0, 10.0),
+    "claude-sonnet-4-6": (3.0, 15.0),
+    "claude-haiku-5-5": (0.10, 0.50),
+    "claude-haiku-4-5": (1.0, 5.0),
 }
+DEFAULT_MODEL = "claude-opus-5-5"
 
 
 class AnthropicVLM(VLMProvider):
     def __init__(
         self,
-        model: str = "claude-opus-5",
+        model: str = DEFAULT_MODEL,
         effort: str = "low",
-        max_tokens: int = 2048,
+        max_tokens: int = 16000,  # current models always think; a low cap truncates replies
         max_image_side: int = 1024,
         fallbacks: bool = True,
         timeout_s: float = 60.0,
@@ -85,13 +94,19 @@ class AnthropicVLM(VLMProvider):
             raise VLMError(f"connection error: {e}") from e
         latency = time.perf_counter() - t0
 
+        # A refusal fallback can answer from a different model inside the same
+        # call: report and price the model that actually served the reply.
+        served = getattr(resp, "model", None) or self.model
+        fallback = any(getattr(e, "type", None) == "fallback_message"
+                       for e in (getattr(resp.usage, "iterations", None) or []))
         usage = UsageStats(
             latency_s=latency,
             input_tokens=resp.usage.input_tokens,
             output_tokens=resp.usage.output_tokens,
-            model=resp.model,
+            model=served,
+            fallback=fallback,
         )
-        pin, pout = PRICES.get(self.model, (0.0, 0.0))
+        pin, pout = PRICES.get(served, PRICES.get(self.model, (0.0, 0.0)))
         usage.cost_usd = (usage.input_tokens * pin + usage.output_tokens * pout) / 1e6
 
         if resp.stop_reason == "refusal":
@@ -101,4 +116,7 @@ class AnthropicVLM(VLMProvider):
         text = next((b.text for b in resp.content if b.type == "text"), None)
         if text is None:
             raise VLMError("no text block in response")
-        return json.loads(text), usage
+        try:
+            return json.loads(text), usage
+        except json.JSONDecodeError as e:
+            raise VLMError(f"invalid JSON in reply: {text[:200]!r}") from e

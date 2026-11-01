@@ -40,10 +40,13 @@ class Recorder:
         self.run_dir.mkdir(parents=True, exist_ok=True)
         self._files = {s: open(self.run_dir / f"{s}.jsonl", "w", encoding="utf-8") for s in STREAMS}
         self._lock = threading.Lock()  # sim topic callbacks arrive on client threads
+        self._closed = False
 
     def log(self, stream: str, record: Dict[str, Any]) -> None:
         line = json.dumps(record, default=_default)
         with self._lock:
+            if self._closed:  # a late sim callback after the run ended
+                return
             self._files[stream].write(line + "\n")
 
     def write_json(self, name: str, obj: Dict[str, Any]) -> None:
@@ -52,6 +55,7 @@ class Recorder:
 
     def close(self) -> None:
         with self._lock:
+            self._closed = True
             for f in self._files.values():
                 f.close()
 

@@ -14,8 +14,14 @@ def reasoning_metrics(log: RunLog, layer: str = "reasoner") -> Optional[Dict[str
         return None
     frames = {f["frame_id"]: f for f in log["frames"]}
     tp = fp = tn = fn = 0
+    errors = 0
     grounded = grounding_trials = 0
     for rec in recs:
+        # A failed call or unusable reply is an abstention, not a "no target" answer:
+        # counting it as a negative would reward a model that errors often.
+        if rec["output"].get("error"):
+            errors += 1
+            continue
         gts = frames.get(rec["frame_id"], {}).get("gt", [])
         found = bool(rec["output"].get("target_found"))
         visible = len(gts) > 0
@@ -39,10 +45,13 @@ def reasoning_metrics(log: RunLog, layer: str = "reasoner") -> Optional[Dict[str
         f1 = None
     else:
         f1 = 2 * precision * recall / (precision + recall) if precision + recall else 0.0
+    scored = len(recs) - errors
     return {
         "decisions": len(recs),
+        "errors": errors,
+        "error_rate": errors / len(recs),
         "confusion": {"tp": tp, "fp": fp, "tn": tn, "fn": fn},
-        "accuracy": (tp + tn) / len(recs),
+        "accuracy": (tp + tn) / scored if scored else None,
         "precision": precision,
         "recall": recall,
         "f1": f1,
@@ -54,4 +63,5 @@ def reasoning_metrics(log: RunLog, layer: str = "reasoner") -> Optional[Dict[str
         "output_tokens": int(sum(r.get("output_tokens", 0) for r in recs)),
         "cost_usd": float(sum(r.get("cost_usd", 0.0) for r in recs)),
         "models": sorted({r.get("model", "") for r in recs}),
+        "fallback_decisions": int(sum(bool(r.get("fallback")) for r in recs)),
     }

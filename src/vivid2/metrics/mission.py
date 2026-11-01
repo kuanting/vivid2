@@ -50,7 +50,7 @@ def mission_metrics(log: RunLog) -> Dict[str, Any]:
     found = m["matched"]
     ttf = {tid: (v["t"] - t0) / 1e9 for tid, v in found.items()}
     n_found = len(found)
-    success = n_found == len(targets) if require_all else n_found > 0
+    success = (n_found == len(targets) if require_all else n_found > 0) and meta.get("end_reason") != "error"
     return {
         "success": bool(success),
         "targets_total": len(targets),

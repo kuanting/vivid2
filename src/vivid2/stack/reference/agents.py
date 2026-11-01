@@ -10,6 +10,7 @@ from vivid2.geo import pixel_ray_to_ground, pixel_to_world
 from vivid2.stack.base import Agent, Frame, MissionContext, Perception, Planner, Reasoner, TargetReport
 
 DEPTH_SATURATION_M = 65.0  # 16-bit millimetre depth saturates at 65.535 m
+NO_FRAME_RETRY_S = 0.1
 
 
 def geolocate(frame: Frame, u: float, v: float, ground_down_m: float) -> Optional[np.ndarray]:
@@ -23,6 +24,14 @@ def geolocate(frame: Frame, u: float, v: float, ground_down_m: float) -> Optiona
                                   frame.width, frame.height, frame.fov_deg)
     return pixel_ray_to_ground(u, v, frame.cam_pos, frame.cam_q, frame.width, frame.height,
                                frame.fov_deg, ground_down_m)
+
+
+def _scalar_params(obj: Any) -> Optional[Dict[str, Any]]:
+    """Public scalar attributes of a layer object (its tunable settings)."""
+    if obj is None:
+        return None
+    return {k: v for k, v in sorted(getattr(obj, "__dict__", {}).items())
+            if not k.startswith("_") and isinstance(v, (bool, int, float, str))}
 
 
 class SearchAgent(Agent):
@@ -50,13 +59,23 @@ class SearchAgent(Agent):
         self.dedup_radius_m = dedup_radius_m
 
     def describe(self) -> Dict[str, Any]:
+        provider = getattr(self.reasoner, "provider", None)
         return {
             "agent": self.name,
             "perception": self.perception.name if self.perception else None,
             "reasoner": self.reasoner.name,
-            "reasoner_model": getattr(getattr(self.reasoner, "provider", None), "model", None),
+            "reasoner_model": getattr(provider, "model", None),
             "planner": self.planner.name,
             "min_confidence": self.min_confidence,
+            "frame_period_s": self.frame_period_s,
+            "dedup_radius_m": self.dedup_radius_m,
+            # Layer settings (sidelap, thresholds, VLM effort...) so a config change forces a re-run.
+            "params": {
+                "planner": _scalar_params(self.planner),
+                "reasoner": _scalar_params(self.reasoner),
+                "provider": _scalar_params(provider),
+                "perception": _scalar_params(self.perception),
+            },
         }
 
     async def run(self, ctx: MissionContext) -> None:
@@ -74,6 +93,7 @@ class SearchAgent(Agent):
             t_loop = asyncio.get_running_loop().time()
             frame = await ctx.get_frame()
             if frame is None:
+                await asyncio.sleep(NO_FRAME_RETRY_S)  # don't hammer the sim while no image is available
                 continue
 
             dets = []
@@ -95,6 +115,7 @@ class SearchAgent(Agent):
                 },
                 "latency_s": usage.latency_s, "input_tokens": usage.input_tokens,
                 "output_tokens": usage.output_tokens, "cost_usd": usage.cost_usd, "model": usage.model,
+                **({"fallback": True} if usage.fallback else {}),
             })
 
             if assessment.target_found and assessment.pixel and assessment.confidence >= self.min_confidence:

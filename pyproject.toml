@@ -21,7 +21,8 @@ dependencies = [
 # The Project AirSim client is installed editable from the sibling fork:
 #   pip install -e ../ProjectAirSim/client/python/projectairsim
 sim = ["projectairsim"]
-claude = ["anthropic>=0.60", "pydantic>=2"]
+# output_config (effort + json_schema) and server-side refusal fallbacks; tested on 2.3
+claude = ["anthropic>=2.3"]
 local-vlm = ["openai>=1.40"]
 # Google Drive downloads of the prebuilt UE plugin zip
 setup = ["gdown>=5"]

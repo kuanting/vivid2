@@ -19,13 +19,20 @@ from vivid2.vlm.base import VLMError, VLMProvider, encode_jpeg
 
 
 def _extract_json(text: str) -> Dict[str, Any]:
+    """Parse the reply as JSON, falling back to the outermost {...} span."""
     try:
-        return json.loads(text)
+        out = json.loads(text)
     except json.JSONDecodeError:
         m = re.search(r"\{.*\}", text, re.S)
         if not m:
             raise VLMError(f"no JSON object in reply: {text[:200]!r}")
-        return json.loads(m.group(0))
+        try:
+            out = json.loads(m.group(0))
+        except json.JSONDecodeError as e:
+            raise VLMError(f"invalid JSON in reply: {text[:200]!r}") from e
+    if not isinstance(out, dict):
+        raise VLMError(f"reply is not a JSON object: {text[:200]!r}")
+    return out
 
 
 class OpenAICompatVLM(VLMProvider):
@@ -70,6 +77,8 @@ class OpenAICompatVLM(VLMProvider):
         except Exception as e:  # server-specific error types vary widely
             raise VLMError(f"{type(e).__name__}: {e}") from e
         latency = time.perf_counter() - t0
+        if not getattr(resp, "choices", None):
+            raise VLMError("empty reply (no choices)")
         u = resp.usage
         usage = UsageStats(
             latency_s=latency,
