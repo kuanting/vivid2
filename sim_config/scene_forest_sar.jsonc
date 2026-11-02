@@ -9,7 +9,9 @@
     {
       "type": "robot",
       "name": "Drone1",
-      "origin": {"xyz": "0.0 0.0 -1.0", "rpy-deg": "0 0 0"},
+      // Map centre, 1 m above the ground (ground at the origin is Unreal Z 257.665 m, inside the
+      // 30 x 30 m launch clearing). Runs override this with dut_start snapped to the terrain model.
+      "origin": {"xyz": "0.0 0.0 -258.665", "rpy-deg": "0 0 0"},
       "robot-config": "robot_vivid_quad.jsonc"
     }
   ],

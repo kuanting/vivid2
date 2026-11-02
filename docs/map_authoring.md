@@ -22,7 +22,9 @@ Landslide.
   and the terrain model from the same numbers and follows the two rules above.
 - **Start the drone above clear ground.** `dut_start.ned` must not be inside or
   touching any mesh, or the physics pins the drone to the contact point. On
-  real terrain, take its height from the terrain model.
+  real terrain, take its height from the terrain model. Keep vegetation off
+  the start: ForestSAR's PCG graph subtracts a 30 × 30 m launch clearing
+  (`LaunchClearing`) around the origin from every layer.
 
 ## Everything must exist when the scene loads
 
