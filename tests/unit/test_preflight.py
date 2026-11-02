@@ -43,7 +43,15 @@ def test_wrong_map_is_reported_with_what_is_open(blocks_spec):
 
 
 def test_vivid2_maps_are_recognised_by_their_marker():
-    assert map_check_patterns({"map": "ForestSAR"}) == ["BP_VIVID2Map_ForestSAR.*"]
+    [pat] = map_check_patterns({"map": "ForestSAR"})
+    for name in ["BP_VIVID2Map_ForestSAR", "BP_VIVID2Map_ForestSAR_C_0", "BP_VIVID2Map_ForestSAR_C_12",
+                 "BP_VIVID2Map_ForestSAR_C_UAID_A4BB6D3F01A2B3C4_1234567890"]:
+        assert re.fullmatch(pat, name), name
+    # a canopy variant's marker must not pass for the base map
+    for name in ["BP_VIVID2Map_ForestSAR_Dense_C_0", "BP_VIVID2Map_ForestSAR_Open", "BP_VIVID2Map_ForestSARX_C_0"]:
+        assert not re.fullmatch(pat, name), name
+    [dense] = map_check_patterns({"map": "ForestSAR_Dense"})
+    assert re.fullmatch(dense, "BP_VIVID2Map_ForestSAR_Dense_C_0")
     assert map_check_patterns({}) == []
     spec = {"scene": {"map": "ForestSAR"}}
     run_preflight(FakeSimWorld(["BP_VIVID2Map_ForestSAR_C_1", "Hiker1"]), spec, [{"id": "Hiker1", "asset": "x"}])

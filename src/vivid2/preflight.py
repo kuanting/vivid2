@@ -16,6 +16,10 @@ class PreflightError(RuntimeError):
 
 
 MARKER_PREFIX = "BP_VIVID2Map_"
+# Project AirSim matches actor names (not editor labels). A placed blueprint is
+# named <Class>_C_<n>, or <Class>_C_UAID_<hex>_<n>; nothing else may follow the
+# map name, so ForestSAR's marker never matches ForestSAR_Dense's.
+MARKER_SUFFIX = r"(_C)?(_UAID_[0-9A-Fa-f]+)?(_\d+)?"
 MIN_TARGET_SIZE_M = 0.05
 MAX_TARGET_SIZE_M = 50.0
 
@@ -33,7 +37,7 @@ def map_check_patterns(scene: Dict[str, Any]) -> List[str]:
     if "map_check" in scene:
         return list(scene["map_check"]["actors"])
     if scene.get("map"):
-        return [MARKER_PREFIX + re.escape(scene["map"]) + ".*"]
+        return [MARKER_PREFIX + re.escape(scene["map"]) + MARKER_SUFFIX]
     return []
 
 

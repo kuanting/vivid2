@@ -8,14 +8,18 @@ Landslide.
 ## Coordinates and height
 
 - **NED is measured from the Unreal world origin**, not from the PlayerStart.
-  Put the PlayerStart at (0, 0, 0) anyway, so the editor camera starts where the
-  drone does.
+  Put the PlayerStart at X = Y = 0 anyway, on the ground (on terrain, the
+  ground height at the origin plus its 92 cm capsule half-height), so the editor
+  camera starts where the drone does.
 - **Keep the whole play area between UE Z = 0 and Z = +1000 m.** Ground-height
   queries (`GetZAtPoint`) trace down from Z = +1000 m to Z = 0 and return 1000
   when they hit nothing. Offset the landscape vertically if the real terrain
   is higher or lower.
 - **Set `home-geo-point.altitude`** in the scene config to the real-world
   elevation of UE Z = 0, so GPS altitudes stay right.
+- **Build terrain with `vivid2 terrain build`** (see
+  [environments.md](environments.md#forestsar-phase-1)). It writes the heightmap
+  and the terrain model from the same numbers and follows the two rules above.
 - **Start the drone above clear ground.** `dut_start.ned` must not be inside or
   touching any mesh, or the physics pins the drone to the contact point. On
   real terrain, take its height from the terrain model.

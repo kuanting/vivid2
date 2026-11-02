@@ -22,7 +22,7 @@ packaged builds. See [unreal_versions.md](unreal_versions.md).
 4. Place a marker actor named `BP_VIVID2Map_<map>` (for example
    `BP_VIVID2Map_ForestSAR`, any empty blueprint). The runner's preflight check
    uses it to confirm the right map is open.
-5. Put a PlayerStart at the world origin (0, 0, 0). Project AirSim measures NED
+5. Put a PlayerStart at X = Y = 0, on the ground. Project AirSim measures NED
    coordinates from the Unreal world origin, not from the PlayerStart.
 
 ## Third-party content and distribution
@@ -63,12 +63,33 @@ is only good for pipeline bring-up. It is meaningless for evaluating a VLM.
 
 ## ForestSAR (Phase 1)
 
-- **Terrain:** import a real DEM (e.g. Taiwan's 20 m DTM or Copernicus GLO-30) as
-  a Landscape heightmap, or use Cesium for Unreal with Google Photorealistic 3D
-  Tiles for context. Keep the playable area about 1 × 1 km at around 1 m
-  resolution.
-- **Vegetation:** a Fab conifer/broadleaf forest pack scattered with a **PCG
-  graph**, driven by slope and height and excluded from a trail spline. Expose
+- **Site:** a forest-zone bench near Lishan, Taichung, Taiwan, centred on
+  24.2436 N, 121.2467 E (2242 m mean elevation). The central 400 m search area
+  varies 27 m in height; a steep valley to the east gives 278 m of relief across
+  the 1 × 1 km map. The Hehuan Main Peak point first planned (24.1426 N,
+  121.2712 E) was rejected: it is alpine grassland with 397 m relief and 41°
+  slopes inside 1 km.
+- **Terrain:** built from the Copernicus GLO-30 DEM (30 m; a surface model, so
+  it includes some canopy height) by
+
+  ```
+  vivid2 terrain build --map ForestSAR --lat 24.2436 --lon 121.2467
+  ```
+
+  This writes `unreal/VIVID2Env/SourceData/ForestSAR/heightmap.png`
+  (1009 × 1009 at 1 m), the terrain model `sim_config/maps/ForestSAR/terrain_dtm.npz`
+  and `terrain.json`, which holds the Landscape import settings, the home geo point
+  and the DEM attribution. Import it in Landscape mode → Manage → New → Import from
+  File with the printed settings (location `[0, 0, 14892]` cm, scale
+  `[100, 100, 55]`, 63 × 63 quad sections, 2 × 2 sections per component,
+  8 × 8 components). UE 5.8 has no scripting call for creating a landscape, so
+  this one step is manual. Then check it: tracing the landscape at random points
+  must give the terrain model's heights. On 2026-11-02, 400 points matched to
+  within 2.6 mm.
+- **Backdrop (to do):** the landscape ends at the 1 km edge. Low camera angles
+  need a coarser surrounding terrain from the same DEM.
+- **Vegetation:** the Forest Fire pack's birches, shrubs, ferns and grass
+  scattered with a **PCG graph**, driven by slope and height and excluded from a trail spline. Expose
   density, species mix and seed as PCG parameters, so scenario variants can
   change canopy density.
 - **Clutter and distractors:** logs, rocks, stumps and red/yellow objects such
@@ -76,9 +97,9 @@ is only good for pipeline bring-up. It is meaningless for evaluating a VLM.
   measurable.
 - **Lighting:** SunPosition plugin (the scenario's `time_of_day`) and volumetric
   fog (the scenario's `weather.fog`).
-- **Terrain height:** scenarios currently assume flat ground at
-  `search_area.ground_down_m`. For real relief, Phase 1 adds a heightmap
-  export so metrics and planners can use true AGL.
+- **Terrain height:** the runner snaps targets and the drone start onto
+  `terrain_dtm.npz`, and the safety metrics measure height above it. The
+  reference planner still flies at a fixed altitude; terrain following is M3.4.
 
 ## Wildfire (Phase 2)
 
