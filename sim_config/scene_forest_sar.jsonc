@@ -1,4 +1,6 @@
-// VIVID 2 base scene for the ForestSAR map in unreal/VIVID2Env (home point: Hehuan Mountain area, Taiwan).
+// VIVID 2 base scene for the ForestSAR map in unreal/VIVID2Env. Home point: a forest-zone bench near
+// Lishan, Taichung, Taiwan (2242 m mean); altitude = real elevation of Unreal Z = 0, from
+// sim_config/maps/ForestSAR/terrain.json (vivid2 terrain build --map ForestSAR --lat 24.2436 --lon 121.2467).
 // The scene builder overrides the robot actor's origin and robot-config and
 // adds the scenario's targets under "spawn-objects".
 {
@@ -17,7 +19,7 @@
     "real-time-update-rate": 3000000,
     "pause-on-start": false
   },
-  "home-geo-point": {"latitude": 24.1426, "longitude": 121.2712, "altitude": 2000.0},
+  "home-geo-point": {"latitude": 24.2436, "longitude": 121.2467, "altitude": 1985.0},
   "segmentation": {"initialize-ids": true, "ignore-existing": false, "use-owner-name": true},
   "scene-type": "UnrealNative"
 }

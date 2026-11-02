@@ -1,0 +1,51 @@
+{
+  "map": "ForestSAR",
+  "heightmap": "../../../unreal/VIVID2Env/SourceData/ForestSAR/heightmap.png",
+  "heightmap_sha256": "f7512b63a3561691ceebe3ad168a62cf1013d2b1f0ce3f71fec46515343d8dac",
+  "terrain_dtm_sha256": "e6a96d156b0c4b39dc715e334990142ff45d8f2e3e042cc4f228d8bfd73adc9b",
+  "landscape": {
+    "resolution": [
+      1009,
+      1009
+    ],
+    "section_size_quads": 63,
+    "sections_per_component": 2,
+    "components": [
+      8,
+      8
+    ],
+    "scale": [
+      100.0,
+      100.0,
+      55
+    ],
+    "landscape_centre_cm": [
+      0.0,
+      0.0,
+      14892
+    ],
+    "landscape_corner_cm": [
+      -50400.0,
+      -50400.0,
+      14892
+    ],
+    "home_geo_point": {
+      "latitude": 24.2436,
+      "longitude": 121.2467,
+      "altitude": 1985.0
+    },
+    "ground_ue_z_m": {
+      "min": 10.041,
+      "max": 287.804,
+      "origin": 257.665
+    },
+    "height_step_cm": 0.4296875
+  },
+  "dem": {
+    "name": "Copernicus GLO-30 DSM",
+    "file": "Copernicus_DSM_COG_10_N24_00_E121_00_DEM.tif",
+    "url": "https://copernicus-dem-30m.s3.amazonaws.com/Copernicus_DSM_COG_10_N24_00_E121_00_DEM/Copernicus_DSM_COG_10_N24_00_E121_00_DEM.tif",
+    "attribution": "Produced using Copernicus WorldDEM-30 (c) DLR e.V. 2010-2014 and (c) Airbus Defence and Space GmbH 2014-2018 provided under COPERNICUS by the European Union and ESA; all rights reserved.",
+    "sha256": "cdd4e1dc60a0da87a556e07e20f7c20b5dad21eca69e80aadff498743ea3f82f"
+  }
+}

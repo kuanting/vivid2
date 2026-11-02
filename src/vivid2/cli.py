@@ -10,11 +10,13 @@
     vivid2 report runs/smoke
     vivid2 unreal setup --engine 5.8 --download
     vivid2 unreal setup --engine 5.7 --airsim-root ../ProjectAirSim
+    vivid2 terrain build --map ForestSAR --lat 24.2436 --lon 121.2467
 """
 from __future__ import annotations
 
 import argparse
 import asyncio
+import hashlib
 import json
 import sys
 from pathlib import Path
@@ -159,6 +161,40 @@ def cmd_unreal_pack(args) -> int:
     return 0
 
 
+def cmd_terrain_build(args) -> int:
+    from vivid2 import dem as dm
+
+    repo = Path(__file__).resolve().parents[2]
+    if args.dem == "copernicus":
+        path = dm.fetch_copernicus(args.lat, args.lon, Path(args.cache_dir).expanduser())
+        info = {"name": "Copernicus GLO-30 DSM", "file": path.name, "url": dm.COPERNICUS_URL.format(name=path.stem),
+                "attribution": dm.COPERNICUS_ATTRIBUTION}
+    else:
+        path = Path(args.dem)
+        info = {"name": args.dem_name or path.name, "file": path.name, "attribution": args.attribution or ""}
+    info["sha256"] = hashlib.sha256(path.read_bytes()).hexdigest()
+    try:
+        build = dm.build_terrain(dm.read_geotiff(path, info["name"]), args.lat, args.lon,
+                                 vertices=args.vertices, cell_m=args.cell_m, margin_m=args.margin_m)
+    except ValueError as e:
+        print(f"error: {e}", file=sys.stderr)
+        return 1
+    out = dm.write_outputs(build, args.map, Path(args.sim_config_dir or repo / "sim_config"),
+                           Path(args.unreal_dir or repo / "unreal" / "VIVID2Env" / "SourceData"), info)
+    s = build.settings
+    print(f"terrain for {args.map}: {out['terrain']}")
+    print(f"heightmap: {out['heightmap']}")
+    print(f"ground: Unreal Z {s['ground_ue_z_m']['min']:.1f}..{s['ground_ue_z_m']['max']:.1f} m "
+          f"(origin {s['ground_ue_z_m']['origin']:.1f} m); step {s['height_step_cm']:.2f} cm")
+    print("Landscape mode -> Manage -> Import from File:")
+    print(f"  resolution {s['resolution'][0]}x{s['resolution'][1]}, section size {s['section_size_quads']}x"
+          f"{s['section_size_quads']} quads, {s['sections_per_component']}x{s['sections_per_component']} sections/"
+          f"component, {s['components'][0]}x{s['components'][1]} components")
+    print(f"  location (centre) {s['landscape_centre_cm']} cm, scale {s['scale']}")
+    print(f"scene home-geo-point: {json.dumps(s['home_geo_point'])}")
+    return 0
+
+
 def main(argv=None) -> int:
     from vivid2.registry import AGENTS
 
@@ -223,6 +259,24 @@ def main(argv=None) -> int:
     u.add_argument("--out", default="dist")
     u.add_argument("--strip-pdb", action="store_true", help="omit debug symbols (*.pdb) to shrink the zip")
     u.set_defaults(fn=cmd_unreal_pack)
+
+    s = sub.add_parser("terrain", help="build a map's terrain from a real elevation model")
+    tsub = s.add_subparsers(dest="terrain_cmd", required=True)
+    t = tsub.add_parser("build", help="DEM -> Unreal Landscape heightmap + VIVID 2 terrain model")
+    t.add_argument("--map", required=True, help="map name, e.g. ForestSAR")
+    t.add_argument("--lat", type=float, required=True, help="home point latitude (map centre, Unreal origin)")
+    t.add_argument("--lon", type=float, required=True, help="home point longitude")
+    t.add_argument("--dem", default="copernicus",
+                   help="GeoTIFF in EPSG:4326, or 'copernicus' to download the GLO-30 tile (default)")
+    t.add_argument("--dem-name", help="name recorded for a local DEM")
+    t.add_argument("--attribution", help="attribution text recorded for a local DEM")
+    t.add_argument("--vertices", type=int, default=1009, help="landscape vertices per side (k*126+1)")
+    t.add_argument("--cell-m", type=float, default=1.0, help="landscape grid spacing, m")
+    t.add_argument("--margin-m", type=float, default=10.0, help="height of the lowest ground above Unreal Z = 0")
+    t.add_argument("--cache-dir", default="~/.cache/vivid2/dem")
+    t.add_argument("--sim-config-dir", help="default: sim_config")
+    t.add_argument("--unreal-dir", help="default: unreal/VIVID2Env/SourceData")
+    t.set_defaults(fn=cmd_terrain_build)
 
     args = p.parse_args(argv)
     if getattr(args, "vlm", None) is None and (getattr(args, "agent", None) in ("vlm", "hybrid") or args.cmd == "eval-frames"):
