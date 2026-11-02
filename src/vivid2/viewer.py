@@ -104,7 +104,9 @@ class RunViewer:
     # -- drawing -----------------------------------------------------------------
     def _draw_payload(self, p: Dict[str, Any]) -> np.ndarray:
         cv2 = self.cv2
-        img = np.ascontiguousarray(p["image"]).copy()
+        clean = np.ascontiguousarray(p["image"])
+        img = clean.copy()
+        insets = [self._inset(clean, g) for g in p["gt"]]
         for g in p["gt"]:
             vis = getattr(g, "visible_px", None)
             box = getattr(g, "bbox_vis", None) or g.bbox
@@ -117,6 +119,17 @@ class RunViewer:
         for d in p["dets"]:
             x0, y0, x1, y1 = (int(round(v)) for v in d["bbox"])
             cv2.rectangle(img, (x0, y0), (x1, y1), MAGENTA, 1)
+        # magnified crops of the targets in view (bottom-left, above the status bar)
+        x = 8
+        for inset in insets:
+            if inset is None:
+                continue
+            ih, iw = inset.shape[:2]
+            y = img.shape[0] - 52 - ih
+            if x + iw > img.shape[1]:
+                break
+            img[y:y + ih, x:x + iw] = inset
+            x += iw + 8
         dec = p.get("decision")
         line2 = ""
         if dec is not None:
@@ -142,6 +155,26 @@ class RunViewer:
                     cv2.FONT_HERSHEY_SIMPLEX, 0.5, WHITE, 1, cv2.LINE_AA)
         cv2.putText(img, line2, (8, h - 8), cv2.FONT_HERSHEY_SIMPLEX, 0.5, WHITE, 1, cv2.LINE_AA)
         return img
+
+    def _inset(self, img: np.ndarray, g, half=(32, 24), zoom: int = 6) -> Optional[np.ndarray]:
+        """A ``zoom``x crop of the raw image around a target that is (at least partly) in frame."""
+        cv2 = self.cv2
+        if not getattr(g, "visible_px", None) and getattr(g, "visible_px", None) is not None:
+            return None  # hidden (behind cover) - nothing to look at
+        box = getattr(g, "bbox_vis", None) or g.bbox
+        cx, cy = (box[0] + box[2]) / 2.0, (box[1] + box[3]) / 2.0
+        h, w = img.shape[:2]
+        x0 = int(np.clip(round(cx) - half[0], 0, max(0, w - 2 * half[0])))
+        y0 = int(np.clip(round(cy) - half[1], 0, max(0, h - 2 * half[1])))
+        crop = img[y0:y0 + 2 * half[1], x0:x0 + 2 * half[0]]
+        if crop.size == 0:
+            return None
+        big = cv2.resize(crop, (crop.shape[1] * zoom, crop.shape[0] * zoom), interpolation=cv2.INTER_NEAREST)
+        vis = g.visible_px
+        colour = GREY if not vis else (GREEN if vis >= MIN_VISIBLE_PX else YELLOW)
+        cv2.rectangle(big, (0, 0), (big.shape[1] - 1, big.shape[0] - 1), colour, 2)
+        cv2.putText(big, f"{g.object_id} x{zoom}", (6, 18), cv2.FONT_HERSHEY_SIMPLEX, 0.5, WHITE, 1, cv2.LINE_AA)
+        return big
 
     def _panel(self, img: Optional[np.ndarray], size, missing: str) -> np.ndarray:
         cv2 = self.cv2
