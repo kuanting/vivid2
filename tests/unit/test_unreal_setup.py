@@ -36,7 +36,7 @@ def _env_dir(tmp_path, root):
 def test_engines_manifest_profiles():
     engines = us.load_engines()
     assert {"5.7", "5.8"} <= set(engines["engines"])
-    assert engines["engines"]["5.7"]["extra_plugins"] == []
+    assert engines["engines"]["5.7"]["extra_plugins"] == ["Fab"]
     assert "ModelContextProtocol" in engines["engines"]["5.8"]["extra_plugins"]
     assert (us.REPO / engines["engines"]["5.8"]["patch"]).exists()
     with pytest.raises(us.SetupError):
@@ -51,6 +51,8 @@ def test_uproject_rendered_per_engine(tmp_path, root, engine):
     assert up["EngineAssociation"] == engine
     assert "ProjectAirSim" in names
     assert ("ModelContextProtocol" in names) == (engine == "5.8")
+    # UE 5.8 renamed the Fab plugin to FabLauncher (on by default); listing "Fab" breaks the build
+    assert ("Fab" in names) == (engine == "5.7")
     assert len(names) == len(set(names))
 
 

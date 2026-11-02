@@ -3,7 +3,7 @@
   "default": "5.8",
   "engines": {
     "5.7": {
-      "extra_plugins": [],
+      "extra_plugins": ["Fab"],
       "editor_maps": false,
       "plugin_sources": ["airsim-root", "plugin-dir", "plugin-zip"],
       "notes": "Upstream Project AirSim builds for 5.7 as-is. VIVID 2 maps are authored in 5.8; 5.7 users run packaged environment builds.",
@@ -21,7 +21,7 @@
       "editor_maps": true,
       "plugin_sources": ["download", "plugin-zip", "airsim-root", "plugin-dir"],
       "patch": "patches/projectairsim-ue5.8.patch",
-      "notes": "Project AirSim needs the UE 5.8 compatibility patch (or the prebuilt plugin zip).",
+      "notes": "Project AirSim needs the UE 5.8 compatibility patch (or the prebuilt plugin zip). Fab is the engine plugin FabLauncher here, enabled by default, so it is not listed.",
       "plugin_zip": {
         "url": "",
         "provider": "gdrive",
