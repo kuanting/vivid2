@@ -86,8 +86,21 @@ is only good for pipeline bring-up. It is meaningless for evaluating a VLM.
   this one step is manual. Then check it: tracing the landscape at random points
   must give the terrain model's heights. On 2026-11-02, 400 points matched to
   within 2.6 mm.
-- **Backdrop (to do):** the landscape ends at the 1 km edge. Low camera angles
-  need a coarser surrounding terrain from the same DEM.
+- **Lighting:** the SunPosition plugin's `SunSky` actor. It contains the sun,
+  sky light, atmosphere and clouds; the template's separate ones were removed.
+  Project AirSim finds it by name for `set_sun_position_from_date_time`. Its
+  settings:
+  - latitude 24.2436, longitude 121.2467, time zone +8, no daylight saving;
+  - sun intensity 6, the template's value, because the project uses fixed
+    exposure;
+  - north offset 0, which makes Unreal +X north, matching NED.
+
+  Noon on 28 Sep puts the sun at 63.5° elevation, azimuth 188°.
+- **Backdrop (optional):** the landscape ends at the 1 km edge. The payload
+  camera looks straight down (80° FOV, about 85 m wide at 50 m), so the edge
+  never shows in evaluated frames. Only the chase camera and screenshots see
+  the empty space past it. A coarser surrounding landscape from the same DEM
+  would fix that.
 - **Ground material:** `/Game/VIVID2/Materials/M_VIVID2_Landscape`. It tiles in
   world space and needs no painted layers:
   - leaf-litter dirt, varied with pebbly dirt and a larger copy of itself to
