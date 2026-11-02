@@ -88,8 +88,33 @@ is only good for pipeline bring-up. It is meaningless for evaluating a VLM.
   within 2.6 mm.
 - **Backdrop (to do):** the landscape ends at the 1 km edge. Low camera angles
   need a coarser surrounding terrain from the same DEM.
-- **Vegetation:** the Forest Fire pack's birches, shrubs, ferns and grass
-  scattered with a **PCG graph**, driven by slope and height and excluded from a trail spline. Expose
+- **Ground material:** `/Game/VIVID2/Materials/M_VIVID2_Landscape`. It tiles in
+  world space and needs no painted layers:
+  - leaf-litter dirt, varied with pebbly dirt and a larger copy of itself to
+    hide tiling;
+  - green moss/herb patches from noise;
+  - rock on slopes steeper than about 31°.
+
+  Its parameters (group "VIVID2 Ground") set the tiling, the slope threshold,
+  the patch amount and the tint.
+- **Vegetation (built):** `/Game/VIVID2/PCG/PCG_VIVID2_Forest`, run by the
+  `PCG_Forest` volume over the whole landscape. It has four layers:
+  - **Trees:** birches, 19–28 m meshes scaled 0.7–1.1.
+  - **Understory:** ferns, ground cover and young birches.
+  - **Grass:** in the clearings.
+  - **Clutter:** rocks, stumps and 11 m fallen logs.
+
+  One canopy noise (about 65 m features) splits the map into forest patches and
+  clearings. Graph parameters set the densities and the clearing fraction:
+  `TreeDensity` 0.012, `ClearingFraction` 0.45, `UnderstoryDensity` 0.04,
+  `GrassDensity` 0.4, `ClutterDensity` 0.002. With these the base map has about
+  8,600 trees, 36,000 understory plants, 2,000 clutter objects and about
+  120,000 grass clumps. Understory and grass have no collision. The volume is
+  set to **Generate On Demand**, so it never regenerates at runtime: generate it
+  in the editor and save the level, which then stores every instance. The
+  Dense/Open variants are copies of the level with different graph parameters.
+  The earlier plan, kept here for reference, was the Forest Fire pack's
+  birches, shrubs, ferns and grass scattered with a **PCG graph**, driven by slope and height and excluded from a trail spline. Expose
   density, species mix and seed as PCG parameters, so scenario variants can
   change canopy density.
 - **Clutter and distractors:** logs, rocks, stumps and red/yellow objects such
