@@ -113,10 +113,8 @@ is only good for pipeline bring-up. It is meaningless for evaluating a VLM.
   set to **Generate On Demand**, so it never regenerates at runtime: generate it
   in the editor and save the level, which then stores every instance. The
   Dense/Open variants are copies of the level with different graph parameters.
-  The earlier plan, kept here for reference, was the Forest Fire pack's
-  birches, shrubs, ferns and grass scattered with a **PCG graph**, driven by slope and height and excluded from a trail spline. Expose
-  density, species mix and seed as PCG parameters, so scenario variants can
-  change canopy density.
+  Not done yet: thinning trees on steep slopes, and keeping a trail
+  spline clear.
 - **Clutter and distractors:** logs, rocks, stumps and red/yellow objects such
   as backpacks, tents and fallen signs. These are what make false alarms
   measurable.
