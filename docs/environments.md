@@ -152,13 +152,44 @@ is only good for pipeline bring-up. It is meaningless for evaluating a VLM.
   8,600 trees, 36,000 understory plants, 2,000 clutter objects and about
   120,000 grass clumps. Understory and grass have no collision. The volume is
   set to **Generate On Demand**, so it never regenerates at runtime: generate it
-  in the editor and save the level, which then stores every instance. The
-  Dense/Open variants are copies of the level with different graph parameters.
+  in the editor and save the level, which then stores every instance.
   Not done yet: thinning trees on steep slopes, and keeping a trail
   spline clear.
-- **Clutter and distractors:** logs, rocks, stumps and red/yellow objects such
-  as backpacks, tents and fallen signs. These are what make false alarms
-  measurable.
+- **Canopy variants (built):** `ForestSAR_Open` and `ForestSAR_Dense` are copies
+  of the level, each with its own marker (`BP_VIVID2Map_ForestSAR_Open` /
+  `_Dense`) and these forest volume parameters:
+
+  | Map | TreeDensity | ClearingFraction | UnderstoryDensity | GrassDensity | ClutterDensity |
+  |---|---|---|---|---|---|
+  | `ForestSAR_Open` | 0.005 | 0.6 | 0.03 | 0.5 | 0.002 |
+  | `ForestSAR` | 0.012 | 0.45 | 0.04 | 0.4 | 0.002 |
+  | `ForestSAR_Dense` | 0.025 | 0.2 | 0.06 | 0.4 | 0.003 |
+
+  They share ForestSAR's terrain: their `sim_config/maps/<map>/terrain.json`
+  says `"terrain_of": "ForestSAR"`. A scenario picks one with `scene.map`, and a
+  campaign can sweep it for all its scenarios: `campaigns/forest_canopy.jsonc`
+  runs `forest_hiker_01` on all three. Preflight only runs the runs for the
+  map that is open; open the next map and run the campaign again, since
+  finished runs are skipped.
+- **Clutter:** the PCG rocks, stumps and fallen logs are natural look-alikes
+  but not scored objects.
+- **Decoys (built):** `VIVID2_Decoy_*` blueprints in `/Game/VIVID2/Targets`, made
+  from engine basic shapes in the hikers' clothing colours:
+
+  | Decoy | Size | Looks like |
+  |---|---|---|
+  | `Backpack_Red` | 0.5 m | a red jacket, small |
+  | `Tarp_Red` | 2.0 x 1.4 m, flat | the red jacket |
+  | `Tent_Orange`, `Tent_Green` | 2.2 m domes | a bright / low-contrast blob |
+  | `SleepingBag_Blue` | 2.1 m, person-sized | a lying person in a blue hoodie |
+  | `Jacket_Yellow` | 0.9 m, arms spread | the yellow jacket |
+  | `Barrel_Blue` | 0.6 m drum | blue clothing |
+
+  Scenarios place them under `distractors`. They get segmentation IDs from 101,
+  each frame records how much of each is visible (`distractors_visible`), and a
+  report near one is a false alarm (`fp_on_distractor` in the reasoning
+  metrics). In a 2026-11-03 survey of `forest_hiker_01`, all four of its decoys
+  were seen from survey height, with up to 100–1,800 visible pixels.
 - **Fog:** the scenario's `weather.fog` goes to Project AirSim's weather
   effects. The level's ExponentialHeightFog is only the base haze.
 - **Terrain height:** the runner snaps targets and the drone start onto
