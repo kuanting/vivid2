@@ -53,6 +53,10 @@ def cmd_run(args) -> int:
                                            frame_bank=args.frame_bank))
     ok = sum(r["metrics"]["mission"]["success"] for r in results)
     print(f"{factory.name}: {ok}/{len(results)} runs successful")
+    if not results:
+        # every run was skipped (e.g. preflight stopped the map); the reasons were printed above
+        print("no runs finished; no scorecard written", file=sys.stderr)
+        return 1
     print(f"scorecard: {write_report(Path(args.out) / campaign.name)}")
     return 0
 
