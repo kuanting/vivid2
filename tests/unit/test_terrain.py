@@ -87,3 +87,14 @@ def test_dut_ground_is_the_terrain_under_the_start(blocks_run):
     # flat maps keep the authored ground
     assert mission_spec(blocks_run, start).ground_down_m == blocks_run.spec["search_area"].get("ground_down_m", 0.0)
     assert mission_spec(blocks_run, start, TerrainModel.flat(0.0)).ground_down_m == 0.0
+
+
+def test_variant_maps_share_the_base_terrain(tmp_path):
+    base = tmp_path / "maps" / "Hill"
+    base.mkdir(parents=True)
+    slope().save(base / "terrain_dtm.npz")
+    (tmp_path / "maps" / "Hill_Dense").mkdir()
+    (tmp_path / "maps" / "Hill_Dense" / "terrain.json").write_text('{"terrain_of": "Hill"}')
+    model, rec = load_for_run(tmp_path, {"scene": {"map": "Hill_Dense"}, "search_area": {"ground_down_m": 0.0}})
+    assert rec["kind"] == "dtm" and rec["file"].endswith("terrain_dtm.npz") and "Hill_Dense" not in rec["file"]
+    assert float(model.down_at(55, 0)) == pytest.approx(-5.5)

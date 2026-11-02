@@ -77,3 +77,11 @@ def test_runs_are_grouped_by_map(root):
     ordered = order_runs(forest[:2] + blocks[:2] + forest[2:4] + blocks[2:4])
     maps = [r.spec["scene"]["map"] for r in ordered]
     assert maps == sorted(maps) and maps.count("BlocksMap") == 4
+
+
+def test_campaign_sweep_runs_a_scenario_on_every_canopy_map(root):
+    c = Campaign.load(root / "campaigns/forest_canopy.jsonc")
+    runs = c.runs()
+    assert sorted(r.spec["scene"]["map"] for r in runs) == ["ForestSAR", "ForestSAR_Dense", "ForestSAR_Open"]
+    assert len({r.run_id for r in runs}) == 3
+    assert [r.spec["scene"]["map"] for r in order_runs(runs)] == ["ForestSAR", "ForestSAR_Dense", "ForestSAR_Open"]

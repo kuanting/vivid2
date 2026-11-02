@@ -127,12 +127,15 @@ class Scenario:
     def id(self) -> str:
         return self.spec["id"]
 
-    def expand(self, seeds: Optional[Union[int, List[int]]] = None) -> List[Run]:
+    def expand(self, seeds: Optional[Union[int, List[int]]] = None,
+               extra_sweep: Optional[Dict[str, List[Any]]] = None) -> List[Run]:
         """Grid-expand ``sweep`` and seeds into concrete runs.
 
         ``seeds`` overrides ``sweep.seeds``; an int N means seeds 0..N-1.
+        ``extra_sweep`` (a campaign's sweep) adds or replaces dotted-path axes.
         """
         sweep = dict(self.spec.get("sweep", {}))
+        sweep.update(extra_sweep or {})
         seed_spec = sweep.pop("seeds", 1) if seeds is None else seeds
         sweep.pop("seeds", None)
         seed_list = list(range(seed_spec)) if isinstance(seed_spec, int) else list(seed_spec)
@@ -170,6 +173,7 @@ class Campaign:
     seeds: Optional[Union[int, List[int]]] = None
     weights: Dict[str, float] = field(default_factory=dict)
     sim_config_dir: Optional[str] = None
+    sweep: Dict[str, List[Any]] = field(default_factory=dict)  # applied to every scenario, e.g. {"scene.map": [...]}
 
     @classmethod
     def load(cls, path: Union[str, Path]) -> "Campaign":
@@ -189,10 +193,11 @@ class Campaign:
             seeds=spec.get("seeds"),
             weights=spec.get("weights", {}),
             sim_config_dir=str((path.parent / sim_cfg).resolve()) if sim_cfg else None,
+            sweep=spec.get("sweep", {}),
         )
 
     def runs(self) -> List[Run]:
         out: List[Run] = []
         for sc in self.scenarios:
-            out.extend(sc.expand(self.seeds))
+            out.extend(sc.expand(self.seeds, self.sweep))
         return out

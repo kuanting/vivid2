@@ -1,0 +1,10 @@
+// The same search over open, mixed and dense canopy (ForestSAR_Open, ForestSAR, ForestSAR_Dense).
+// Runs are grouped by map: open one map in the editor, run the campaign, open the next and run it
+// again (finished runs are skipped).
+{
+  "name": "forest_canopy",
+  "sim_config_dir": "../sim_config",
+  "scenarios": ["../scenarios/forest_sar/forest_hiker_01.jsonc"],
+  "sweep": {"scene.map": ["ForestSAR_Open", "ForestSAR", "ForestSAR_Dense"]},
+  "seeds": 1
+}

@@ -1,0 +1,5 @@
+{
+  "map": "ForestSAR_Dense",
+  "terrain_of": "ForestSAR",
+  "note": "Same landscape as ForestSAR; only the PCG vegetation settings differ (see docs/environments.md)."
+}

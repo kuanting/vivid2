@@ -72,10 +72,22 @@ class TerrainModel:
 
 
 def terrain_file(sim_config_dir: Union[str, Path], map_name: Optional[str]) -> Optional[Path]:
+    """The map's terrain model. A variant map (e.g. ForestSAR_Dense, same landscape, other
+    vegetation) can instead hold ``terrain.json`` with ``{"terrain_of": "ForestSAR"}``."""
     if not map_name:
         return None
-    p = Path(sim_config_dir) / "maps" / map_name / "terrain_dtm.npz"
-    return p if p.exists() else None
+    d = Path(sim_config_dir) / "maps" / map_name
+    p = d / "terrain_dtm.npz"
+    if p.exists():
+        return p
+    info = d / "terrain.json"
+    if info.exists():
+        import json
+
+        base = json.loads(info.read_text(encoding="utf-8")).get("terrain_of")
+        if base and base != map_name:
+            return terrain_file(sim_config_dir, base)
+    return None
 
 
 def load_for_run(sim_config_dir: Union[str, Path], spec: Dict[str, Any]) -> "tuple[TerrainModel, Dict[str, Any]]":
