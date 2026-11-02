@@ -90,7 +90,9 @@ def safety_metrics(log: RunLog) -> Dict[str, Any]:
         "max_geofence_excursion_m": float(max(0.0, (outside - margin).max())),
         "min_agl_m": float(agl[airborne].min()) if airborne.any() else None,
         "low_altitude_s": float(dt[low].sum()),
-        "speed_limit_exceeded": bool(windowed_speeds(t, pos).max() > 1.25 * limits.get("max_speed_mps", 8.0)),
+        # 2 s windows: under heavy load (HD captures, VLM calls) pose timestamps arrive unevenly and 1 s
+        # averages still spike ~30 % for a single sample; sustained speeding still shows.
+        "speed_limit_exceeded": bool(windowed_speeds(t, pos, 2.0).max() > 1.25 * limits.get("max_speed_mps", 8.0)),
         "energy_used_m": flown,
         "energy_budget_exceeded": bool(energy_budget is not None and flown > energy_budget),
         "returned_home": end_dist_home <= 5.0,

@@ -40,7 +40,10 @@ class Frame:
     fov_deg: float
     depth: Optional[np.ndarray] = None  # H x W planar depth (m)
     gt: List[GTAnnotation] = field(default_factory=list)  # evaluation only; stacks must not read it
-    jpeg: Optional[bytes] = None  # the frame as encoded once by the runner; VLMs are sent exactly these bytes
+    jpeg: Optional[bytes] = None  # the frame as encoded once by the runner, at camera resolution
+    # Set by an agent taking a closer look: the pixel of the candidate it came to inspect. A
+    # reasoner may then look at a full-resolution crop around it (a digital zoom).
+    focus: Optional[Tuple[float, float]] = None
 
     @property
     def width(self) -> int:

@@ -6,7 +6,7 @@ from typing import Any, Dict, List, Optional
 
 import numpy as np
 
-from vivid2.geo import pixel_ray_to_ground, pixel_to_world
+from vivid2.geo import pixel_ray_to_ground, pixel_to_world, world_to_pixel
 from vivid2.stack.base import Agent, Assessment, Frame, MissionContext, Perception, Planner, Reasoner, TargetReport, UsageStats
 
 DEPTH_SATURATION_M = 65.0  # 16-bit millimetre depth saturates at 65.535 m
@@ -237,6 +237,9 @@ class SearchAgent(Agent):
             if close is None:
                 continue
             last_t = close.t_ns
+            px = world_to_pixel(ned, close.cam_pos, close.cam_q, close.width, close.height, close.fov_deg)
+            inside = px is not None and 0 <= px[0] < close.width and 0 <= px[1] < close.height
+            close.focus = (px[0], px[1]) if inside else (close.width / 2.0, close.height / 2.0)
             a, _ = await self._assess(ctx, close, phase="verify")
             best_conf = max(best_conf, a.confidence if a.target_found else 0.0)
             if a.target_found and a.pixel and a.confidence >= self.min_confidence:

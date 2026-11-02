@@ -85,8 +85,13 @@ def parse_tiles(tiles: str) -> Tuple[int, int]:
     return cols, rows
 
 
-def vlm_views(image: ImageInput, tiles: str = "1x1", max_side: int = VLM_MAX_SIDE) -> List[View]:
-    """What a VLM is sent for one frame: the whole frame, or a grid of tiles at full detail.
+FOCUS_SIZE = (960, 720)  # full-resolution crop sent when a frame has a focus point
+
+
+def vlm_views(image: ImageInput, tiles: str = "1x1", max_side: int = VLM_MAX_SIDE,
+              focus: Optional[Tuple[float, float]] = None, focus_size: Tuple[int, int] = FOCUS_SIZE) -> List[View]:
+    """What a VLM is sent for one frame: the whole frame, a grid of tiles at full detail, or
+    (with ``focus``) one full-resolution crop centred on that pixel.
 
     Deterministic, so a live run and an offline evaluation of the same banked
     JPEG send identical bytes. A frame that already fits (e.g. 960x720) is sent
@@ -95,6 +100,14 @@ def vlm_views(image: ImageInput, tiles: str = "1x1", max_side: int = VLM_MAX_SID
     cols, rows = parse_tiles(tiles)
     data = image_bytes(image, FRAME_JPEG_MAX_SIDE)
     w, h = Image.open(io.BytesIO(data)).size
+    if focus is not None and (w > focus_size[0] or h > focus_size[1]):
+        cw, ch = min(w, focus_size[0]), min(h, focus_size[1])
+        x0 = int(np.clip(round(focus[0] - cw / 2), 0, w - cw))
+        y0 = int(np.clip(round(focus[1] - ch / 2), 0, h - ch))
+        crop = decode_jpeg(data)[y0:y0 + ch, x0:x0 + cw]
+        jpeg = encode_jpeg_bytes(crop, max_side)
+        vw, vh = Image.open(io.BytesIO(jpeg)).size
+        return [View(jpeg, vw, vh, float(x0), float(y0), cw / vw, ch / vh)]
     if cols == rows == 1 and max(w, h) <= max_side:
         return [View(data, w, h)]
     full = decode_jpeg(data)

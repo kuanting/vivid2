@@ -85,17 +85,13 @@ class RunViewer:
             pass
 
     def chase_callback(self) -> Callable[[Any, Dict[str, Any]], None]:
+        # Keep the network callback trivial: the sim times out publishing to a client that
+        # decodes ~30 HD frames a second in its receive thread. The display loop decodes the
+        # newest message only.
         def cb(_topic, msg):
-            try:
-                from projectairsim.utils import unpack_image
-
-                img = unpack_image(msg)
-                if img is not None and img.size:
-                    with self._lock:
-                        self._chase = img
-                        self._dirty = True
-            except Exception:
-                pass
+            with self._lock:
+                self._chase_msg = msg
+                self._dirty = True
         return cb
 
     def close(self) -> None:
@@ -215,15 +211,24 @@ class RunViewer:
         try:
             while self._running:
                 with self._lock:
-                    dirty, p, chase = self._dirty, self._payload, self._chase
+                    dirty, p, chase_msg = self._dirty, self._payload, getattr(self, "_chase_msg", None)
+                    self._chase_msg = None
                     self._dirty = False
+                chase = None
+                if chase_msg is not None:
+                    try:
+                        from projectairsim.utils import unpack_image
+
+                        chase = unpack_image(chase_msg)
+                    except Exception:
+                        chase = None
                 if dirty:
                     if p is not None:
                         cv2.imshow("VIVID2 Payload", self._draw_payload(p))
                         if "p" not in placed:
                             cv2.moveWindow("VIVID2 Payload", 40, 40)
                             placed.add("p")
-                    if chase is not None:
+                    if chase is not None and getattr(chase, "size", 0):
                         cv2.imshow("VIVID2 Chase", cv2.resize(chase, self.chase_size))
                         if "c" not in placed:
                             cv2.moveWindow("VIVID2 Chase", 1490, 40)  # right of the 1440 px payload window

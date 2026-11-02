@@ -38,14 +38,16 @@ class VLMReasoner(Reasoner):
 
     name = "vlm_reasoner"
 
-    def __init__(self, provider: VLMProvider, system: str = None, tiles: str = "1x1"):
+    def __init__(self, provider: VLMProvider, system: str = None, tiles: str = "1x1", zoom: bool = True):
         parse_tiles(tiles)
         self.provider = provider
         self.system = system
         self.tiles = tiles
+        self.zoom = zoom  # look at a full-resolution crop when the agent marks a focus (closer look)
         self._templates: Dict[str, str] = {}
 
-    def _prompt(self, view: View, n_views: int, index: int, detections: List[Detection], mission: MissionSpec) -> str:
+    def _prompt(self, view: View, n_views: int, index: int, detections: List[Detection], mission: MissionSpec,
+                focused: bool = False) -> str:
         tpl = self._templates.setdefault(mission.mission, load_prompt(mission.mission))
         lines = []
         for d in detections:  # detector boxes are in frame pixels; give them in this view's 0-1000 coordinates
@@ -59,14 +61,18 @@ class VLMReasoner(Reasoner):
         det_block = ("An onboard detector proposed these candidates (may be wrong):\n" + "\n".join(lines) + "\n"
                      if lines else "")
         prompt = tpl.format(altitude_m=mission.altitude_m, brief=mission.brief, detections_block=det_block)
-        if n_views > 1:
+        if focused:
+            prompt += ("\n\nThe drone has descended over a possible sighting for a closer look. This image is a "
+                       "full-resolution crop of the camera frame centred on that spot (a digital zoom).")
+        elif n_views > 1:
             prompt += (f"\n\nThis image is tile {index + 1} of {n_views} of one camera frame (a {self.tiles} grid, "
                        "shown at full camera resolution). Answer for this tile only; a person may be cut off at its edge.")
         return prompt
 
-    def _ask(self, view: View, n_views: int, index: int, detections, mission) -> Tuple[Assessment, UsageStats]:
+    def _ask(self, view: View, n_views: int, index: int, detections, mission,
+             focused: bool = False) -> Tuple[Assessment, UsageStats]:
         try:
-            out, usage = self.provider.query([view.jpeg], self._prompt(view, n_views, index, detections, mission),
+            out, usage = self.provider.query([view.jpeg], self._prompt(view, n_views, index, detections, mission, focused),
                                              ASSESSMENT_SCHEMA, self.system)
         except VLMError as e:
             return Assessment(False, 0.0, raw={"error": str(e)}), UsageStats(model=self.provider.model)
@@ -80,9 +86,11 @@ class VLMReasoner(Reasoner):
         return a, usage
 
     def assess(self, frame: Frame, detections: List[Detection], mission: MissionSpec) -> Tuple[Assessment, UsageStats]:
-        views = vlm_views(frame.jpeg if frame.jpeg is not None else frame.rgb, self.tiles)
+        focus = getattr(frame, "focus", None) if self.zoom else None
+        views = vlm_views(frame.jpeg if frame.jpeg is not None else frame.rgb, self.tiles, focus=focus)
+        focused = focus is not None and bool(views[0].x0 or views[0].y0 or views[0].width < frame.width)
         if len(views) == 1:
-            return self._ask(views[0], 1, 0, detections, mission)
+            return self._ask(views[0], 1, 0, detections, mission, focused)
         with ThreadPoolExecutor(max_workers=len(views)) as pool:
             answers = list(pool.map(lambda iv: self._ask(iv[1], len(views), iv[0], detections, mission),
                                     enumerate(views)))

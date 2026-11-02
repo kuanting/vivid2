@@ -97,3 +97,23 @@ def test_remaining_path_continues_after_the_nearest_segment():
     assert remaining_path(path, [40, 2, -30]) == [[100, 0, -30], [100, 50, -30], [0, 50, -30]]
     assert remaining_path(path, [101, 30, -30]) == [[100, 50, -30], [0, 50, -30]]
     assert remaining_path(path, [5, 49, -30]) == [[0, 50, -30]]
+
+
+def test_close_up_frames_carry_the_candidate_as_focus(tmp_path, blocks_run):
+    class FocusRecorder(DistanceReasoner):
+        name = "focusrec"
+
+        def __init__(self):
+            super().__init__(sure_below_m=20.0)
+            self.focus = []
+
+        def assess(self, frame, detections, mission):
+            self.focus.append(frame.focus)
+            return super().assess(frame, detections, mission)
+
+    r = FocusRecorder()
+    _fly(tmp_path, blocks_run, r)
+    close = [f for f in r.focus if f is not None]
+    assert close, "no close-up frame had a focus"
+    w, h = 960, 720  # FakeWorld camera; the drone hovers over the candidate, so it projects near the centre
+    assert all(abs(u - w / 2) < 60 and abs(v - h / 2) < 60 for u, v in close)

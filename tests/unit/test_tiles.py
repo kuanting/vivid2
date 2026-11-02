@@ -92,3 +92,30 @@ def test_merge_prefers_the_most_confident_find():
                (Assessment(True, 0.8, (2, 2)), UsageStats())]
     a, _ = merge_tile_assessments(answers)
     assert a.pixel == (2, 2) and a.raw["tiles_found"] == [1, 2]
+
+
+def test_focus_sends_a_full_resolution_crop_around_the_candidate(blocks_run):
+    views = vlm_views(_jpeg(1920, 1440), focus=(1700, 100))
+    [v] = views
+    assert (v.width, v.height) == (960, 720) and (v.x0, v.y0) == (960, 0)   # clipped to the frame
+    assert v.sx == v.sy == 1.0 and v.to_frame(740, 100) == (1700, 100)
+    [small] = vlm_views(_jpeg(960, 720), focus=(100, 100))                 # already full detail: unchanged
+    assert (small.width, small.height) == (960, 720)
+
+    class Seen(VLMProvider):
+        model = "seen"
+
+        def query(self, images, prompt, schema, system=None):
+            self.prompt, self.shape = prompt, decode_jpeg(images[0]).shape
+            return ({"target_found": True, "confidence": 0.9, "point": [500, 500], "description": "x", "hazards": [],
+                     "next_action": "continue"}, UsageStats(model="seen"))
+
+    vlm = Seen()
+    frame = _frame(_jpeg(1920, 1440))
+    frame.focus = (960, 720)
+    a, _ = VLMReasoner(vlm).assess(frame, [], mission_spec(blocks_run))
+    assert vlm.shape == (720, 960, 3) and "digital zoom" in vlm.prompt
+    assert a.pixel == pytest.approx((480 + 480, 360 + 360))
+    frame.focus = None
+    VLMReasoner(vlm).assess(frame, [], mission_spec(blocks_run))
+    assert max(vlm.shape[:2]) == VLM_MAX_SIDE and "digital zoom" not in vlm.prompt
