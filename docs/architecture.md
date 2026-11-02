@@ -60,6 +60,13 @@
   Targets and the drone start keep their authored height above ground but sit
   on the real terrain, and safety measures height above it. `meta.json` records
   the file and its hash for rescoring.
+- The DUT's `MissionSpec.ground_down_m` is the terrain height under the start,
+  not the authored plane. `search_area.altitude_m` is therefore height above
+  the start's ground: the reference agents fly at
+  `ground_down_m - altitude_m` NED. On ForestSAR the start is 257.7 m up, so the
+  authored plane at down 0 would put "55 m up" inside the hill. Coverage is
+  scored on the same plane. A terrain-following planner (M3.4) will replace
+  this fixed altitude.
 
 ## Controllers
 
