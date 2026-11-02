@@ -556,7 +556,12 @@ async def _run_all(runs, campaign, agent_factory, out, sim_cfg, address, resume,
         # A fresh connection per run: Project AirSim disconnects the client when an
         # async task fails, and one bad run must not take the rest of the campaign down.
         client = ProjectAirSimClient(address=address)
-        client.connect()
+        try:
+            client.connect()
+        except Exception as e:
+            log(f"    -> cannot connect to Project AirSim at {address} ({type(e).__name__}): is the simulator "
+                "running? In the editor, open the map and press Play (or start the packaged build). Stopping.")
+            break
         serialize_requests(client)
         try:
             r = await execute_run(client, run, agent_factory, sim_cfg, out, campaign.weights, airsim_root, agent=agent,
