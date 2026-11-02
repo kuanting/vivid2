@@ -1,17 +1,20 @@
-// ForestSAR map: two separated hikers at dusk with valley fog.
+// ForestSAR map: two separated hikers at dusk with fog.
 {
   "id": "forest_hiker_02",
   "mission": "forest_sar",
-  "description": "Two hikers separated after dark; one on a scree slope, one under dense canopy. Dusk and fog sweep.",
+  "description": "Two hikers separated at dusk: one crouching, one lying face down. Fog sweep.",
   "scene": {"base": "scene_forest_sar.jsonc", "robot_config": "robot_vivid_quad.jsonc", "camera": "Payload", "map": "ForestSAR"},
   "dut_start": {"ned": [0, 0, -1], "yaw_deg": 0},
-  "search_area": {"polygon_ne": [[-200, -150], [200, -150], [200, 150], [-200, 150]], "altitude_m": 50, "ground_down_m": 0},
+  // 60 m above the start keeps at least 18 m over the treetops (ground -10..+11 m, trees <= 31 m).
+  "search_area": {"polygon_ne": [[-200, -150], [200, -150], [200, 150], [-200, 150]], "altitude_m": 60, "ground_down_m": 0},
   "targets": [
-    {"id": "Hiker1", "asset": "SKM_Manny", "ned": [140, -90, 0], "yaw_deg": 0, "description": "adult, yellow jacket, sitting"},
-    {"id": "Hiker2", "asset": "SKM_Manny", "ned": [-120, 110, 0], "yaw_deg": 120, "description": "teenager, dark blue hoodie"}
+    {"id": "Hiker1", "asset": "VIVID2_Hiker_YellowJacket_Crouching", "ned": [140, -90, 0], "yaw_deg": 0,
+     "description": "adult, yellow jacket, grey trousers, crouching"},
+    {"id": "Hiker2", "asset": "VIVID2_Hiker_BlueHoodie_LyingFront", "ned": [-120, 110, 0], "yaw_deg": 120,
+     "description": "teenager, dark blue hoodie, lying face down"}
   ],
   "target_jitter_m": 25,
-  "brief": "A father (yellow rain jacket) and his teenage son (dark blue hoodie) became separated while descending at dusk. Search for both; either may be sitting or lying down.",
+  "brief": "A father (yellow rain jacket) and his teenage son (dark blue hoodie) became separated while descending at dusk. Search for both; either may be crouching or lying down.",
   "environment": {"time_of_day": "2026-09-28 17:30:00", "weather": {"fog": 0.2}, "wind_ned": [4, 2, 0]},
   "limits": {"timeout_s": 1500, "max_speed_mps": 8, "min_agl_m": 25, "geofence_margin_m": 25, "energy_budget_m": 12000},
   "success": {"localization_tolerance_m": 10, "require_all_targets": true},

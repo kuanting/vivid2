@@ -1,0 +1,7 @@
+// Quick end-to-end check on the ForestSAR map (1 run of forest_hiker_01).
+{
+  "name": "forest_smoke",
+  "sim_config_dir": "../sim_config",
+  "scenarios": ["../scenarios/forest_sar/forest_hiker_01.jsonc"],
+  "seeds": 1
+}

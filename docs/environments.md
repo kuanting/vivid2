@@ -47,16 +47,44 @@ Scenarios spawn targets by **asset name** through `spawn-objects`. Project
 AirSim looks names up in the asset registry: static meshes, skeletal meshes and
 blueprints.
 
-- Import a skeletal human (for example UE5 Manny/Quinn, or MetaHumans baked to
-  skeletal meshes) and name it `SKM_Manny`. Add clothing-colour variants such as
-  `SKM_Hiker_RedJacket` and `SKM_Hiker_BlueHoodie`. Then use those names in the
-  scenario `asset` fields.
-- Poses such as lying, sitting or waving can be separate skeletal mesh assets or
-  blueprints with a fixed animation pose.
-- The origin of each asset must be at ground level (the feet), because scenario
-  `ned.z` is the ground height.
-- Make sure the asset gets a segmentation ID. The scene's `segmentation` block
-  initialises IDs by owner name.
+**Built (v1):** 16 blueprints in `/Game/VIVID2/Targets`, named
+`VIVID2_Hiker_<Outfit>_<Pose>`.
+- **Outfits:**
+
+  | Outfit | Body | Jacket | Trousers |
+  |---|---|---|---|
+  | `RedJacket` | Manny | red | dark |
+  | `YellowJacket` | Manny | yellow | grey |
+  | `BlueHoodie` | Quinn | dark blue | blue |
+  | `GreenJacket` | Manny | olive (low contrast) | khaki |
+
+- **Poses:** `Standing`, `Crouching`, `LyingBack`, `LyingFront`.
+- **Construction:** each blueprint is one skeletal mesh (the UE5 mannequin) held
+  in a fixed animation pose. The jacket and trousers use flat matte colours
+  (`M_VIVID2_Clothing`); the mannequin's own material leaves white panels.
+- **Lying poses:** the template has no lying animation (its "death" clips are
+  short staggers ending in a crouch), so the lying poses are the idle pose
+  rotated flat and lifted 15 cm.
+- **Pivot:** the pivot is at the feet, so scenario `ned.z` = 0 puts the hiker
+  on the terrain.
+- **Size from the air:** from 45–60 m a lying hiker is about 20–25 payload
+  pixels long; a standing one shows only head and shoulders.
+- **Cooking:** `DirectoriesToAlwaysCook` includes `/Game/VIVID2/Targets`,
+  because hikers are spawned by name and no map references them.
+- **Mannequin content:** the mannequins come from the engine's Third Person
+  template content (`Content/Characters`, not committed). Add it with
+  Add → Add Feature or Content Pack → Third Person, or copy
+  `<UE>/Templates/TemplateResources/High/Characters/Content` to
+  `Content/Characters`.
+- **Upgrade path:** realistic clothed people (a Fab human pack, or MetaHumans
+  once the MetaHuman optional content is installed) can replace the mannequins
+  under the same asset names.
+
+Rules for any target asset:
+- The origin must be at ground level (the feet, or the lowest point when
+  lying), because scenario `ned.z` is the ground height.
+- Make sure the asset gets a segmentation ID. The runner sets one per target
+  by name right after spawning.
 
 On Blocks, `1M_Cube` scaled to 0.5 × 0.5 × 1.7 stands in for a person. This
 is only good for pipeline bring-up. It is meaningless for evaluating a VLM.
@@ -131,8 +159,8 @@ is only good for pipeline bring-up. It is meaningless for evaluating a VLM.
 - **Clutter and distractors:** logs, rocks, stumps and red/yellow objects such
   as backpacks, tents and fallen signs. These are what make false alarms
   measurable.
-- **Lighting:** SunPosition plugin (the scenario's `time_of_day`) and volumetric
-  fog (the scenario's `weather.fog`).
+- **Fog:** the scenario's `weather.fog` goes to Project AirSim's weather
+  effects. The level's ExponentialHeightFog is only the base haze.
 - **Terrain height:** the runner snaps targets and the drone start onto
   `terrain_dtm.npz`, and the safety metrics measure height above it. The
   reference planner still flies at a fixed altitude; terrain following is M3.4.

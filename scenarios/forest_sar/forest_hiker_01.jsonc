@@ -1,15 +1,17 @@
-// ForestSAR map (unreal/VIVID2Env): one injured hiker off-trail under partial canopy.
-// Requires the map and a skeletal human asset named SKM_Manny (see docs/environments.md).
+// ForestSAR map (unreal/VIVID2Env): one injured hiker under partial canopy, north-east of the start.
+// Targets are the posed VIVID2_Hiker_* blueprints in /Game/VIVID2/Targets (see docs/environments.md).
 {
   "id": "forest_hiker_01",
   "mission": "forest_sar",
-  "description": "Injured hiker in a red jacket lying 30-60 m off the trail, mixed conifer canopy.",
+  "description": "Injured hiker in a red jacket lying on his back 90-120 m from the start, mixed birch canopy.",
   "scene": {"base": "scene_forest_sar.jsonc", "robot_config": "robot_vivid_quad.jsonc", "camera": "Payload", "map": "ForestSAR"},
   "dut_start": {"ned": [0, 0, -1], "yaw_deg": 0},
-  "search_area": {"polygon_ne": [[-150, -100], [150, -100], [150, 100], [-150, 100]], "altitude_m": 45, "ground_down_m": 0},
+  // 55 m above the start: the ground in this area is 9 m below to 11 m above the start and the
+  // tallest birches are about 31 m, so the drone keeps at least 13 m over the treetops.
+  "search_area": {"polygon_ne": [[-150, -100], [150, -100], [150, 100], [-150, 100]], "altitude_m": 55, "ground_down_m": 0},
   "targets": [
-    {"id": "Hiker1", "asset": "SKM_Manny", "ned": [90, 40, 0], "yaw_deg": 35,
-     "description": "adult, red jacket, lying down"}
+    {"id": "Hiker1", "asset": "VIVID2_Hiker_RedJacket_LyingBack", "ned": [90, 40, 0], "yaw_deg": 35,
+     "description": "adult, red jacket, dark trousers, lying on his back"}
   ],
   "target_jitter_m": 30,
   "brief": "Adult male hiker, 45, wearing a red jacket and dark trousers, reported a fall near the north end of the ridge trail around noon. He may be lying down and partly hidden under trees.",
