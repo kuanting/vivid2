@@ -68,6 +68,31 @@
   scored on the same plane. A terrain-following planner (M3.4) will replace
   this fixed altitude.
 
+## Closer look before reporting (reference agents)
+
+Search crews survey from a safe height, then go and look closer at anything
+suspicious before calling it in. With `verify` on (the default for the `vlm`
+and `hybrid` agents; `vivid2 run --verify on|off` overrides it), the reference
+`SearchAgent` does the same:
+
+1. A *candidate* is a find at confidence 0.3 or more. The agent leaves the
+   lawnmower path and flies over it.
+2. It descends to 10 m above the highest obstacle around the candidate (from the
+   depth image), never below the scenario's `min_agl_m` + 5 m, and never above
+   the survey altitude.
+3. It takes two close-up frames. It reports only if one confirms the target at
+   0.6 or more, located from the close-up, which is more accurate.
+4. It climbs back and flies the rest of the path. Dismissed spots are not checked
+   again, and after 8 detours it falls back to reporting finds at 0.6 directly.
+
+The cost of looking is scored by the existing layers: time to find, path length
+and energy. Planning metrics also count `verifications`,
+`verifications_confirmed` and `verify_time_s`. Decisions taken during a closer
+look carry `"phase": "verify"`.
+
+Agent names separate the behaviours: `vlm-<model>` verifies, while
+`vlm-<model>-noverify` and `coverage_gt-verify` are the non-default variants.
+
 ## Controllers
 
 `AirSimController` drives the Project AirSim Drone API. It works for both

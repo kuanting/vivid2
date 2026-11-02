@@ -74,7 +74,20 @@ class AgentFactory:
 
     @property
     def name(self) -> str:
-        return vlm_agent_name(self.kind, self._vlm, self.tiles) if self._vlm is not None else self.kind
+        name = vlm_agent_name(self.kind, self._vlm, self.tiles) if self._vlm is not None else self.kind
+        if self.verify != self.default_verify:  # keep runs with the non-default behaviour apart
+            name += "-verify" if self.verify else "-noverify"
+        return name
+
+    @property
+    def default_verify(self) -> bool:
+        """VLM stacks take a closer look before reporting, like a search crew; the GT/YOLO baselines don't."""
+        return self.kind in ("vlm", "hybrid")
+
+    @property
+    def verify(self) -> bool:
+        v = self.opts.get("verify")
+        return self.default_verify if v is None else v == "on"
 
     @property
     def tiles(self) -> str:
@@ -95,14 +108,14 @@ class AgentFactory:
         period = float(self.opts.get("frame_period_s", 1.0 if self._vlm is None else 2.0))
         if self.kind == "survey":
             return SurveyAgent(self.name, planner, frame_period_s=period)
+        kw = {"frame_period_s": period, "verify": self.verify}
         if self.kind == "coverage_gt":
             from vivid2.stack.reference.perception import GroundTruthPerception
 
             return SearchAgent(self.name, planner, DetectionThresholdReasoner(0.5),
-                               GroundTruthPerception(run.resolved_targets()), frame_period_s=period)
+                               GroundTruthPerception(run.resolved_targets()), **kw)
         if self.kind == "coverage_yolo":
-            return SearchAgent(self.name, planner, DetectionThresholdReasoner(0.5), self._yolo(), frame_period_s=period)
+            return SearchAgent(self.name, planner, DetectionThresholdReasoner(0.5), self._yolo(), **kw)
         if self.kind == "vlm":
-            return SearchAgent(self.name, planner, VLMReasoner(self._vlm, tiles=self.tiles), None, frame_period_s=period)
-        return SearchAgent(self.name, planner, VLMReasoner(self._vlm, tiles=self.tiles), self._yolo(),
-                           frame_period_s=period)
+            return SearchAgent(self.name, planner, VLMReasoner(self._vlm, tiles=self.tiles), None, **kw)
+        return SearchAgent(self.name, planner, VLMReasoner(self._vlm, tiles=self.tiles), self._yolo(), **kw)

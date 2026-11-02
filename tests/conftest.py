@@ -52,6 +52,9 @@ class FakeController(Controller):
         return not self.w.path
 
     async def goto(self, ned, speed_mps) -> None:
+        self.w.path = []  # like the real controller: a goto cancels the path in progress
+        self.w.log("events", {"t": self.w.t_ns, "kind": "goto", "target": list(map(float, ned))})
+        self.w.t_ns += int(np.linalg.norm(np.asarray(ned, float) - self.w.pos) / max(speed_mps, 0.1) * 1e9)
         self.w.pos = np.asarray(ned, float)
         self.w.tick()
 

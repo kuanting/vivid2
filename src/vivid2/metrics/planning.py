@@ -71,4 +71,14 @@ def planning_metrics(log: RunLog) -> Dict[str, Any]:
         **cov,
         "path_length_m": length,
         "coverage_per_km_m2": cov["covered_m2"] / (length / 1000.0) if length > 0 else 0.0,
+        **verification_stats(log["events"]),
     }
+
+
+def verification_stats(events: List[Dict[str, Any]]) -> Dict[str, Any]:
+    """Closer looks the agent took before reporting (``verify_start`` / ``verify_end`` events)."""
+    starts = [e for e in events if e.get("kind") == "verify_start"]
+    ends = [e for e in events if e.get("kind") == "verify_end"]
+    time_s = sum(max(0, int(b["t"]) - int(a["t"])) for a, b in zip(starts, ends)) / 1e9
+    return {"verifications": len(starts), "verifications_confirmed": sum(bool(e.get("confirmed")) for e in ends),
+            "verify_time_s": time_s}

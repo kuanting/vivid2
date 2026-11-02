@@ -43,7 +43,8 @@ def cmd_run(args) -> int:
     campaign = Campaign.load(args.campaign)
     if args.seeds is not None:
         campaign.seeds = args.seeds
-    opts = {k: v for k, v in vars(args).items() if k.startswith(("vlm", "yolo", "sidelap", "frame_period")) and v is not None}
+    opts = {k: v for k, v in vars(args).items()
+            if k.startswith(("vlm", "yolo", "sidelap", "frame_period", "verify")) and v is not None}
     try:
         factory = AgentFactory(args.agent, opts)
     except ValueError as e:
@@ -229,6 +230,9 @@ def main(argv=None) -> int:
     s.add_argument("--frame-period-s", dest="frame_period_s", type=float)
     s.add_argument("--frame-bank", choices=["off", "rgb", "rgbd"], default="rgb",
                    help="save each frame the agent fetches (JPEG at camera resolution; rgbd adds depth)")
+    s.add_argument("--verify", choices=["on", "off"],
+                   help="closer look before reporting: fly over a candidate, descend, confirm (default: on for "
+                        "vlm/hybrid, off for the coverage baselines)")
     s.add_argument("--view", action="store_true",
                    help="live windows: the payload frames with ground truth and the agent's decisions, and the chase camera")
     s.set_defaults(fn=cmd_run)
