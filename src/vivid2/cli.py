@@ -5,6 +5,7 @@
     vivid2 run --campaign campaigns/smoke.jsonc --agent vlm --vlm anthropic
     vivid2 run --campaign campaigns/smoke.jsonc --agent vlm --vlm local --vlm-model Qwen/Qwen2.5-VL-7B-Instruct
     vivid2 run --campaign campaigns/blocks_v1.jsonc --agent survey --frame-bank rgb
+    vivid2 run --campaign campaigns/forest_smoke.jsonc --agent coverage_gt --view
     vivid2 eval-frames runs/blocks_v1/survey --vlm anthropic --vlm-model claude-sonnet-5-5
     vivid2 rescore runs/smoke
     vivid2 report runs/smoke
@@ -50,7 +51,7 @@ def cmd_run(args) -> int:
         return 2
     results = asyncio.run(execute_campaign(campaign, factory, Path(args.out), address=args.address,
                                            resume=not args.no_resume, airsim_root=args.airsim_root,
-                                           frame_bank=args.frame_bank))
+                                           frame_bank=args.frame_bank, view=args.view))
     ok = sum(r["metrics"]["mission"]["success"] for r in results)
     print(f"{factory.name}: {ok}/{len(results)} runs successful")
     if not results:
@@ -224,6 +225,8 @@ def main(argv=None) -> int:
     s.add_argument("--frame-period-s", dest="frame_period_s", type=float)
     s.add_argument("--frame-bank", choices=["off", "rgb", "rgbd"], default="rgb",
                    help="save each frame the agent fetches (the exact JPEG sent to VLMs; rgbd adds depth)")
+    s.add_argument("--view", action="store_true",
+                   help="live windows: the payload frames with ground truth and the agent's decisions, and the chase camera")
     s.set_defaults(fn=cmd_run)
 
     s = sub.add_parser("eval-frames", help="evaluate a VLM offline on the saved frames of recorded runs")

@@ -25,6 +25,7 @@ from vivid2.sim.scene_builder import build_scene, camera_settings, captures
 from vivid2.sim.segmentation import SegmentationError, assign_ids, palette, visibility
 from vivid2.stack.base import Agent, Frame, GTAnnotation, MissionContext, MissionSpec, TargetReport
 from vivid2.stack.reference.controllers import AirSimController
+from vivid2.viewer import make_viewer
 from vivid2.terrain import load_for_run
 from vivid2.unreal_setup import status as unreal_status
 from vivid2.vlm.base import JPEG_MAX_SIDE, JPEG_QUALITY, encode_jpeg_bytes, sha256_hex
@@ -177,7 +178,8 @@ def write_bank_files(run_dir: Path, frame_id: int, jpeg: bytes, depth_m: Optiona
 class SimMissionContext(MissionContext):
     def __init__(self, run: Run, world, drone, camera_id: str, recorder: Recorder, controller: AirSimController,
                  fov_deg: float, frame_bank: str = "off", seg_ids: Optional[Dict[str, int]] = None,
-                 target_ids: Optional[List[str]] = None, start_ned=None, terrain=None):
+                 target_ids: Optional[List[str]] = None, start_ned=None, terrain=None, viewer=None):
+        self.viewer = viewer  # optional live camera windows (vivid2.viewer.RunViewer)
         if frame_bank not in FRAME_BANK_MODES:
             raise ValueError(f"frame_bank must be one of {FRAME_BANK_MODES}")
         self.frame_bank = frame_bank
@@ -224,8 +226,10 @@ class SimMissionContext(MissionContext):
                 depth[(raw == 0) | (raw >= DEPTH_NO_DATA)] = 0.0  # no data
         vis: Dict[str, Dict[str, Any]] = {}
         smsg = imgs.get(ImageType.SEGMENTATION) if self.seg_ids else None
+        seg = None
         if smsg:
-            vis = await asyncio.to_thread(visibility, _decode(smsg, np.uint8, 3), self.seg_ids, self._seg_colours)
+            seg = _decode(smsg, np.uint8, 3)
+            vis = await asyncio.to_thread(visibility, seg, self.seg_ids, self._seg_colours)
         gt = []
         for a in rgb_msg.get("annotations") or []:
             c, s = a["bbox2d"]["center"], a["bbox2d"]["size"]
@@ -256,6 +260,8 @@ class SimMissionContext(MissionContext):
             "gt": [_gt_record(g) for g in gt], **bank,
             **({"distractors_visible": distractors_seen} if distractors_seen else {}),
         })
+        if self.viewer is not None:
+            self.viewer.show_frame(frame, seg=seg, extra=f"t {self.elapsed_s():.0f} s  height {self.mission.ground_down_m - frame.cam_pos[2]:.0f} m")
         return frame
 
     def pose(self):
@@ -266,9 +272,13 @@ class SimMissionContext(MissionContext):
         self.reports.append(report)
         self.recorder.log("reports", {"t": report.t_ns, "frame_id": report.frame_id, "ned": report.ned,
                                       "confidence": report.confidence, "source": report.source, "note": report.note})
+        if self.viewer is not None:
+            self.viewer.note("reports", {"frame_id": report.frame_id})
 
     def log(self, stream: str, record: Dict[str, Any]) -> None:
         self.recorder.log(stream, record)
+        if self.viewer is not None and stream in ("detections", "decisions"):
+            self.viewer.note(stream, record)
 
     def should_stop(self) -> bool:
         return self._stop or self.elapsed_s() >= self.mission.timeout_s
@@ -390,6 +400,7 @@ async def execute_run(
     airsim_root: Optional[str] = None,
     agent: Optional[Agent] = None,
     frame_bank: str = "off",
+    viewer=None,
 ) -> Dict[str, Any]:
     from projectairsim import Drone
 
@@ -426,11 +437,16 @@ async def execute_run(
                                               "impact_point": msg.get("impact_point")}),
     )
     apply_environment(world, run.spec.get("environment", {}))
+    if viewer is not None:
+        viewer.set_status(f"{run.run_id}  {agent.name}")
+        chase = drone.sensors.get("Chase", {}).get("scene_camera") if hasattr(drone, "sensors") else None
+        if chase:
+            client.subscribe(chase, viewer.chase_callback())
 
     controller = AirSimController(drone, world.get_sim_time, rec.log)
     ctx = SimMissionContext(run, world, drone, sc.get("camera", "Payload"), rec, controller, cam["fov-degrees"], frame_bank,
                             seg_ids=seg_ids, target_ids=[t["id"] for t in targets], start_ned=start_ned,
-                            terrain=terrain)
+                            terrain=terrain, viewer=viewer)
     meta = {
         "run_id": run.run_id, "scenario_id": run.scenario_id, "seed": run.seed, "params": run.params,
         "mission": run.spec["mission"], "agent": agent.describe(), "targets": targets,
@@ -492,6 +508,7 @@ async def execute_campaign(
     airsim_root: Optional[str] = None,
     log: Callable[[str], None] = print,
     frame_bank: str = "off",
+    view: bool = False,
 ) -> List[Dict[str, Any]]:
     from projectairsim import ProjectAirSimClient
 
@@ -502,6 +519,19 @@ async def execute_campaign(
     results = []
     runs = order_runs(campaign.runs())
     blocked_maps: Dict[Optional[str], str] = {}  # map -> why its runs can't start
+    viewer = make_viewer(view, log)
+    try:
+        return await _run_all(runs, campaign, agent_factory, out, sim_cfg, address, resume, airsim_root, log,
+                              frame_bank, viewer, results, blocked_maps)
+    finally:
+        if viewer is not None:
+            viewer.close()
+
+
+async def _run_all(runs, campaign, agent_factory, out, sim_cfg, address, resume, airsim_root, log, frame_bank,
+                   viewer, results, blocked_maps) -> List[Dict[str, Any]]:
+    from projectairsim import ProjectAirSimClient
+
     for i, run in enumerate(runs, 1):
         map_name = scenario_map(run.spec)
         if map_name in blocked_maps:
@@ -529,7 +559,7 @@ async def execute_campaign(
         serialize_requests(client)
         try:
             r = await execute_run(client, run, agent_factory, sim_cfg, out, campaign.weights, airsim_root, agent=agent,
-                                  frame_bank=frame_bank)
+                                  frame_bank=frame_bank, viewer=viewer)
         except PreflightError as e:
             log(f"    -> preflight failed: {e}")
             blocked_maps[map_name] = f"map {map_name!r} failed preflight"
