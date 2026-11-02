@@ -34,3 +34,15 @@ def test_missing_depth_and_segmentation_are_placeholders():
          "gt": [GTAnnotation("Hiker1", (10, 10, 20, 20), 0, None)], "dets": [], "decision": None, "extra": ""}
     out = _viewer()._draw_payload(p)
     assert out.shape == (720, 1440, 3)
+
+
+def test_high_resolution_frames_are_scaled_for_display_but_insets_keep_detail():
+    rgb = np.zeros((1440, 1920, 3), np.uint8)
+    rgb[700:702, 1000:1040] = (0, 0, 255)  # a 2 px red line: visible only at full resolution
+    p = {"frame_id": 5, "image": rgb, "depth": None, "seg": None, "extra": "", "dets": [], "decision": None,
+         "gt": [GTAnnotation("Hiker1", (1000, 690, 1040, 712), 60, (1000, 690, 1040, 712))]}
+    out = _viewer()._draw_payload(p)
+    assert out.shape == (720, 1440, 3)                     # same window as a 960x720 camera
+    inset = out[720 - 52 - 288:720 - 52, 8:8 + 384]
+    red = (inset[..., 2] > 200) & (inset[..., 1] < 50)
+    assert red.sum() > 200                                  # the line, magnified ~3x from camera pixels

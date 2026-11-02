@@ -50,9 +50,12 @@ def make_vlm(opts: Dict[str, Any]):
     return inner
 
 
-def vlm_agent_name(kind: str, vlm) -> str:
-    """``vlm-claude-opus-5-5``; replayed answers get a ``-replay`` suffix so they never overwrite live runs."""
+def vlm_agent_name(kind: str, vlm, tiles: str = "1x1") -> str:
+    """``vlm-claude-opus-5-5`` (``-t2x2`` when frames are sent as tiles); replayed answers get a
+    ``-replay`` suffix so they never overwrite live runs."""
     name = f"{kind}-{re.sub(r'[^A-Za-z0-9._-]+', '_', vlm.model)}"
+    if tiles != "1x1":
+        name += f"-t{tiles}"
     return name + "-replay" if getattr(vlm, "mode", None) == "replay" else name
 
 
@@ -71,7 +74,11 @@ class AgentFactory:
 
     @property
     def name(self) -> str:
-        return vlm_agent_name(self.kind, self._vlm) if self._vlm is not None else self.kind
+        return vlm_agent_name(self.kind, self._vlm, self.tiles) if self._vlm is not None else self.kind
+
+    @property
+    def tiles(self) -> str:
+        return self.opts.get("vlm_tiles") or "1x1"
 
     def _yolo(self):
         if self._detector is None:
@@ -96,5 +103,6 @@ class AgentFactory:
         if self.kind == "coverage_yolo":
             return SearchAgent(self.name, planner, DetectionThresholdReasoner(0.5), self._yolo(), frame_period_s=period)
         if self.kind == "vlm":
-            return SearchAgent(self.name, planner, VLMReasoner(self._vlm), None, frame_period_s=period)
-        return SearchAgent(self.name, planner, VLMReasoner(self._vlm), self._yolo(), frame_period_s=period)
+            return SearchAgent(self.name, planner, VLMReasoner(self._vlm, tiles=self.tiles), None, frame_period_s=period)
+        return SearchAgent(self.name, planner, VLMReasoner(self._vlm, tiles=self.tiles), self._yolo(),
+                           frame_period_s=period)

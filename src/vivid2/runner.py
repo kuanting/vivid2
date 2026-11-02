@@ -28,7 +28,7 @@ from vivid2.stack.reference.controllers import AirSimController
 from vivid2.viewer import make_viewer
 from vivid2.terrain import load_for_run
 from vivid2.unreal_setup import status as unreal_status
-from vivid2.vlm.base import JPEG_MAX_SIDE, JPEG_QUALITY, encode_jpeg_bytes, sha256_hex
+from vivid2.vlm.base import FRAME_JPEG_MAX_SIDE, JPEG_QUALITY, encode_jpeg_bytes, sha256_hex
 
 TRAJECTORY_HZ = 10.0
 RTL_GRACE_S = 180.0
@@ -243,7 +243,8 @@ class SimMissionContext(MissionContext):
         distractors_seen = {oid: v["visible_px"] for oid, v in vis.items()
                             if oid not in self.target_ids and v["visible_px"]}
         self._frame_id += 1
-        jpeg = await asyncio.to_thread(encode_jpeg_bytes, rgb)  # encoded once; VLMs are sent exactly these bytes
+        # encoded once at camera resolution; what a VLM is sent is derived from these bytes (vlm_views)
+        jpeg = await asyncio.to_thread(encode_jpeg_bytes, rgb, FRAME_JPEG_MAX_SIDE)
         frame = Frame(
             t_ns=int(rgb_msg["time_stamp"]), frame_id=self._frame_id, rgb=rgb, depth=depth,
             cam_pos=np.array([rgb_msg["pos_x"], rgb_msg["pos_y"], rgb_msg["pos_z"]]),
@@ -459,7 +460,7 @@ async def execute_run(
         "mission_spec": asdict(ctx.mission),  # what the DUT was told; open-loop evaluation reuses it
         "distractors": distractors, "segmentation_ids": seg_ids,
         "gt_version": 2 if seg_ids else 1,  # 2: ground truth carries per-target visible pixels
-        "frame_bank": {"mode": frame_bank, "jpeg_quality": JPEG_QUALITY, "jpeg_max_side": JPEG_MAX_SIDE,
+        "frame_bank": {"mode": frame_bank, "jpeg_quality": JPEG_QUALITY, "jpeg_max_side": FRAME_JPEG_MAX_SIDE,
                        "depth": "uint16 mm, half resolution, 0 = no data"},
     }
     rec.write_json("meta.json", meta)

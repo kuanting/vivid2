@@ -1,9 +1,11 @@
 """VLM provider interface: images + prompt + JSON schema -> JSON dict + usage.
 
 Images are BGR uint8 arrays or already-encoded JPEG bytes. The runner encodes
-each camera frame once (``encode_jpeg_bytes`` with the defaults below) and
-saves those bytes in the frame bank, so a live run and an offline evaluation
-of the same frame send the model identical bytes.
+each camera frame once at camera resolution (``FRAME_JPEG_MAX_SIDE``) and saves
+those bytes in the frame bank. ``vlm_views`` derives what a model is sent from
+them: the whole frame (at most ``VLM_MAX_SIDE``) or a grid of tiles. The
+derivation is deterministic, so a live run and an offline evaluation of the
+same frame send identical bytes.
 """
 from __future__ import annotations
 
@@ -19,7 +21,9 @@ from PIL import Image
 from vivid2.stack.base import UsageStats
 
 JPEG_QUALITY = 85
-JPEG_MAX_SIDE = 1024
+JPEG_MAX_SIDE = 1024        # providers: largest side when they are given a raw array
+FRAME_JPEG_MAX_SIDE = 4096  # frame bank: frames are saved at camera resolution
+VLM_MAX_SIDE = 1568         # largest image side worth sending (Claude resizes anything bigger)
 
 ImageInput = Union[np.ndarray, bytes]
 
@@ -54,6 +58,57 @@ def decode_jpeg(data: bytes) -> np.ndarray:
 
 def sha256_hex(data: bytes) -> str:
     return hashlib.sha256(data).hexdigest()
+
+
+class View:
+    """One image sent to a VLM, cut from a frame: frame pixel = (x0 + u * sx, y0 + v * sy)."""
+
+    __slots__ = ("jpeg", "width", "height", "x0", "y0", "sx", "sy")
+
+    def __init__(self, jpeg: bytes, width: int, height: int, x0: float = 0.0, y0: float = 0.0,
+                 sx: float = 1.0, sy: float = 1.0):
+        self.jpeg, self.width, self.height = jpeg, width, height
+        self.x0, self.y0, self.sx, self.sy = x0, y0, sx, sy
+
+    def to_frame(self, u: float, v: float) -> Tuple[float, float]:
+        return self.x0 + u * self.sx, self.y0 + v * self.sy
+
+
+def parse_tiles(tiles: str) -> Tuple[int, int]:
+    """'2x2' -> (2 columns, 2 rows)."""
+    try:
+        cols, rows = (int(v) for v in tiles.lower().split("x"))
+    except Exception:
+        raise ValueError(f"tiles must look like '1x1' or '2x2', got {tiles!r}") from None
+    if not (1 <= cols <= 6 and 1 <= rows <= 6):
+        raise ValueError(f"tiles {tiles!r} out of range (1x1 .. 6x6)")
+    return cols, rows
+
+
+def vlm_views(image: ImageInput, tiles: str = "1x1", max_side: int = VLM_MAX_SIDE) -> List[View]:
+    """What a VLM is sent for one frame: the whole frame, or a grid of tiles at full detail.
+
+    Deterministic, so a live run and an offline evaluation of the same banked
+    JPEG send identical bytes. A frame that already fits (e.g. 960x720) is sent
+    as the banked bytes unchanged.
+    """
+    cols, rows = parse_tiles(tiles)
+    data = image_bytes(image, FRAME_JPEG_MAX_SIDE)
+    w, h = Image.open(io.BytesIO(data)).size
+    if cols == rows == 1 and max(w, h) <= max_side:
+        return [View(data, w, h)]
+    full = decode_jpeg(data)
+    views = []
+    xs = np.linspace(0, w, cols + 1).round().astype(int)
+    ys = np.linspace(0, h, rows + 1).round().astype(int)
+    for r in range(rows):
+        for c in range(cols):
+            crop = full[ys[r]:ys[r + 1], xs[c]:xs[c + 1]]
+            ch, cw = crop.shape[:2]
+            jpeg = encode_jpeg_bytes(crop, max_side)
+            vw, vh = Image.open(io.BytesIO(jpeg)).size
+            views.append(View(jpeg, vw, vh, float(xs[c]), float(ys[r]), cw / vw, ch / vh))
+    return views
 
 
 class VLMError(RuntimeError):

@@ -76,10 +76,17 @@ vivid2 report runs\smoke                                                 # -> ru
 
 ### Comparing VLMs on identical frames
 
-Each run saves the frames its agent fetched (`--frame-bank rgb`, the default):
-the exact JPEGs a VLM is sent. To compare models fairly, record the frames once
-with the `survey` agent, then evaluate every model offline on them. A local
-model can then use the whole GPU with Unreal closed.
+Each run saves the frames its agent fetched (`--frame-bank rgb`, the default)
+as JPEGs at camera resolution (the payload camera is 1920 × 1440: about 4.8 cm
+per pixel from 55 m, so a lying hiker is roughly 38 × 9 px). What a VLM is sent
+is derived from those bytes deterministically:
+- by default, the whole frame at most 1568 px per side;
+- with `--vlm-tiles 2x2`, four 960 × 720 tiles at full detail, at about four
+  times the cost.
+
+Live and offline runs therefore send identical bytes. To compare models fairly,
+record the frames once with the `survey` agent, then evaluate every model
+offline on them. A local model can then use the whole GPU with Unreal closed.
 
 ```powershell
 vivid2 run --campaign campaigns\blocks_v1.jsonc --agent survey

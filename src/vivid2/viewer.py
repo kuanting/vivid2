@@ -29,6 +29,7 @@ import numpy as np
 
 from vivid2.sim.segmentation import MIN_VISIBLE_PX
 
+DISPLAY_WIDTH = 960  # RGB panel width on screen; larger cameras are scaled down (insets keep full detail)
 GREEN, YELLOW, GREY, MAGENTA, RED, WHITE = (60, 220, 60), (0, 220, 255), (150, 150, 150), (255, 0, 255), (0, 0, 255), (255, 255, 255)
 
 
@@ -103,21 +104,28 @@ class RunViewer:
 
     # -- drawing -----------------------------------------------------------------
     def _draw_payload(self, p: Dict[str, Any]) -> np.ndarray:
+        """RGB panel (scaled to DISPLAY_WIDTH) with overlays, depth and segmentation beside it.
+
+        Overlays are drawn in display coordinates; the zoom insets crop the
+        full-resolution image, so a 1920 px camera shows its real detail there.
+        """
         cv2 = self.cv2
         clean = np.ascontiguousarray(p["image"])
-        img = clean.copy()
-        insets = [self._inset(clean, g) for g in p["gt"]]
+        h0, w0 = clean.shape[:2]
+        k = min(1.0, DISPLAY_WIDTH / w0)  # display pixels per camera pixel
+        img = cv2.resize(clean, (round(w0 * k), round(h0 * k)), interpolation=cv2.INTER_AREA) if k < 1 else clean.copy()
+        insets = [self._inset(clean, g, k) for g in p["gt"]]
         for g in p["gt"]:
             vis = getattr(g, "visible_px", None)
             box = getattr(g, "bbox_vis", None) or g.bbox
             colour = GREY if not vis else (GREEN if vis >= MIN_VISIBLE_PX else YELLOW)
-            x0, y0, x1, y1 = (int(round(v)) for v in box)
-            pad = 6  # targets are ~10-25 px from survey height; pad so the box doesn't hide them
+            x0, y0, x1, y1 = (int(round(v * k)) for v in box)
+            pad = 6  # targets are tiny from survey height; pad so the box doesn't hide them
             cv2.rectangle(img, (x0 - pad, y0 - pad), (x1 + pad, y1 + pad), colour, 2)
             label = f"{g.object_id} {vis if vis is not None else '?'}px"
             cv2.putText(img, label, (x0 - pad, max(12, y0 - pad - 4)), cv2.FONT_HERSHEY_SIMPLEX, 0.45, colour, 1, cv2.LINE_AA)
         for d in p["dets"]:
-            x0, y0, x1, y1 = (int(round(v)) for v in d["bbox"])
+            x0, y0, x1, y1 = (int(round(v * k)) for v in d["bbox"])
             cv2.rectangle(img, (x0, y0), (x1, y1), MAGENTA, 1)
         # magnified crops of the targets in view (bottom-left, above the status bar)
         x = 8
@@ -126,7 +134,7 @@ class RunViewer:
                 continue
             ih, iw = inset.shape[:2]
             y = img.shape[0] - 52 - ih
-            if x + iw > img.shape[1]:
+            if x + iw > img.shape[1] or y < 0:
                 break
             img[y:y + ih, x:x + iw] = inset
             x += iw + 8
@@ -138,7 +146,7 @@ class RunViewer:
             if dec.get("error"):
                 line2 = f"decision: error ({str(dec['error'])[:40]})"
             if found and dec.get("pixel"):
-                u, v = (int(round(c)) for c in dec["pixel"])
+                u, v = (int(round(c * k)) for c in dec["pixel"])
                 cv2.drawMarker(img, (u, v), RED, cv2.MARKER_CROSS, 22, 2)
         if p.get("reported"):
             line2 += "  REPORTED"
@@ -147,7 +155,7 @@ class RunViewer:
         depth = self._depth_panel(p.get("depth"), side)
         seg = self._panel(p.get("seg"), side, "no segmentation")
         img = np.hstack([img, np.vstack([depth, seg])])
-        cv2.putText(img, "RGB", (8, 18), cv2.FONT_HERSHEY_SIMPLEX, 0.55, WHITE, 1, cv2.LINE_AA)
+        cv2.putText(img, f"RGB {w0}x{h0}", (8, 18), cv2.FONT_HERSHEY_SIMPLEX, 0.55, WHITE, 1, cv2.LINE_AA)
         cv2.putText(img, "Depth", (w + 8, 18), cv2.FONT_HERSHEY_SIMPLEX, 0.55, WHITE, 1, cv2.LINE_AA)
         cv2.putText(img, "Segmentation", (w + 8, side[1] + 18), cv2.FONT_HERSHEY_SIMPLEX, 0.55, WHITE, 1, cv2.LINE_AA)
         cv2.rectangle(img, (0, h - 44), (img.shape[1], h), (0, 0, 0), -1)
@@ -156,24 +164,30 @@ class RunViewer:
         cv2.putText(img, line2, (8, h - 8), cv2.FONT_HERSHEY_SIMPLEX, 0.5, WHITE, 1, cv2.LINE_AA)
         return img
 
-    def _inset(self, img: np.ndarray, g, half=(32, 24), zoom: int = 6) -> Optional[np.ndarray]:
-        """A ``zoom``x crop of the raw image around a target that is (at least partly) in frame."""
+    def _inset(self, img: np.ndarray, g, k: float = 1.0, size=(384, 288), zoom: float = 6.0) -> Optional[np.ndarray]:
+        """A magnified crop of the full-resolution image around a target that is (partly) in frame.
+
+        The crop covers the same ground at any camera resolution (``size / zoom``
+        display pixels, i.e. ``size / (zoom * k)`` camera pixels).
+        """
         cv2 = self.cv2
         if not getattr(g, "visible_px", None) and getattr(g, "visible_px", None) is not None:
             return None  # hidden (behind cover) - nothing to look at
         box = getattr(g, "bbox_vis", None) or g.bbox
         cx, cy = (box[0] + box[2]) / 2.0, (box[1] + box[3]) / 2.0
+        half = (round(size[0] / (2 * zoom * k)), round(size[1] / (2 * zoom * k)))
         h, w = img.shape[:2]
         x0 = int(np.clip(round(cx) - half[0], 0, max(0, w - 2 * half[0])))
         y0 = int(np.clip(round(cy) - half[1], 0, max(0, h - 2 * half[1])))
         crop = img[y0:y0 + 2 * half[1], x0:x0 + 2 * half[0]]
         if crop.size == 0:
             return None
-        big = cv2.resize(crop, (crop.shape[1] * zoom, crop.shape[0] * zoom), interpolation=cv2.INTER_NEAREST)
+        big = cv2.resize(crop, size, interpolation=cv2.INTER_NEAREST)
         vis = g.visible_px
         colour = GREY if not vis else (GREEN if vis >= MIN_VISIBLE_PX else YELLOW)
         cv2.rectangle(big, (0, 0), (big.shape[1] - 1, big.shape[0] - 1), colour, 2)
-        cv2.putText(big, f"{g.object_id} x{zoom}", (6, 18), cv2.FONT_HERSHEY_SIMPLEX, 0.5, WHITE, 1, cv2.LINE_AA)
+        cv2.putText(big, f"{g.object_id} x{size[0] / crop.shape[1]:.0f} ({crop.shape[1]}x{crop.shape[0]} px)", (6, 18),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.5, WHITE, 1, cv2.LINE_AA)
         return big
 
     def _panel(self, img: Optional[np.ndarray], size, missing: str) -> np.ndarray:

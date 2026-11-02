@@ -70,6 +70,9 @@ def _add_vlm_args(s) -> None:
     s.add_argument("--vlm-point-format", choices=["norm1000", "pixels"],
                    help="local VLMs: how the model writes the target point (Qwen-VL tends to use pixels)")
     s.add_argument("--vlm-cache", help="JSONL cache of VLM answers")
+    s.add_argument("--vlm-tiles", default=None,
+                   help="send each frame as a grid of full-detail tiles, e.g. 2x2 (default 1x1: the whole frame, "
+                        "at most 1568 px per side); tiles cost proportionally more per frame")
     s.add_argument("--vlm-cache-mode", choices=["record", "replay"],
                    help="record (default): call the model and save answers; replay: answer from the cache only")
 
@@ -90,10 +93,11 @@ def cmd_eval_frames(args) -> int:
     except ValueError as e:
         print(f"error: {e}", file=sys.stderr)
         return 2
-    reasoner = VLMReasoner(vlm)
-    name = vlm_agent_name("vlm", vlm)
+    tiles = args.vlm_tiles or "1x1"
+    reasoner = VLMReasoner(vlm, tiles=tiles)
+    name = vlm_agent_name("vlm", vlm, tiles)
     desc = {"agent": name, "mode": "open_loop", "reasoner": reasoner.name, "reasoner_model": vlm.model,
-            "provider": vlm.fingerprint()}
+            "provider": vlm.fingerprint(), "tiles": tiles}
     print(f"{name}: evaluating {len(runs)} runs")
     results = evaluate_runs(runs, reasoner, name, desc, Path(args.out) if args.out else None, args.concurrency)
     decisions = sum(r["metrics"]["reasoning"]["decisions"] for r in results if r["metrics"]["reasoning"])
@@ -224,7 +228,7 @@ def main(argv=None) -> int:
     s.add_argument("--sidelap", type=float)
     s.add_argument("--frame-period-s", dest="frame_period_s", type=float)
     s.add_argument("--frame-bank", choices=["off", "rgb", "rgbd"], default="rgb",
-                   help="save each frame the agent fetches (the exact JPEG sent to VLMs; rgbd adds depth)")
+                   help="save each frame the agent fetches (JPEG at camera resolution; rgbd adds depth)")
     s.add_argument("--view", action="store_true",
                    help="live windows: the payload frames with ground truth and the agent's decisions, and the chase camera")
     s.set_defaults(fn=cmd_run)
