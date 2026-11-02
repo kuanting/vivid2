@@ -72,3 +72,18 @@ def test_targets_and_start_snap_and_the_dut_sees_its_limits(blocks_run):
     m = mission_spec(blocks_run, blocks_run.resolved_start(t))
     assert m.min_agl_m == blocks_run.spec["limits"]["min_agl_m"]
     assert m.energy_budget_m == blocks_run.spec["limits"]["energy_budget_m"]
+
+
+def test_dut_ground_is_the_terrain_under_the_start(blocks_run):
+    """On a raised map the authored ground (down 0) can be far below the real ground; the DUT
+    must get the terrain height at its start, or "fly 35 m up" means "fly into the hillside"."""
+    hill = TerrainModel(np.full((3, 3), -257.7), n0=-100.0, e0=-100.0, cell_m=100.0, source="raised plateau")
+    start = blocks_run.resolved_start(hill)
+    m = mission_spec(blocks_run, start, hill)
+    assert m.ground_down_m == pytest.approx(-257.7)
+    takeoff_down = m.ground_down_m - m.altitude_m          # what the reference agents fly to
+    assert takeoff_down < start[2]                          # above the start, not below the ground
+    assert hill.agl(np.array([[start[0], start[1], takeoff_down]]))[0] == pytest.approx(m.altitude_m)
+    # flat maps keep the authored ground
+    assert mission_spec(blocks_run, start).ground_down_m == blocks_run.spec["search_area"].get("ground_down_m", 0.0)
+    assert mission_spec(blocks_run, start, TerrainModel.flat(0.0)).ground_down_m == 0.0

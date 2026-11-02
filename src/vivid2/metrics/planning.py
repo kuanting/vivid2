@@ -63,7 +63,9 @@ def coverage(
 
 def planning_metrics(log: RunLog) -> Dict[str, Any]:
     meta = log.meta
-    cov = coverage(log["frames"], meta["search_area"]["polygon_ne"], meta["search_area"].get("ground_down_m", 0.0))
+    # the ground plane the DUT was given (terrain under the start; older logs: the authored plane)
+    ground = (meta.get("mission_spec") or {}).get("ground_down_m", meta["search_area"].get("ground_down_m", 0.0))
+    cov = coverage(log["frames"], meta["search_area"]["polygon_ne"], ground)
     length = path_length(log["trajectory"])
     return {
         **cov,

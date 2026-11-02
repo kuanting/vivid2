@@ -41,15 +41,25 @@ def _wxyz(d: Dict[str, float]) -> Tuple[float, float, float, float]:
     return (d["w"], d["x"], d["y"], d["z"])
 
 
-def mission_spec(run: Run, start_ned=None) -> MissionSpec:
+def mission_spec(run: Run, start_ned=None, terrain=None) -> MissionSpec:
+    """What the DUT is told. ``ground_down_m`` is the real ground under the start point.
+
+    Scenarios author heights against flat ``search_area.ground_down_m``; on a map
+    with relief that plane can be hundreds of metres off, so the DUT gets the
+    terrain height at its start instead (flat maps: unchanged). ``altitude_m``
+    is then height above the start's ground.
+    """
     s = run.spec
     lim = s["limits"]
+    ground = float(s["search_area"].get("ground_down_m", 0.0))
+    if terrain is not None and start_ned is not None:
+        ground = float(terrain.down_at(start_ned[0], start_ned[1]))
     return MissionSpec(
         mission=s["mission"],
         brief=s["brief"],
         search_polygon_ne=s["search_area"]["polygon_ne"],
         altitude_m=s["search_area"]["altitude_m"],
-        ground_down_m=s["search_area"].get("ground_down_m", 0.0),
+        ground_down_m=ground,
         start_ned=list(start_ned) if start_ned is not None else s["dut_start"]["ned"],
         max_speed_mps=lim.get("max_speed_mps", 8.0),
         timeout_s=lim["timeout_s"],
@@ -167,7 +177,7 @@ def write_bank_files(run_dir: Path, frame_id: int, jpeg: bytes, depth_m: Optiona
 class SimMissionContext(MissionContext):
     def __init__(self, run: Run, world, drone, camera_id: str, recorder: Recorder, controller: AirSimController,
                  fov_deg: float, frame_bank: str = "off", seg_ids: Optional[Dict[str, int]] = None,
-                 target_ids: Optional[List[str]] = None, start_ned=None):
+                 target_ids: Optional[List[str]] = None, start_ned=None, terrain=None):
         if frame_bank not in FRAME_BANK_MODES:
             raise ValueError(f"frame_bank must be one of {FRAME_BANK_MODES}")
         self.frame_bank = frame_bank
@@ -181,7 +191,7 @@ class SimMissionContext(MissionContext):
         self.recorder = recorder
         self.controller = controller
         self.fov_deg = fov_deg
-        self.mission = mission_spec(run, start_ned)
+        self.mission = mission_spec(run, start_ned, terrain)
         self.t0_ns = world.get_sim_time()
         self.last_t_ns = self.t0_ns  # last sim time seen, for logging after the connection drops
         self.depth_scale: Optional[float] = None  # metres per raw depth unit, detected in flight
@@ -419,7 +429,8 @@ async def execute_run(
 
     controller = AirSimController(drone, world.get_sim_time, rec.log)
     ctx = SimMissionContext(run, world, drone, sc.get("camera", "Payload"), rec, controller, cam["fov-degrees"], frame_bank,
-                            seg_ids=seg_ids, target_ids=[t["id"] for t in targets], start_ned=start_ned)
+                            seg_ids=seg_ids, target_ids=[t["id"] for t in targets], start_ned=start_ned,
+                            terrain=terrain)
     meta = {
         "run_id": run.run_id, "scenario_id": run.scenario_id, "seed": run.seed, "params": run.params,
         "mission": run.spec["mission"], "agent": agent.describe(), "targets": targets,
