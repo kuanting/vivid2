@@ -25,6 +25,22 @@ packaged builds. See [unreal_versions.md](unreal_versions.md).
 5. Put a PlayerStart at the world origin (0, 0, 0). Project AirSim measures NED
    coordinates from the Unreal world origin, not from the PlayerStart.
 
+## Third-party content and distribution
+
+The repo never contains third-party source assets. Only VIVID 2's own content
+under `Content/VIVID2/` is committed. Maps there may reference pack assets, but
+the packs themselves are ignored by git.
+
+- **Users** get a packaged `VIVID2Env` build (cooked, in `.pak` files), made with
+  `tools\package_env.ps1` and published as a release download. They need no
+  Unreal or Fab account.
+- **Map authors** who want to edit the maps in the editor must get each pack
+  below from Fab themselves and install it at the listed folder.
+
+| Pack | Folder | Used for | Notes |
+|---|---|---|---|
+| Forest Fire (Fab) | `Content/ForestFire/` | ForestSAR vegetation (birch trees, shrubs, ferns, grass, stumps, logs, rocks); Wildfire fire and smoke | Made for UE4. Checked in UE 5.8 (2026-11-02): all three maps load with 0 errors. The meshes log "recomputing physics on load" until they are resaved. Fire and smoke are Cascade particle systems (`PS_*`), which UE 5.8 still renders. |
+
 ## Targets (hikers)
 
 Scenarios spawn targets by **asset name** through `spawn-objects`. Project
