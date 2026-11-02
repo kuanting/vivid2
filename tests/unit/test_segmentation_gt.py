@@ -103,3 +103,13 @@ def test_distractors_are_spawned_and_segmentation_is_captured(root, blocks_run):
     names = [o["name"] for o in scene["spawn-objects"]["sim-packaged"]]
     assert names == ["Hiker1", "Backpack1"]
     assert captures(scene, "Payload", 3)
+
+
+def test_visible_threshold_scales_with_image_size():
+    from vivid2.sim.segmentation import min_visible_px, visibility_state
+    assert min_visible_px() == 20 and min_visible_px(960, 720) == 20
+    assert min_visible_px(1920, 1440) == 80          # the same patch of ground at twice the resolution
+    assert min_visible_px(640, 480) == 20             # never below the base threshold
+    g = {"visible_px": 50}
+    assert visibility_state(g, frame_wh=(960, 720)) == "visible"
+    assert visibility_state(g, frame_wh=(1920, 1440)) == "partial"

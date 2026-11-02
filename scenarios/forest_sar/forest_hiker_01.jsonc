@@ -14,6 +14,14 @@
      "description": "adult, red jacket, dark trousers, lying on his back"}
   ],
   "target_jitter_m": 30,
+  // Decoys (VIVID2_Decoy_* in /Game/VIVID2/Targets): reports within the localisation tolerance of
+  // one are false alarms. Two share the hiker's jacket red; the sleeping bag is person-sized.
+  "distractors": [
+    {"id": "Decoy1", "asset": "VIVID2_Decoy_Tarp_Red", "ned": [-60, -50, 0], "yaw_deg": 20, "description": "red tarp"},
+    {"id": "Decoy2", "asset": "VIVID2_Decoy_Backpack_Red", "ned": [30, -70, 0], "yaw_deg": 70, "description": "red backpack"},
+    {"id": "Decoy3", "asset": "VIVID2_Decoy_SleepingBag_Blue", "ned": [-110, 60, 0], "yaw_deg": 110, "description": "blue sleeping bag"},
+    {"id": "Decoy4", "asset": "VIVID2_Decoy_Tent_Orange", "ned": [120, -40, 0], "yaw_deg": 0, "description": "orange dome tent"}
+  ],
   "brief": "Adult male hiker, 45, wearing a red jacket and dark trousers, reported a fall near the north end of the ridge trail around noon. He may be lying down and partly hidden under trees.",
   "environment": {"time_of_day": "2026-09-28 15:00:00", "weather": {}, "wind_ned": [3, 0, 0]},
   "limits": {"timeout_s": 900, "max_speed_mps": 7, "min_agl_m": 25, "geofence_margin_m": 25, "energy_budget_m": 7000},

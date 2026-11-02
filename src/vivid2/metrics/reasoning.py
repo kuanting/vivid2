@@ -36,7 +36,8 @@ def reasoning_metrics(log: RunLog, layer: str = "reasoner") -> Optional[Dict[str
             errors += 1
             continue
         frame = frames.get(rec["frame_id"], {})
-        states = [(g, visibility_state(g)) for g in frame.get("gt", [])]
+        wh = (frame.get("width"), frame.get("height"))
+        states = [(g, visibility_state(g, frame_wh=wh)) for g in frame.get("gt", [])]
         visible = [g for g, st in states if st == "visible"]
         if not visible and any(st == "partial" for _, st in states):
             dont_care += 1

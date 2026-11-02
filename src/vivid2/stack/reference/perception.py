@@ -15,7 +15,7 @@ from typing import Dict, List, Optional, Sequence
 import numpy as np
 
 from vivid2.geo import world_to_pixel
-from vivid2.sim.segmentation import MIN_VISIBLE_PX
+from vivid2.sim.segmentation import min_visible_px
 from vivid2.stack.base import Detection, Frame, Perception
 
 
@@ -47,7 +47,7 @@ class GroundTruthPerception(Perception):
         dets = []
         for a in frame.gt:
             if a.visible_px is not None:  # ground truth v2: segmentation says exactly what is visible
-                if a.visible_px >= MIN_VISIBLE_PX and a.bbox_vis is not None:
+                if a.visible_px >= min_visible_px(frame.width, frame.height) and a.bbox_vis is not None:
                     dets.append(Detection(self.label, tuple(a.bbox_vis), 1.0))
             elif self._visible(frame, a.object_id, a.bbox):
                 dets.append(Detection(self.label, tuple(a.bbox), 1.0))

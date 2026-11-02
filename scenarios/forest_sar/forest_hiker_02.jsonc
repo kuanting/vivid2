@@ -14,6 +14,14 @@
      "description": "teenager, dark blue hoodie, lying face down"}
   ],
   "target_jitter_m": 25,
+  // Decoys: a yellow jacket and a blue sleeping bag match the two hikers' colours.
+  "distractors": [
+    {"id": "Decoy1", "asset": "VIVID2_Decoy_Jacket_Yellow", "ned": [-40, -110, 0], "yaw_deg": 40, "description": "dropped yellow jacket"},
+    {"id": "Decoy2", "asset": "VIVID2_Decoy_SleepingBag_Blue", "ned": [-160, -40, 0], "yaw_deg": 15, "description": "blue sleeping bag"},
+    {"id": "Decoy3", "asset": "VIVID2_Decoy_Tent_Green", "ned": [60, 90, 0], "yaw_deg": 60, "description": "green dome tent"},
+    {"id": "Decoy4", "asset": "VIVID2_Decoy_Tarp_Red", "ned": [0, 60, 0], "yaw_deg": -30, "description": "red tarp"},
+    {"id": "Decoy5", "asset": "VIVID2_Decoy_Barrel_Blue", "ned": [170, 40, 0], "yaw_deg": 0, "description": "blue plastic drum"}
+  ],
   "brief": "A father (yellow rain jacket) and his teenage son (dark blue hoodie) became separated while descending at dusk. Search for both; either may be crouching or lying down.",
   "environment": {"time_of_day": "2026-09-28 17:30:00", "weather": {"fog": 0.2}, "wind_ned": [4, 2, 0]},
   "limits": {"timeout_s": 1500, "max_speed_mps": 8, "min_agl_m": 25, "geofence_margin_m": 25, "energy_budget_m": 12000},

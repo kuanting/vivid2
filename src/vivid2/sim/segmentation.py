@@ -21,7 +21,8 @@ BACKGROUND_ID = 0
 TARGET_ID_BASE = 1
 DISTRACTOR_ID_BASE = 101
 MAX_ID = 255
-MIN_VISIBLE_PX = 20  # below this a target is "partly visible": neither a hit nor a miss
+MIN_VISIBLE_PX = 20  # at 960x720; below this a target is "partly visible": neither a hit nor a miss
+REFERENCE_PIXELS = 960 * 720  # the threshold scales with image area, so "visible" means the same patch of ground
 PALETTE_ORDER = "rgb"  # palette entries are RGB; decoded images are BGR (verified on Blocks: Hiker1 = (6, 108, 153))
 
 
@@ -66,12 +67,23 @@ def visibility(seg: np.ndarray, ids: Dict[str, int], colours: np.ndarray) -> Dic
     return out
 
 
-def visibility_state(gt: Dict[str, Any], min_px: int = MIN_VISIBLE_PX) -> str:
+def min_visible_px(width: Optional[int] = None, height: Optional[int] = None) -> int:
+    """Visible-pixel threshold for an image size: MIN_VISIBLE_PX at 960x720, scaled by area
+    (80 px at 1920x1440), never below MIN_VISIBLE_PX."""
+    if not width or not height:
+        return MIN_VISIBLE_PX
+    return max(MIN_VISIBLE_PX, int(round(MIN_VISIBLE_PX * width * height / REFERENCE_PIXELS)))
+
+
+def visibility_state(gt: Dict[str, Any], min_px: Optional[int] = None, frame_wh=None) -> str:
     """'visible', 'partial' (don't care) or 'hidden' for one ground-truth entry.
 
+    The threshold is ``min_px``, else scaled to the frame size ``frame_wh``.
     Entries without ``visible_px`` (ground truth v1) count as visible.
     """
     px = gt.get("visible_px")
     if px is None:
         return "visible"
+    if min_px is None:
+        min_px = min_visible_px(*(frame_wh or (None, None)))
     return "visible" if px >= min_px else ("partial" if px > 0 else "hidden")

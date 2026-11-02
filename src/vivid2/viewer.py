@@ -7,7 +7,7 @@ OpenCV windows (``projectairsim.image_utils.ImageDisplay``). VIVID 2 opens two:
   fetches, like AirSim's RGB / depth / segmentation sub-windows:
   - RGB (left, full size): exactly what the agent is evaluated on, with the
     ground truth drawn on top. Each target's box is green when at least
-    MIN_VISIBLE_PX pixels of it are visible, yellow when fewer, grey when
+    MIN_VISIBLE_PX pixels of it are visible (scaled to the image size), yellow when fewer, grey when
     hidden. The agent's detections are magenta, and its decision for the frame
     and any point it reported are shown too.
   - Depth (top right): greyscale, near = dark, 0-150 m.
@@ -27,7 +27,7 @@ from typing import Any, Callable, Dict, Optional
 
 import numpy as np
 
-from vivid2.sim.segmentation import MIN_VISIBLE_PX
+from vivid2.sim.segmentation import min_visible_px
 
 DISPLAY_WIDTH = 960  # RGB panel width on screen; larger cameras are scaled down (insets keep full detail)
 GREEN, YELLOW, GREY, MAGENTA, RED, WHITE = (60, 220, 60), (0, 220, 255), (150, 150, 150), (255, 0, 255), (0, 0, 255), (255, 255, 255)
@@ -112,13 +112,14 @@ class RunViewer:
         cv2 = self.cv2
         clean = np.ascontiguousarray(p["image"])
         h0, w0 = clean.shape[:2]
+        self._min_px = min_visible_px(w0, h0)
         k = min(1.0, DISPLAY_WIDTH / w0)  # display pixels per camera pixel
         img = cv2.resize(clean, (round(w0 * k), round(h0 * k)), interpolation=cv2.INTER_AREA) if k < 1 else clean.copy()
         insets = [self._inset(clean, g, k) for g in p["gt"]]
         for g in p["gt"]:
             vis = getattr(g, "visible_px", None)
             box = getattr(g, "bbox_vis", None) or g.bbox
-            colour = GREY if not vis else (GREEN if vis >= MIN_VISIBLE_PX else YELLOW)
+            colour = GREY if not vis else (GREEN if vis >= self._min_px else YELLOW)
             x0, y0, x1, y1 = (int(round(v * k)) for v in box)
             pad = 6  # targets are tiny from survey height; pad so the box doesn't hide them
             cv2.rectangle(img, (x0 - pad, y0 - pad), (x1 + pad, y1 + pad), colour, 2)
@@ -184,7 +185,7 @@ class RunViewer:
             return None
         big = cv2.resize(crop, size, interpolation=cv2.INTER_NEAREST)
         vis = g.visible_px
-        colour = GREY if not vis else (GREEN if vis >= MIN_VISIBLE_PX else YELLOW)
+        colour = GREY if not vis else (GREEN if vis >= self._min_px else YELLOW)
         cv2.rectangle(big, (0, 0), (big.shape[1] - 1, big.shape[0] - 1), colour, 2)
         cv2.putText(big, f"{g.object_id} x{size[0] / crop.shape[1]:.0f} ({crop.shape[1]}x{crop.shape[0]} px)", (6, 18),
                     cv2.FONT_HERSHEY_SIMPLEX, 0.5, WHITE, 1, cv2.LINE_AA)

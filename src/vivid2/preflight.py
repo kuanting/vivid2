@@ -73,7 +73,9 @@ def check_spawned(world, targets: List[Dict[str, Any]]) -> Dict[str, List[float]
             )
         size = world.get_3d_bounding_box(t["id"], align)["size"]
         dims = [float(size["x"]), float(size["y"]), float(size["z"])]
-        if not all(MIN_TARGET_SIZE_M <= d <= MAX_TARGET_SIZE_M for d in dims):
+        # The largest side tells a spawned object from an empty (0 m) or runaway box; flat things
+        # such as a tarp are legitimately only centimetres thick.
+        if not (MIN_TARGET_SIZE_M <= max(dims) <= MAX_TARGET_SIZE_M and min(dims) >= 0.0):
             raise PreflightError(f"target {t['id']!r} ({t['asset']}) has an implausible size {dims} m")
         sizes[t["id"]] = dims
     return sizes

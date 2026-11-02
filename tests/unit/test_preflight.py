@@ -64,6 +64,11 @@ def test_renamed_or_odd_sized_targets_fail(blocks_spec):
     tiny = FakeSimWorld(BLOCKS + ["Hiker1"], sizes={"Hiker1": (0.01, 0.01, 0.01)})
     with pytest.raises(PreflightError, match="implausible size"):
         run_preflight(tiny, blocks_spec, blocks_spec["targets"])
+    empty = FakeSimWorld(BLOCKS + ["Hiker1"], sizes={"Hiker1": (0.0, 0.0, 0.0)})  # e.g. no colliding component
+    with pytest.raises(PreflightError, match="implausible size"):
+        run_preflight(empty, blocks_spec, blocks_spec["targets"])
+    flat = FakeSimWorld(BLOCKS + ["Hiker1"], sizes={"Hiker1": (2.0, 1.4, 0.02)})  # a tarp is thin but real
+    run_preflight(flat, blocks_spec, blocks_spec["targets"])
 
 
 def test_runs_are_grouped_by_map(root):

@@ -66,7 +66,8 @@ def perception_metrics(
         gts, ignore = [], []
         for g in frames[fid].get("gt", []):
             box = g.get("bbox_vis") or g["bbox"]
-            (gts if visibility_state(g) == "visible" else ignore).append({**g, "box": box})
+            wh = (frames[fid].get("width"), frames[fid].get("height"))
+            (gts if visibility_state(g, frame_wh=wh) == "visible" else ignore).append({**g, "box": box})
         n_gt += len(gts)
         used = set()
         for det in sorted(dets_by_frame[fid], key=lambda d: -d["score"]):
