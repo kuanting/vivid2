@@ -80,8 +80,12 @@ and `hybrid` agents; `vivid2 run --verify on|off` overrides it), the reference
 2. It descends to 10 m above the highest obstacle around the candidate (from the
    depth image), never below the scenario's `min_agl_m` + 5 m, and never above
    the survey altitude.
-3. It takes two close-up frames. It reports only if one confirms the target at
-   0.6 or more, located from the close-up, which is more accurate.
+3. It takes up to three close-ups. For each one the VLM gets a full-resolution
+   960 x 720 crop around the candidate (a digital zoom). It reports only if a
+   majority confirm the target at 0.6 or more, located as the mean of those
+   close-ups. One noisy "yes" is not enough: in the second Claude run on
+   ForestSAR (2026-11-03), a single confirming close-up turned the red-tarp
+   decoy into a false alarm.
 4. It climbs back and flies the rest of the path. Dismissed spots are not checked
    again, and after 8 detours it falls back to reporting finds at 0.6 directly.
 

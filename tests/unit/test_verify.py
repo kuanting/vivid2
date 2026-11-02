@@ -117,3 +117,36 @@ def test_close_up_frames_carry_the_candidate_as_focus(tmp_path, blocks_run):
     assert close, "no close-up frame had a focus"
     w, h = 960, 720  # FakeWorld camera; the drone hovers over the candidate, so it projects near the centre
     assert all(abs(u - w / 2) < 60 and abs(v - h / 2) < 60 for u, v in close)
+
+
+class FlipFlopReasoner(Reasoner):
+    """Unsure from survey height; close up, answers follow a fixed yes/no pattern (a noisy VLM)."""
+
+    name = "flipflop"
+
+    def __init__(self, pattern):
+        self.pattern, self.i = list(pattern), 0
+
+    def assess(self, frame, detections, mission):
+        if not frame.gt:
+            return Assessment(False, 0.05), UsageStats(model="fake")
+        g = frame.gt[0]
+        px = ((g.bbox[0] + g.bbox[2]) / 2, (g.bbox[1] + g.bbox[3]) / 2)
+        if frame.focus is None:  # survey frame
+            return Assessment(True, 0.5, pixel=px), UsageStats(model="fake")
+        yes = self.pattern[self.i % len(self.pattern)]
+        self.i += 1
+        return (Assessment(True, 0.7, pixel=px) if yes else Assessment(False, 0.3)), UsageStats(model="fake")
+
+
+@pytest.mark.parametrize("pattern,confirmed,looks", [
+    ([False, True, False], False, 3),   # one noisy "yes" is not a confirmation
+    ([True, False, True], True, 3),
+    ([True, True, False], True, 2),     # majority reached: no third look
+    ([False, False, True], False, 2),   # majority impossible: stop early
+])
+def test_confirmation_needs_a_majority_of_close_ups(tmp_path, blocks_run, pattern, confirmed, looks):
+    _, world, rec = _fly(tmp_path, blocks_run, FlipFlopReasoner(pattern), max_verifications=1)
+    end = _events(rec, "verify_end")[0]
+    assert end["confirmed"] is confirmed and end["looks"] == looks
+    assert bool(world.reports) is confirmed

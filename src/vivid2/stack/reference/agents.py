@@ -26,7 +26,8 @@ def geolocate(frame: Frame, u: float, v: float, ground_down_m: float) -> Optiona
         patch = frame.depth[max(y - 3, 0):y + 4, max(x - 3, 0):x + 4]
         valid = patch[(patch > 0.1) & (patch < DEPTH_SATURATION_M)]
         if valid.size:
-            return pixel_to_world(u, v, float(np.median(valid)), frame.cam_pos, frame.cam_q,
+            # 75th percentile: a person partly under a crown shows leaves in the patch; lean on the ground
+            return pixel_to_world(u, v, float(np.percentile(valid, 75)), frame.cam_pos, frame.cam_q,
                                   frame.width, frame.height, frame.fov_deg)
     return pixel_ray_to_ground(u, v, frame.cam_pos, frame.cam_q, frame.width, frame.height,
                                frame.fov_deg, ground_down_m)
@@ -83,8 +84,10 @@ class SearchAgent(Agent):
     2. descends to about VERIFY_CLEARANCE_M above the highest obstacle around it,
        read from the depth image, and never below the mission's minimum height
        + VERIFY_MIN_EXTRA_M;
-    3. takes ``verify_frames`` close-ups, and reports the target, located from
-       a close-up, only if one confirms it at ``min_confidence``;
+    3. takes up to ``verify_frames`` close-ups, the VLM looking at a full-resolution
+       crop around the candidate, and reports the target only if a majority confirm
+       it at ``min_confidence`` (a single noisy "yes" is not enough), located as the
+       mean of the confirming close-ups;
     4. climbs back and resumes the path.
 
     Dismissed spots are not checked again. ``max_verifications`` bounds the
@@ -102,7 +105,7 @@ class SearchAgent(Agent):
         dedup_radius_m: float = 15.0,
         verify: bool = False,
         candidate_confidence: float = 0.3,
-        verify_frames: int = 2,
+        verify_frames: int = 3,
         max_verifications: int = 8,
     ):
         self.name = name
@@ -227,15 +230,18 @@ class SearchAgent(Agent):
                            "frame_id": frame.frame_id})
         await ctx.controller.goto([float(ned[0]), float(ned[1]), float(pos[2])], m.max_speed_mps)
         await ctx.controller.goto([float(ned[0]), float(ned[1]), look_down], VERIFY_DESCENT_MPS)
-        found: Optional[TargetReport] = None
+        need = self.verify_frames // 2 + 1  # majority of the close-ups
+        yes: List[Any] = []  # (ned, assessment, frame) of confirming close-ups
+        looks = 0
         best_conf = 0.0
         last_t = frame.t_ns
-        for _ in range(self.verify_frames):
+        while looks < self.verify_frames and len(yes) < need and (looks - len(yes)) <= self.verify_frames - need:
             if ctx.should_stop():
                 break
             close = await ctx.get_frame()
             if close is None:
                 continue
+            looks += 1
             last_t = close.t_ns
             px = world_to_pixel(ned, close.cam_pos, close.cam_q, close.width, close.height, close.fov_deg)
             inside = px is not None and 0 <= px[0] < close.width and 0 <= px[1] < close.height
@@ -245,11 +251,16 @@ class SearchAgent(Agent):
             if a.target_found and a.pixel and a.confidence >= self.min_confidence:
                 at = geolocate(close, a.pixel[0], a.pixel[1], m.ground_down_m)
                 if at is not None and np.linalg.norm(at[:2] - ned[:2]) <= 2 * VERIFY_RADIUS_M + self.dedup_radius_m:
-                    found = TargetReport(ned=at, confidence=a.confidence, source=self.reasoner.name,
-                                         frame_id=close.frame_id, t_ns=close.t_ns, note=a.description)
-                    break
-        ctx.log("events", {"t": last_t, "kind": "verify_end",
-                           "confirmed": found is not None, "confidence": best_conf})
+                    yes.append((at, a, close))
+        found: Optional[TargetReport] = None
+        if len(yes) >= need:
+            at = np.mean([y[0] for y in yes], axis=0)
+            last = yes[-1]
+            found = TargetReport(ned=at, confidence=float(np.mean([y[1].confidence for y in yes])),
+                                 source=self.reasoner.name, frame_id=last[2].frame_id, t_ns=last[2].t_ns,
+                                 note=last[1].description)
+        ctx.log("events", {"t": last_t, "kind": "verify_end", "confirmed": found is not None,
+                           "confidence": best_conf, "looks": looks, "votes": len(yes)})
         return found
 
     async def _resume(self, ctx: MissionContext, survey_down: float) -> None:
