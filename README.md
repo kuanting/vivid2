@@ -104,7 +104,7 @@ every frame, so their replays mostly miss (a miss is scored as an abstention).
 
 | `--agent` | Perception | Reasoner | Purpose |
 |---|---|---|---|
-| `coverage_gt` | Simulator ground truth (occlusion-checked) | Threshold | Oracle upper bound |
+| `coverage_gt` | Simulator ground truth (occlusion- and fog-checked) | Threshold | Oracle upper bound |
 | `coverage_yolo` | ONNX YOLO (`--yolo-model`) | Threshold | Classic CV baseline |
 | `vlm` | none | VLM on raw frames | VLM-only baseline |
 | `hybrid` | ONNX YOLO | VLM verifies candidates | Detector + VLM |

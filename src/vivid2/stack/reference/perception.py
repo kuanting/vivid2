@@ -4,6 +4,8 @@ GroundTruthPerception: oracle upper bound built from simulator ground truth.
 With segmentation pixel counts (ground truth v2) it reports exactly the
 visible targets, boxed around their visible pixels; otherwise it falls back
 to a depth-based occlusion test (sim boxes ignore occluders such as canopy).
+It sees what the scoring counts as visible, so with contrast (ground truth v3)
+it does not see through fog: it is perfect perception of the rendered image.
 
 OnnxYoloDetector: any YOLOv8/YOLO11-format ONNX person detector (COCO class 0),
 run with onnxruntime. Stand-in for a vendor's onboard detector.
@@ -15,7 +17,7 @@ from typing import Dict, List, Optional, Sequence
 import numpy as np
 
 from vivid2.geo import world_to_pixel
-from vivid2.sim.segmentation import min_visible_px
+from vivid2.sim.segmentation import visibility_state
 from vivid2.stack.base import Detection, Frame, Perception
 
 
@@ -47,7 +49,8 @@ class GroundTruthPerception(Perception):
         dets = []
         for a in frame.gt:
             if a.visible_px is not None:  # ground truth v2: segmentation says exactly what is visible
-                if a.visible_px >= min_visible_px(frame.width, frame.height) and a.bbox_vis is not None:
+                state = visibility_state({"visible_px": a.visible_px, "contrast": a.contrast}, frame_wh=(frame.width, frame.height))
+                if state == "visible" and a.bbox_vis is not None:
                     dets.append(Detection(self.label, tuple(a.bbox_vis), 1.0))
             elif self._visible(frame, a.object_id, a.bbox):
                 dets.append(Detection(self.label, tuple(a.bbox), 1.0))

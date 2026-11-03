@@ -4,6 +4,15 @@ The sim's 2D annotation boxes ignore occlusion: a hiker under tree canopy still
 gets a box. Scoring "not visible" answers as misses would punish correct ones,
 so the runner counts each target's pixels in the segmentation image instead.
 
+The segmentation image is geometry only: fog does not touch it. A hiker that
+fog has washed into the ground still has all its pixels there. So the runner
+also measures each object's contrast in the rendered colour image: the CIELAB
+colour difference (Delta E 1976) between the object's own pixels and a thin
+ring of ground around them. Below ``MIN_CONTRAST`` (about where a person stops
+showing in dusk fog from 55 m) the target counts as "partial", like one too
+small to judge: neither a hit nor a miss. Camouflage in clear air (a yellow
+jacket among yellow birch crowns) stays well above it.
+
 Project AirSim assigns segmentation IDs when a scene loads, before VIVID 2's
 targets are spawned, and its default IDs come from a hash of the name that
 ignores digits and capitals (so "Hiker1" and "Hiker2" collide). After spawning,
@@ -23,6 +32,7 @@ DISTRACTOR_ID_BASE = 101
 MAX_ID = 255
 MIN_VISIBLE_PX = 20  # at 960x720; below this a target is "partly visible": neither a hit nor a miss
 REFERENCE_PIXELS = 960 * 720  # the threshold scales with image area, so "visible" means the same patch of ground
+MIN_CONTRAST = 6.0  # CIELAB Delta E against the surrounding ground; below this fog has washed the target out
 PALETTE_ORDER = "rgb"  # palette entries are RGB; decoded images are BGR (verified on Blocks: Hiker1 = (6, 108, 153))
 
 
@@ -53,9 +63,17 @@ def assign_ids(world, targets: List[Dict[str, Any]], distractors: Iterable[Dict[
     return ids
 
 
-def visibility(seg: np.ndarray, ids: Dict[str, int], colours: np.ndarray) -> Dict[str, Dict[str, Any]]:
-    """Visible pixel count and tight visible box (x1, y1, x2, y2) per object in one segmentation image."""
+def visibility(seg: np.ndarray, ids: Dict[str, int], colours: np.ndarray,
+               rgb: Optional[np.ndarray] = None) -> Dict[str, Dict[str, Any]]:
+    """Visible pixel count and tight visible box (x1, y1, x2, y2) per object in one segmentation image.
+
+    With the matching colour image ``rgb`` (BGR, same size), also the object's ``contrast``
+    against its surroundings (see ``contrast``); None when it has no visible pixels.
+    """
     out: Dict[str, Dict[str, Any]] = {}
+    labelled = None
+    if rgb is not None:
+        labelled = ~np.all(seg == colours[BACKGROUND_ID], axis=2)
     for oid, sid in ids.items():
         mask = np.all(seg == colours[sid], axis=2)
         n = int(mask.sum())
@@ -64,7 +82,40 @@ def visibility(seg: np.ndarray, ids: Dict[str, int], colours: np.ndarray) -> Dic
             ys, xs = np.nonzero(mask)
             box = [float(xs.min()), float(ys.min()), float(xs.max() + 1), float(ys.max() + 1)]
         out[oid] = {"visible_px": n, "bbox_vis": box}
+        if rgb is not None:
+            out[oid]["contrast"] = contrast(rgb, mask, box, labelled) if n else None
     return out
+
+
+RING_GAP_PX = 2    # at 1920 px wide: skip the anti-aliased edge between object and ground
+RING_WIDTH_PX = 8  # at 1920 px wide: the ground the object is seen against
+
+
+def contrast(rgb: np.ndarray, mask: np.ndarray, box: List[float], labelled: Optional[np.ndarray] = None) -> Optional[float]:
+    """CIELAB Delta E (1976) between the mean colour of the object's pixels and of a ring around them.
+
+    The ring is ``RING_GAP_PX`` to ``RING_GAP_PX + RING_WIDTH_PX`` pixels out (scaled to the image
+    width) and leaves out other labelled objects (``labelled``). Fog pulls both towards the fog
+    colour, so the difference shrinks as the fog thickens. None if the ring is empty.
+    """
+    import cv2
+
+    h, w = mask.shape
+    scale = w / 1920.0
+    gap = max(1, int(round(RING_GAP_PX * scale)))
+    outer = gap + max(2, int(round(RING_WIDTH_PX * scale)))
+    x1, y1 = max(int(box[0]) - outer, 0), max(int(box[1]) - outer, 0)
+    x2, y2 = min(int(box[2]) + outer, w), min(int(box[3]) + outer, h)
+    m = mask[y1:y2, x1:x2].astype(np.uint8)
+    near = cv2.dilate(m, cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (2 * gap + 1, 2 * gap + 1)))
+    far = cv2.dilate(m, cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (2 * outer + 1, 2 * outer + 1)))
+    ring = far.astype(bool) & ~near.astype(bool)
+    if labelled is not None:
+        ring &= ~labelled[y1:y2, x1:x2]
+    if not ring.any():
+        return None
+    lab = cv2.cvtColor(rgb[y1:y2, x1:x2].astype(np.float32) / 255.0, cv2.COLOR_BGR2Lab)
+    return float(np.linalg.norm(lab[m.astype(bool)].mean(axis=0) - lab[ring].mean(axis=0)))
 
 
 def min_visible_px(width: Optional[int] = None, height: Optional[int] = None) -> int:
@@ -78,12 +129,17 @@ def min_visible_px(width: Optional[int] = None, height: Optional[int] = None) ->
 def visibility_state(gt: Dict[str, Any], min_px: Optional[int] = None, frame_wh=None) -> str:
     """'visible', 'partial' (don't care) or 'hidden' for one ground-truth entry.
 
-    The threshold is ``min_px``, else scaled to the frame size ``frame_wh``.
-    Entries without ``visible_px`` (ground truth v1) count as visible.
+    The pixel threshold is ``min_px``, else scaled to the frame size ``frame_wh``. A target
+    with enough pixels but contrast below ``MIN_CONTRAST`` (washed out by fog) is 'partial'.
+    Entries without ``visible_px`` (ground truth v1) count as visible; entries without
+    ``contrast`` (ground truth v2) are judged by pixels alone.
     """
     px = gt.get("visible_px")
     if px is None:
         return "visible"
     if min_px is None:
         min_px = min_visible_px(*(frame_wh or (None, None)))
-    return "visible" if px >= min_px else ("partial" if px > 0 else "hidden")
+    if px < min_px:
+        return "partial" if px > 0 else "hidden"
+    c = gt.get("contrast")
+    return "partial" if c is not None and c < MIN_CONTRAST else "visible"

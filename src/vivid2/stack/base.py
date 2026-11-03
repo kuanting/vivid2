@@ -30,6 +30,7 @@ class GTAnnotation:
     bbox: Tuple[float, float, float, float]  # x1, y1, x2, y2 (pixels); sim box, ignores occlusion
     visible_px: Optional[int] = None  # pixels of the object in the segmentation image (None: not measured)
     bbox_vis: Optional[Tuple[float, float, float, float]] = None  # tight box around the visible pixels
+    contrast: Optional[float] = None  # CIELAB Delta E against the surrounding ground (low in fog); None: not measured
 
 
 @dataclass

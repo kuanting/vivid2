@@ -11,7 +11,7 @@ import time
 import traceback
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Optional, Tuple
+from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
 
 import numpy as np
 
@@ -115,14 +115,21 @@ def detect_depth_scale(raw: np.ndarray, cam_height_m: float) -> Optional[float]:
     return 0.001 if float(np.median(valid)) > 1000.0 else 1.0
 
 
+# What the runner itself does to a run (part of every run's config hash, so changing it re-runs on resume).
+# 2: segmentation visible pixels; 3: exposure settled before the mission, contrast (fog) in visibility.
+SIM_VERSION = 3
+
+
 def run_config_hash(run: Run, agent_desc: Dict[str, Any]) -> str:
     """Fingerprint of everything that determines a run's outcome.
 
     The run id stays (scenario, swept params, seed) so different agents can be
-    paired on the same run; this hash also covers the resolved scenario spec and
-    the agent's configuration, so editing either forces a re-run on resume.
+    paired on the same run; this hash also covers the resolved scenario spec, the
+    agent's configuration and ``SIM_VERSION``, so changing any of them forces a
+    re-run on resume.
     """
-    blob = json.dumps({"spec": run.spec, "seed": run.seed, "agent": agent_desc}, sort_keys=True, default=str)
+    blob = json.dumps({"spec": run.spec, "seed": run.seed, "agent": agent_desc, "sim": SIM_VERSION},
+                      sort_keys=True, default=str)
     return hashlib.sha1(blob.encode()).hexdigest()[:12]
 
 
@@ -143,6 +150,38 @@ def apply_environment(world, env: Dict[str, Any]) -> None:
         world.enable_weather_visual_effects()
         for name, value in weather.items():
             world.set_weather_visual_effects_param(WeatherParameter[name.upper()], float(value))
+
+
+EXPOSURE_MAX_CAPTURES = 20
+EXPOSURE_PERIOD_S = 0.5
+EXPOSURE_SETTLED_GREY = 1.5  # spread of mean grey level (0-255) over the last 3 captures that counts as settled
+
+
+async def settle_exposure(drone, cameras: Sequence[str]) -> Dict[str, Dict[str, Any]]:
+    """Capture from each camera until its auto exposure has settled to this run's light and fog.
+
+    A camera's exposure state survives from the previous run in the same Unreal session, and it
+    only adapts when the camera captures. Without this, the first frames of a run are too bright
+    or too dark depending on what ran before (the very first one is sometimes black). Called
+    before the mission clock starts; the frames are thrown away.
+    """
+    from projectairsim.types import ImageType
+
+    out: Dict[str, Dict[str, Any]] = {}
+    for cam in cameras:
+        greys: List[float] = []
+        settled = False
+        for _ in range(EXPOSURE_MAX_CAPTURES):
+            imgs = await asyncio.to_thread(drone.get_images, cam, [ImageType.SCENE])
+            msg = imgs.get(ImageType.SCENE)
+            if msg:
+                greys.append(float(_decode(msg, np.uint8, 3).mean()))
+                if len(greys) >= 3 and greys[-1] > 1.0 and max(greys[-3:]) - min(greys[-3:]) < EXPOSURE_SETTLED_GREY:
+                    settled = True
+                    break
+            await asyncio.sleep(EXPOSURE_PERIOD_S)
+        out[cam] = {"captures": len(greys), "settled": settled, "mean_grey": [round(g, 1) for g in greys]}
+    return out
 
 
 def projectairsim_commit(airsim_root: Optional[str]) -> Optional[str]:
@@ -234,17 +273,20 @@ class SimMissionContext(MissionContext):
         seg = None
         if smsg:
             seg = _decode(smsg, np.uint8, 3)
-            vis = await asyncio.to_thread(visibility, seg, self.seg_ids, self._seg_colours)
+            # the colour image too: fog does not show in segmentation, only in the object's contrast
+            vis = await asyncio.to_thread(visibility, seg, self.seg_ids, self._seg_colours,
+                                          rgb if rgb.shape[:2] == seg.shape[:2] else None)
         gt = []
         for a in rgb_msg.get("annotations") or []:
             c, s = a["bbox2d"]["center"], a["bbox2d"]["size"]
             v = vis.get(a["object_id"], {})
             gt.append(GTAnnotation(a["object_id"], (c["x"] - s["x"] / 2, c["y"] - s["y"] / 2, c["x"] + s["x"] / 2, c["y"] + s["y"] / 2),
-                                   v.get("visible_px"), tuple(v["bbox_vis"]) if v.get("bbox_vis") else None))
+                                   v.get("visible_px"), tuple(v["bbox_vis"]) if v.get("bbox_vis") else None,
+                                   v.get("contrast")))
         annotated = {g.object_id for g in gt}
         for oid, v in vis.items():  # seen in segmentation but outside the annotation's frustum test
             if oid in self.target_ids and oid not in annotated and v["visible_px"]:
-                gt.append(GTAnnotation(oid, tuple(v["bbox_vis"]), v["visible_px"], tuple(v["bbox_vis"])))
+                gt.append(GTAnnotation(oid, tuple(v["bbox_vis"]), v["visible_px"], tuple(v["bbox_vis"]), v.get("contrast")))
         distractors_seen = {oid: v["visible_px"] for oid, v in vis.items()
                             if oid not in self.target_ids and v["visible_px"]}
         self._frame_id += 1
@@ -328,6 +370,8 @@ def _gt_record(g: GTAnnotation) -> Dict[str, Any]:
     if g.visible_px is not None:
         rec["visible_px"] = g.visible_px
         rec["bbox_vis"] = list(g.bbox_vis) if g.bbox_vis else None
+    if g.contrast is not None:
+        rec["contrast"] = round(g.contrast, 2)
     return rec
 
 
@@ -470,6 +514,14 @@ async def execute_run(
         chase = drone.sensors.get("Chase", {}).get("scene_camera") if hasattr(drone, "sensors") else None
         if chase:
             client.subscribe(chase, viewer.chase_callback())
+    cameras = [sc.get("camera", "Payload")]
+    for nav in ("Front",):
+        try:
+            camera_settings(scene, nav, sc.get("drone_name", "Drone1"))
+            cameras.append(nav)
+        except StopIteration:
+            pass  # robot config without that camera
+    exposure = await settle_exposure(drone, cameras)  # before the mission clock starts
 
     controller = AirSimController(drone, world.get_sim_time, rec.log)
     ctx = SimMissionContext(run, world, drone, sc.get("camera", "Payload"), rec, controller, cam["fov-degrees"], frame_bank,
@@ -491,7 +543,9 @@ async def execute_run(
         "map": sc.get("map"), "preflight": preflight,
         "mission_spec": ctx.mission.record(),  # what the DUT was told; open-loop evaluation reuses it
         "distractors": distractors, "segmentation_ids": seg_ids,
-        "gt_version": 2 if seg_ids else 1,  # 2: ground truth carries per-target visible pixels
+        # 2: ground truth carries per-target visible pixels; 3: and contrast in the colour image (fog)
+        "gt_version": 3 if seg_ids else 1,
+        "sim_version": SIM_VERSION, "exposure": exposure,
         "frame_bank": {"mode": frame_bank, "jpeg_quality": JPEG_QUALITY, "jpeg_max_side": FRAME_JPEG_MAX_SIDE,
                        "depth": "uint16 mm, half resolution, 0 = no data"},
     }

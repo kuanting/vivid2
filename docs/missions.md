@@ -78,15 +78,35 @@ the benchmark measures.
 On ForestSAR about 37 % of the ground is open, but a dip can see only about
 15 % of a search area. On `ForestSAR_Open` it is 73 % and 62 %; on
 `ForestSAR_Dense` 4 % of the ground is open and nothing outside the launch
-clearing is wide enough to descend into, so the baseline does not dip at all. `forest_clearing_01` puts its hikers inside clearings a
-dip reaches; the other forest scenarios put them under crown edges, out of its
-reach. To place targets either way, record a survey with `--dip on
+clearing is wide enough to descend into, so the baseline does not dip at all.
+`forest_clearing_01` puts its hikers inside clearings a dip reaches; the other
+forest scenarios put them under crown edges, out of its reach. To place targets either way, record a survey with `--dip on
 --frame-bank rgbd` and run `python tools/dip_reach.py <run dir>`.
 
-**The oracle sees through fog.** `coverage_gt` uses segmentation ground truth,
-which is geometry only, so in fog it is an upper bound on planning, not on
-seeing. Compare stacks in fog against `vlm`, `coverage_yolo` and their `--dip`
-variants.
+**Visible means visible in the image, fog included.** Segmentation ground
+truth is geometry only: fog does not touch it. So the runner also measures each
+target's colour contrast against the ground around it in the rendered frame
+(CIELAB ΔE, recorded as `contrast` in `frames.jsonl`). A target washed out by
+fog, below `MIN_CONTRAST` (ΔE 6, in `src/vivid2/sim/segmentation.py`), is
+don't-care in the perception and reasoning scores: missing it is not an error,
+and reporting it earns nothing. Measured on 2026-11-03 (`forest_clearing_01`,
+`forest_hiker_02`, `forest_fog_01`; medians per hiker, then the range):
+
+| Condition | Camera | Hiker contrast (ΔE) | Don't-care at ΔE 6 |
+|---|---|---|---|
+| Dusk, clear air (including camouflaged hikers) | 55 m | 22–32 (12–41) | 0 % |
+| Dusk, fog 0.02 | 55 m | 12–32 (8–38) | 0 % |
+| Noon, fog 0.2 | 55 m | 10 (9–11) | 0 % |
+| Dusk, fog 0.05 | 55 m | 7–16 (5–30) | 17 % |
+| Dusk, fog 0.05 | 12 m (a dip) | 20–26 (13–27) | 0 % |
+| Noon, fog 0.4 | 55 m | 5 (4–10) | 57 % |
+
+Camouflage is not fog: a yellow jacket among yellow birch crowns stands well
+above the threshold, so missing it still counts. The oracle `coverage_gt` uses
+the same rule, so it does not see through fog either. It is perfect perception
+of the rendered frames, not of the scene. The contrast of every target is kept
+in `frames.jsonl`, so a different threshold can be applied to finished runs
+with `vivid2 rescore`.
 
 ## Wildfire S&R (`mission: wildfire_sar`), Phase 2
 
