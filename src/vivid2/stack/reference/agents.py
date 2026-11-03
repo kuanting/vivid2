@@ -23,15 +23,16 @@ VERIFY_RADIUS_M = 8.0       # ground radius checked for obstacles, and how far a
 VERIFY_DESCENT_MPS = 3.0
 
 # Dips into clearings (see lowflight.py)
-DIP_DESCENT_MPS = 2.0
+DIP_DESCENT_MPS = 3.0
 DIP_CLIMB_MPS = 3.0
-DIP_STEP_M = 8.0            # descend in steps, re-checking the clearing with each closer depth image
+DIP_STEP_M = 10.0           # descend in steps, re-checking the clearing with each closer depth image
 DIP_STEP_OVERHEAD_S = 1.5   # per step: settling, one frame
 DIP_COLUMN_M = 4.0          # radius around the descent line that must stay clear
 DIP_CLEARANCE_M = 3.0       # ... of anything higher than this below the next stop
 DIP_KEEP_RADIUS = 0.75      # stop descending if the clearing shrinks below this share of min_radius_m
 LANDING_OVERHEAD_S = 40.0   # final slow landing and disarm, in the time budget
 MAX_GUARD_CLIMBS = 6
+HOME_SKIP_M = 25.0          # no dips into the launch clearing
 
 
 GROUND_TOLERANCE_M = 3.0  # a depth point this far above the coarse terrain is not on the ground
@@ -215,11 +216,22 @@ class LowFlightMixin:
 
     async def _lf_tour(self, ctx: MissionContext,
                        look: Callable[[MissionContext, Clearing], Awaitable[None]]) -> None:
-        """Dip into the clearings found, nearest first, while time and energy allow."""
+        """Dip into the clearings found, nearest first, while time and energy allow.
+
+        The launch clearing is skipped: the drone saw it up close at takeoff.
+        """
+        home = ctx.mission.start_ned
         visited: List[tuple] = []
+
+        def candidates() -> List[Clearing]:
+            return [c for c in self._canopy.clearings(self.low.min_radius_m, self._dip_spacing, exclude=visited)
+                    if math.hypot(c.n - home[0], c.e - home[1]) > HOME_SKIP_M]
+
+        planned = candidates()
+        self._lf_event(ctx, "dip_plan", spots=[[round(c.n, 1), round(c.e, 1), round(c.radius_m, 1)] for c in planned])
         while self._dips < self.low.max_dips and not ctx.should_stop() and not self._all_found(ctx):
             pos, _ = ctx.pose()
-            spots = self._canopy.clearings(self.low.min_radius_m, self._dip_spacing, exclude=visited)
+            spots = candidates()
             if not spots:
                 break
             spot = min(spots, key=lambda c: math.hypot(c.n - pos[0], c.e - pos[1]))
@@ -229,8 +241,7 @@ class LowFlightMixin:
             visited.append((spot.n, spot.e))
             self._dips += 1
             await self._dip(ctx, spot, look)
-        self._lf_event(ctx, "dip_tour_end", dips=self._dips,
-                       clearings=len(self._canopy.clearings(self.low.min_radius_m, self._dip_spacing)))
+        self._lf_event(ctx, "dip_tour_end", dips=self._dips, clearings=len(planned))
 
     async def _dip(self, ctx: MissionContext, spot: Clearing,
                    look: Callable[[MissionContext, Clearing], Awaitable[None]]) -> None:

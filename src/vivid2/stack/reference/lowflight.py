@@ -43,7 +43,7 @@ class DipSettings:
 
     dip_agl_m: float = 12.0          # look height above the ground (never below min_agl_m + 5)
     min_radius_m: float = 6.0        # clearance from the drone to the nearest tree, to descend
-    max_dips: int = 10
+    max_dips: int = 30               # in practice the time budget decides
     dip_frames: int = 3              # looks at the bottom; a majority must agree to report
     open_height_m: float = 3.0       # a cell is open if its surface is this close to the ground
     cell_m: float = 2.0

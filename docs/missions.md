@@ -56,9 +56,9 @@ simplest safe version of this, to show the fog scenarios can be solved:
    the nadir depth image. Depth is not affected by fog. It stores this as
    height above the coarse terrain model (`ctx.mission.terrain`).
 2. After the survey it flies to the clearings it found, nearest first, while
-   time and energy allow (at most 10).
+   time and energy allow, skipping the launch clearing.
 3. It descends vertically into each to about 12 m above the ground. It goes
-   down in 8 m steps, re-checking the clearing with each closer depth image.
+   down in 10 m steps, re-checking the clearing with each closer depth image.
 4. It looks three times from the bottom, and reports only what a majority of
    those looks agree on. Then it climbs back.
 5. A guard climbs when the mapped canopy or ground ahead comes within 10 m of
