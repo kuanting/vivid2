@@ -34,18 +34,42 @@ LANDING_OVERHEAD_S = 40.0   # final slow landing and disarm, in the time budget
 MAX_GUARD_CLIMBS = 6
 
 
-def geolocate(frame: Frame, u: float, v: float, ground_down_m: float) -> Optional[np.ndarray]:
-    """Pixel -> NED using median depth around the pixel, else a flat-ground ray."""
+GROUND_TOLERANCE_M = 3.0  # a depth point this far above the coarse terrain is not on the ground
+
+
+def ray_to_terrain(frame: Frame, u: float, v: float, terrain: TerrainModel, iterations: int = 4) -> Optional[np.ndarray]:
+    """Where the pixel's ray meets the (smooth, coarse) terrain: a few flat-ground steps."""
+    down = float(terrain.down_at(frame.cam_pos[0], frame.cam_pos[1]))
+    p = None
+    for _ in range(iterations):
+        p = pixel_ray_to_ground(u, v, frame.cam_pos, frame.cam_q, frame.width, frame.height, frame.fov_deg, down)
+        if p is None:
+            return None
+        down = float(terrain.down_at(p[0], p[1]))
+    return p
+
+
+def geolocate(frame: Frame, u: float, v: float, ground_down_m: float,
+              terrain: Optional[TerrainModel] = None) -> Optional[np.ndarray]:
+    """Pixel -> NED of a person on the ground.
+
+    Uses the depth around the pixel. When that lands well above the terrain (the
+    patch caught the crown a person is partly under), or there is no depth, the
+    pixel's ray is intersected with the terrain instead (flat ``ground_down_m``
+    without a terrain model).
+    """
+    terrain = terrain if terrain is not None else TerrainModel.flat(ground_down_m)
     if frame.depth is not None:
         x, y = int(round(u)), int(round(v))
         patch = frame.depth[max(y - 3, 0):y + 4, max(x - 3, 0):x + 4]
         valid = patch[(patch > 0.1) & (patch < DEPTH_SATURATION_M)]
         if valid.size:
             # 75th percentile: a person partly under a crown shows leaves in the patch; lean on the ground
-            return pixel_to_world(u, v, float(np.percentile(valid, 75)), frame.cam_pos, frame.cam_q,
-                                  frame.width, frame.height, frame.fov_deg)
-    return pixel_ray_to_ground(u, v, frame.cam_pos, frame.cam_q, frame.width, frame.height,
-                               frame.fov_deg, ground_down_m)
+            p = pixel_to_world(u, v, float(np.percentile(valid, 75)), frame.cam_pos, frame.cam_q,
+                               frame.width, frame.height, frame.fov_deg)
+            if p[2] >= float(terrain.down_at(p[0], p[1])) - GROUND_TOLERANCE_M:
+                return p
+    return ray_to_terrain(frame, u, v, terrain)
 
 
 def highest_obstacle_down(frame: Frame, u: float, v: float, radius_m: float = VERIFY_RADIUS_M) -> Optional[float]:
@@ -265,10 +289,11 @@ class SearchAgent(LowFlightMixin, Agent):
 
     With ``verify`` on, a candidate (a find at ``candidate_confidence`` or more)
     is not reported straight away. The agent:
-    1. leaves the survey path and flies over the candidate;
-    2. descends to about VERIFY_CLEARANCE_M above the highest obstacle around it,
-       read from the depth image, and never below the mission's minimum height
-       + VERIFY_MIN_EXTRA_M;
+    1. leaves the survey path and flies to a point on the line of sight from the
+       candidate to the camera that saw it (so the view stays as unobstructed);
+    2. descends along that line to about VERIFY_CLEARANCE_M above the highest
+       obstacle around the candidate and under the look point, read from the
+       depth image, and never below the mission's minimum height + VERIFY_MIN_EXTRA_M;
     3. takes up to ``verify_frames`` close-ups, the VLM looking at a full-resolution
        crop around the candidate, and reports the target only if a majority confirm
        it at ``min_confidence`` (a single noisy "yes" is not enough), located as the
@@ -323,8 +348,9 @@ class SearchAgent(LowFlightMixin, Agent):
             "min_confidence": self.min_confidence,
             "frame_period_s": self.frame_period_s,
             "dedup_radius_m": self.dedup_radius_m,
+            "geolocate": "depth_or_terrain_ray",
             "verify": ({"candidate_confidence": self.candidate_confidence, "frames": self.verify_frames,
-                        "max": self.max_verifications} if self.verify else False),
+                        "max": self.max_verifications, "approach": "line_of_sight"} if self.verify else False),
             **({"dip": self._lf_describe()} if self.low is not None else {}),  # old run hashes stay valid
             # Layer settings (sidelap, thresholds, VLM effort...) so a config change forces a re-run.
             "params": {
@@ -383,7 +409,7 @@ class SearchAgent(LowFlightMixin, Agent):
         checking = self.verify and self._verifications < self.max_verifications
         threshold = self.candidate_confidence if checking else self.min_confidence
         if assessment.target_found and assessment.pixel and assessment.confidence >= threshold:
-            ned = geolocate(frame, assessment.pixel[0], assessment.pixel[1], m.ground_down_m)
+            ned = geolocate(frame, assessment.pixel[0], assessment.pixel[1], m.ground_down_m, m.terrain)
             if ned is not None and self._is_new(ned, self._reported + self._dismissed):
                 if checking:
                     self._verifications += 1
@@ -426,7 +452,7 @@ class SearchAgent(LowFlightMixin, Agent):
             self._lf_observe(frame)
             a, _ = await self._assess(ctx, frame, phase="dip")
             if a.target_found and a.pixel and a.confidence >= self.min_confidence:
-                at = geolocate(frame, a.pixel[0], a.pixel[1], m.ground_down_m)
+                at = geolocate(frame, a.pixel[0], a.pixel[1], m.ground_down_m, m.terrain)
                 if at is not None:
                     yes.append((at, a, frame))
             wait = self.frame_period_s - (asyncio.get_running_loop().time() - t_loop)
@@ -469,20 +495,39 @@ class SearchAgent(LowFlightMixin, Agent):
 
     async def _verify(self, ctx: MissionContext, frame: Frame, assessment: Assessment, ned: np.ndarray,
                       survey_down: float) -> Optional[TargetReport]:
-        """Fly over a candidate and descend for a closer look; a confirmed report, or None."""
+        """Come closer along the line of sight and look again; a confirmed report, or None.
+
+        The look point lies on the line from the candidate to the camera that saw it,
+        so the candidate stays where it was in the image, unobstructed as it was, only
+        larger. (Straight overhead, a person seen at an angle under a crown's edge is
+        hidden by the crown.) Its height keeps VERIFY_CLEARANCE_M above the highest
+        obstacle around the candidate and under the look point, and the mission's
+        minimum height + VERIFY_MIN_EXTRA_M.
+        """
         m = ctx.mission
         ground = float(ned[2])  # the candidate sits on the ground
         top = highest_obstacle_down(frame, assessment.pixel[0], assessment.pixel[1])
         height = m.min_agl_m + VERIFY_MIN_EXTRA_M
         if top is not None:
             height = max(height, ground - top + VERIFY_CLEARANCE_M)
-        look_down = max(ground - height, survey_down)  # never climb above the survey altitude to look
+        cam = np.asarray(frame.cam_pos, float)
+        seen_from = ground - float(cam[2])  # height of the detecting camera above the candidate
+        frac = float(np.clip(height / seen_from, 0.0, 1.0)) if seen_from > 0 else 1.0
+        look = ned + frac * (cam - ned)
+        # Keep clear of whatever lies under the look point too (it is between the candidate and the camera's nadir).
+        below = world_to_pixel([look[0], look[1], ground], cam, frame.cam_q, frame.width, frame.height, frame.fov_deg)
+        if below is not None and 0 <= below[0] < frame.width and 0 <= below[1] < frame.height:
+            top_look = highest_obstacle_down(frame, below[0], below[1])
+            if top_look is not None and look[2] > top_look - VERIFY_CLEARANCE_M:
+                frac = float(np.clip((ground - (top_look - VERIFY_CLEARANCE_M)) / seen_from, frac, 1.0))
+                look = ned + frac * (cam - ned)
+        look_down = max(float(look[2]), survey_down)  # never climb above the survey altitude to look
         pos, _ = ctx.pose()
         ctx.log("events", {"t": frame.t_ns, "kind": "verify_start", "candidate": [float(v) for v in ned],
                            "confidence": assessment.confidence, "height_m": ground - look_down,
-                           "frame_id": frame.frame_id})
-        await ctx.controller.goto([float(ned[0]), float(ned[1]), float(pos[2])], m.max_speed_mps)
-        await ctx.controller.goto([float(ned[0]), float(ned[1]), look_down], VERIFY_DESCENT_MPS)
+                           "look_at": [float(look[0]), float(look[1]), look_down], "frame_id": frame.frame_id})
+        await ctx.controller.goto([float(look[0]), float(look[1]), float(pos[2])], m.max_speed_mps)
+        await ctx.controller.goto([float(look[0]), float(look[1]), look_down], VERIFY_DESCENT_MPS)
         need = self.verify_frames // 2 + 1  # majority of the close-ups
         yes: List[Any] = []  # (ned, assessment, frame) of confirming close-ups
         looks = 0
@@ -503,7 +548,7 @@ class SearchAgent(LowFlightMixin, Agent):
             a, _ = await self._assess(ctx, close, phase="verify")
             best_conf = max(best_conf, a.confidence if a.target_found else 0.0)
             if a.target_found and a.pixel and a.confidence >= self.min_confidence:
-                at = geolocate(close, a.pixel[0], a.pixel[1], m.ground_down_m)
+                at = geolocate(close, a.pixel[0], a.pixel[1], m.ground_down_m, m.terrain)
                 if at is not None and np.linalg.norm(at[:2] - ned[:2]) <= 2 * VERIFY_RADIUS_M + self.dedup_radius_m:
                     yes.append((at, a, close))
         found: Optional[TargetReport] = None

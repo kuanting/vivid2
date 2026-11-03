@@ -105,18 +105,38 @@ def test_close_up_frames_carry_the_candidate_as_focus(tmp_path, blocks_run):
 
         def __init__(self):
             super().__init__(sure_below_m=20.0)
-            self.focus = []
+            self.focus, self.seen = [], None
 
         def assess(self, frame, detections, mission):
-            self.focus.append(frame.focus)
-            return super().assess(frame, detections, mission)
+            a, u = super().assess(frame, detections, mission)
+            if frame.focus is not None:
+                self.focus.append(frame.focus)
+            elif a.target_found:
+                self.seen = a.pixel  # where the survey frame saw the candidate
+            return a, u
 
     r = FocusRecorder()
     _fly(tmp_path, blocks_run, r)
-    close = [f for f in r.focus if f is not None]
-    assert close, "no close-up frame had a focus"
-    w, h = 960, 720  # FakeWorld camera; the drone hovers over the candidate, so it projects near the centre
-    assert all(abs(u - w / 2) < 60 and abs(v - h / 2) < 60 for u, v in close)
+    assert r.focus, "no close-up frame had a focus"
+    # coming closer along the line of sight keeps the candidate where it was in the image
+    assert all(abs(u - r.seen[0]) < 5 and abs(v - r.seen[1]) < 5 for u, v in r.focus)
+
+
+def test_the_closer_look_comes_down_the_line_of_sight(tmp_path, blocks_run):
+    import json
+    _, world, rec = _fly(tmp_path, blocks_run, DistanceReasoner(sure_below_m=20.0))
+    start, = _events(rec, "verify_start")
+    frames = {json.loads(l)["frame_id"]: json.loads(l) for l in (rec.run_dir / "frames.jsonl").read_text().splitlines()}
+    cam = np.asarray(frames[start["frame_id"]]["cam_pos"], float)
+    cand, look = np.asarray(start["candidate"], float), np.asarray(start["look_at"], float)
+    # on the segment candidate -> detecting camera, at the planned height
+    frac = (cand[2] - look[2]) / (cand[2] - cam[2])
+    assert 0 < frac < 1
+    assert np.allclose(look, cand + frac * (cam - cand), atol=0.05)
+    assert cand[2] - look[2] == pytest.approx(start["height_m"])
+    # and the drone actually went there
+    traj = np.array([json.loads(l)["pos"] for l in (rec.run_dir / "trajectory.jsonl").read_text().splitlines()])
+    assert np.min(np.linalg.norm(traj - look, axis=1)) < 0.5
 
 
 class FlipFlopReasoner(Reasoner):

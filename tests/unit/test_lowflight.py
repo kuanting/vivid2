@@ -210,3 +210,26 @@ def test_dip_flag_names_agents_and_changes_the_config_hash(blocks_run):
     s = AgentFactory("survey", {"dip": "on"})
     assert s.name == "survey-dip" and s(blocks_run).describe()["dip"]
     assert "dip" not in AgentFactory("survey", {})(blocks_run).describe()
+
+
+def test_a_find_under_a_crown_edge_is_located_on_the_ground_not_on_the_crown():
+    """Depth around the pixel caught leaves 20 m up: geolocate falls back to the ray meeting the terrain."""
+    from vivid2.geo import pixel_to_world
+    from vivid2.stack.reference.agents import geolocate
+
+    cam = np.array([0.0, 0.0, -50.0])
+    depth = np.full((240, 320), 30.0, np.float32)  # a crown everywhere, 20 m above the ground at down 0
+    f = Frame(0, 1, np.zeros((240, 320, 3), np.uint8), cam, NADIR_Q, 80.0, depth=depth)
+    u, v = 260.0, 60.0
+    crown = pixel_to_world(u, v, 30.0, cam, NADIR_Q, 320, 240, 80.0)
+    p = geolocate(f, u, v, 0.0, TerrainModel.flat(0.0))
+    assert p[2] == pytest.approx(0.0, abs=0.1)            # on the ground
+    assert np.hypot(*(p[:2] - crown[:2])) > 5.0            # not under the crown point
+    # on the ground already: depth is used as before
+    f.depth[:] = 50.0
+    q = geolocate(f, u, v, 0.0, TerrainModel.flat(0.0))
+    assert q[2] == pytest.approx(0.0, abs=0.1) and np.allclose(q[:2], p[:2], atol=0.2)
+    # a sloping coarse DEM is followed
+    slope = TerrainModel(np.add.outer(np.arange(11) * -2.0, np.zeros(11)), n0=-50, e0=-50, cell_m=10.0)
+    r = geolocate(Frame(0, 1, f.rgb, cam, NADIR_Q, 80.0), u, v, 0.0, slope)
+    assert r[2] == pytest.approx(float(slope.down_at(r[0], r[1])), abs=0.2)
