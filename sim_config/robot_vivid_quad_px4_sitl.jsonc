@@ -334,7 +334,18 @@
           "streaming-enabled": true,
           "pixels-as-float": false,
           "compress": false,
-          "target-gamma": 2.5
+          "target-gamma": 2.5,
+          // auto exposure, as on a real camera: the project default is a fixed exposure set for noon,
+          // which renders dusk scenes almost black (histogram method, fast adaptation)
+          "auto-exposure-method": 0,
+          "auto-exposure-speed": 20.0,
+          "auto-exposure-bias": 0.0,
+          // The project runs with r.DefaultFeature.AutoExposure=0 (min = max brightness = 1, i.e. fixed)
+          // and legacy luminance units, so give the camera a real adaptation range down to dusk.
+          "auto-exposure-min-brightness": 0.0005,
+          "auto-exposure-max-brightness": 2.0,
+          "auto-exposure-histogram-log-min": -14.0,
+          "auto-exposure-histogram-log-max": 6.0
         }
       ],
       "gimbal": {
@@ -363,7 +374,18 @@
           "streaming-enabled": false,
           "pixels-as-float": false,
           "compress": false,
-          "target-gamma": 2.5
+          "target-gamma": 2.5,
+          // auto exposure, as on a real camera: the project default is a fixed exposure set for noon,
+          // which renders dusk scenes almost black (histogram method, fast adaptation)
+          "auto-exposure-method": 0,
+          "auto-exposure-speed": 20.0,
+          "auto-exposure-bias": 0.0,
+          // The project runs with r.DefaultFeature.AutoExposure=0 (min = max brightness = 1, i.e. fixed)
+          // and legacy luminance units, so give the camera a real adaptation range down to dusk.
+          "auto-exposure-min-brightness": 0.0005,
+          "auto-exposure-max-brightness": 2.0,
+          "auto-exposure-histogram-log-min": -14.0,
+          "auto-exposure-histogram-log-max": 6.0
         },
         {
           "image-type": 1,
