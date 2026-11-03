@@ -15,6 +15,7 @@ from typing import Any, Dict
 from vivid2.scenario import Run
 from vivid2.stack.base import Agent
 from vivid2.stack.reference.agents import SearchAgent, SurveyAgent
+from vivid2.stack.reference.lowflight import DipSettings
 from vivid2.stack.reference.planners import LawnmowerPlanner
 from vivid2.stack.reference.reasoners import DetectionThresholdReasoner, VLMReasoner
 
@@ -77,7 +78,14 @@ class AgentFactory:
         name = vlm_agent_name(self.kind, self._vlm, self.tiles) if self._vlm is not None else self.kind
         if self.verify != self.default_verify:  # keep runs with the non-default behaviour apart
             name += "-verify" if self.verify else "-noverify"
+        if self.dip:
+            name += "-dip"
         return name
+
+    @property
+    def dip(self) -> bool:
+        """Low flight: dip into the clearings mapped during the survey (off by default)."""
+        return self.opts.get("dip") == "on"
 
     @property
     def default_verify(self) -> bool:
@@ -106,9 +114,10 @@ class AgentFactory:
     def __call__(self, run: Run) -> Agent:
         planner = LawnmowerPlanner(sidelap=float(self.opts.get("sidelap", 0.2)))
         period = float(self.opts.get("frame_period_s", 1.0 if self._vlm is None else 2.0))
+        dip = DipSettings() if self.dip else None
         if self.kind == "survey":
-            return SurveyAgent(self.name, planner, frame_period_s=period)
-        kw = {"frame_period_s": period, "verify": self.verify}
+            return SurveyAgent(self.name, planner, frame_period_s=period, dip=dip)
+        kw = {"frame_period_s": period, "verify": self.verify, "dip": dip}
         if self.kind == "coverage_gt":
             from vivid2.stack.reference.perception import GroundTruthPerception
 

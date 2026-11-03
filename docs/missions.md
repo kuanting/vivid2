@@ -47,9 +47,31 @@ VIVID 2 is set up to reward stacks that can do that autonomously:
 
 Things a capable stack might do: plan a terrain-following route through
 clearings, avoid trunks and crowns with the forward depth camera, drop below
-the canopy to inspect a spot, and weigh time and energy against coverage. The
-reference agents do none of this, which is the headroom the benchmark
-measures.
+the canopy to inspect a spot, and weigh time and energy against coverage.
+
+**The reference low-flight baseline** (`--dip on`, any reference agent) does the
+simplest safe version of this, to show the fog scenarios can be solved:
+
+1. During the high survey it maps the highest surface in every 2 m cell from
+   the nadir depth image. Depth is not affected by fog. It stores this as
+   height above the coarse terrain model (`ctx.mission.terrain`).
+2. After the survey it flies to the clearings it found, nearest first, while
+   time and energy allow (at most 10).
+3. It descends vertically into each to about 12 m above the ground. It goes
+   down in 8 m steps, re-checking the clearing with each closer depth image.
+4. It looks three times from the bottom, and reports only what a majority of
+   those looks agree on. Then it climbs back.
+5. A guard climbs when the mapped canopy or ground ahead comes within 10 m of
+   the flight level.
+
+It never flies under the canopy or between trunks. People under the crowns,
+and spots too narrow to descend into vertically, are left for capable stacks.
+That is the headroom the benchmark measures.
+
+**The oracle sees through fog.** `coverage_gt` uses segmentation ground truth,
+which is geometry only, so in fog it is an upper bound on planning, not on
+seeing. Compare stacks in fog against `vlm`, `coverage_yolo` and their `--dip`
+variants.
 
 ## Wildfire S&R (`mission: wildfire_sar`), Phase 2
 

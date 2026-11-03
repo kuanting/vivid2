@@ -44,7 +44,7 @@ def cmd_run(args) -> int:
     if args.seeds is not None:
         campaign.seeds = args.seeds
     opts = {k: v for k, v in vars(args).items()
-            if k.startswith(("vlm", "yolo", "sidelap", "frame_period", "verify")) and v is not None}
+            if k.startswith(("vlm", "yolo", "sidelap", "frame_period", "verify", "dip")) and v is not None}
     try:
         factory = AgentFactory(args.agent, opts)
     except ValueError as e:
@@ -233,6 +233,9 @@ def main(argv=None) -> int:
     s.add_argument("--verify", choices=["on", "off"],
                    help="closer look before reporting: fly over a candidate, descend, confirm (default: on for "
                         "vlm/hybrid, off for the coverage baselines)")
+    s.add_argument("--dip", choices=["on", "off"],
+                   help="low flight: after the survey, descend into the clearings mapped from the depth image "
+                        "and look from about 12 m above the ground (default: off)")
     s.add_argument("--view", action="store_true",
                    help="live windows: the payload frames with ground truth and the agent's decisions, and the chase camera")
     s.set_defaults(fn=cmd_run)

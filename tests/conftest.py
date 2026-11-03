@@ -13,7 +13,7 @@ from typing import Any, Dict, List, Optional, Sequence
 import numpy as np
 import pytest
 
-from vivid2.geo import rpy_to_quat, world_to_pixel
+from vivid2.geo import focal_px, quat_to_rot, rpy_to_quat, world_to_pixel
 from vivid2.recorder import Recorder
 from vivid2.scenario import Run, Scenario
 from vivid2.stack.base import Controller, Frame, GTAnnotation, MissionContext, TargetReport
@@ -71,8 +71,14 @@ class FakeController(Controller):
 
 
 class FakeWorld(MissionContext):
-    def __init__(self, run: Run, recorder: Recorder, width=960, height=720, fov=80.0, box_px=18, targets=None):
+    """``surface(n, e)`` (optional): height of trees etc. above the flat ground, m; nadir depth
+    images then show it (rays are cast into the height field)."""
+
+    def __init__(self, run: Run, recorder: Recorder, width=960, height=720, fov=80.0, box_px=18, targets=None,
+                 surface=None, surface_max_m=30.0):
         self.run = run
+        self.surface = surface
+        self.surface_max_m = surface_max_m
         self.recorder = recorder
         self.mission = mission_spec(run)
         self.targets = targets if targets is not None else run.resolved_targets()
@@ -115,13 +121,30 @@ class FakeWorld(MissionContext):
             if proj and 0 <= proj[0] < self.W and 0 <= proj[1] < self.H:
                 u, v, _ = proj
                 gt.append(GTAnnotation(t["id"], (u - self.box, v - self.box, u + self.box, v + self.box)))
-        depth = np.full((self.H, self.W), self.mission.ground_down_m - self.pos[2], np.float32)
+        depth = self.render_depth()
         frame = Frame(self.t_ns, self.frame_id, np.zeros((self.H, self.W, 3), np.uint8), self.pos.copy(), NADIR_Q,
                       self.fov, depth=depth, gt=gt)
         self.recorder.log("frames", {"t": self.t_ns, "frame_id": self.frame_id, "cam_pos": self.pos.copy(),
                                      "cam_q": list(NADIR_Q), "width": self.W, "height": self.H, "fov_deg": self.fov,
                                      "gt": [{"object_id": g.object_id, "bbox": list(g.bbox)} for g in gt]})
         return frame
+
+    def render_depth(self) -> np.ndarray:
+        ground = self.mission.ground_down_m
+        if self.surface is None:
+            return np.full((self.H, self.W), ground - self.pos[2], np.float32)
+        f = focal_px(self.W, self.fov)
+        uu, vv = np.meshgrid(np.arange(self.W) + 0.5, np.arange(self.H) + 0.5)
+        rays = quat_to_rot(NADIR_Q) @ np.stack([np.ones(uu.size), (uu.ravel() - self.W / 2) / f, (vv.ravel() - self.H / 2) / f])
+        h = np.zeros(uu.size)
+        todo = np.ones(uu.size, bool)
+        for level in np.arange(self.surface_max_m, 0.0, -1.0):  # march down; the first surface reached is seen
+            s = (ground - level - self.pos[2]) / rays[2, todo]
+            hit = self.surface(self.pos[0] + s * rays[0, todo], self.pos[1] + s * rays[1, todo]) >= level
+            idx = np.flatnonzero(todo)[hit]
+            h[idx] = level
+            todo[idx] = False
+        return ((ground - h - self.pos[2]) / rays[2]).reshape(self.H, self.W).astype(np.float32)
 
     def pose(self):
         return self.pos.copy(), (1.0, 0.0, 0.0, 0.0)
