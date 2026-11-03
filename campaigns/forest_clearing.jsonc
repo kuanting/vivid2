@@ -1,0 +1,11 @@
+// Does dipping find people the high survey misses in fog? forest_clearing_01 only (3 runs on ForestSAR):
+// two hikers in clearings a dip can reach, dusk, fog 0 / 0.02 / 0.05 (0 is the clear-air control).
+//   vivid2 run --campaign campaigns/forest_clearing.jsonc --agent vlm
+//   vivid2 run --campaign campaigns/forest_clearing.jsonc --agent vlm --dip on
+{
+  "name": "forest_clearing",
+  "sim_config_dir": "../sim_config",
+  "scenarios": ["../scenarios/forest_sar/forest_clearing_01.jsonc"],
+  "seeds": 1,
+  "weights": {"mission": 0.35, "perception": 0.15, "reasoning": 0.15, "planning": 0.10, "control": 0.05, "safety": 0.20}
+}

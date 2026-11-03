@@ -19,6 +19,7 @@ person and report each one's position, then return home.
 | `forest_hiker_01` | ForestSAR | 1 hiker, red jacket, lying; 4 decoys | 5 seeds |
 | `forest_hiker_02` | ForestSAR | 2 hikers at dusk; 5 decoys | fog 0 / 0.02 / 0.05 × 3 seeds |
 | `forest_fog_01` | ForestSAR | 1 hiker in dense fog at midday; 3 decoys | fog 0.2 / 0.4 × 3 seeds |
+| `forest_clearing_01` | ForestSAR | 2 hikers in small clearings at dusk; 3 decoys | fog 0 / 0.02 / 0.05 × 3 seeds |
 
 ### Challenge: fly low in the woods
 
@@ -73,6 +74,12 @@ about 20 × 15 m of ground, so it only finds people in or right next to a
 clearing at least 6 m in radius. People under the crowns, and spots too narrow
 to descend into vertically, are left for capable stacks. That is the headroom
 the benchmark measures.
+
+On ForestSAR about 37 % of the ground is open, but a dip can see only about
+15 % of a search area. `forest_clearing_01` puts its hikers inside clearings a
+dip reaches; the other forest scenarios put them under crown edges, out of its
+reach. To place targets either way, record a survey with `--dip on
+--frame-bank rgbd` and run `python tools/dip_reach.py <run dir>`.
 
 **The oracle sees through fog.** `coverage_gt` uses segmentation ground truth,
 which is geometry only, so in fog it is an upper bound on planning, not on

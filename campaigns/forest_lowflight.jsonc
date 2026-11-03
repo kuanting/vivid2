@@ -1,12 +1,14 @@
-// Low flight in fog: the scenarios the high survey fails in, one seed each (5 runs on ForestSAR).
-// forest_hiker_02: dusk, fog 0 / 0.02 / 0.05 (0 is the clear-air control); forest_fog_01: noon, fog 0.2 / 0.4.
+// Low flight in fog: the scenarios the high survey fails in, one seed each (8 runs on ForestSAR).
+// forest_hiker_02: dusk, fog 0 / 0.02 / 0.05 (0 is the clear-air control); forest_fog_01: noon, fog 0.2 / 0.4;
+// forest_clearing_01: dusk, fog 0 / 0.02 / 0.05, hikers in clearings a dip can reach (the others are under crowns).
 // Compare an agent with and without --dip on, e.g.
 //   vivid2 run --campaign campaigns/forest_lowflight.jsonc --agent vlm
 //   vivid2 run --campaign campaigns/forest_lowflight.jsonc --agent vlm --dip on
 {
   "name": "forest_lowflight",
   "sim_config_dir": "../sim_config",
-  "scenarios": ["../scenarios/forest_sar/forest_hiker_02.jsonc", "../scenarios/forest_sar/forest_fog_01.jsonc"],
+  "scenarios": ["../scenarios/forest_sar/forest_hiker_02.jsonc", "../scenarios/forest_sar/forest_fog_01.jsonc",
+                "../scenarios/forest_sar/forest_clearing_01.jsonc"],
   "seeds": 1,
   "weights": {"mission": 0.35, "perception": 0.15, "reasoning": 0.15, "planning": 0.10, "control": 0.05, "safety": 0.20}
 }

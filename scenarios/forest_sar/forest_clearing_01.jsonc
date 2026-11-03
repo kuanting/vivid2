@@ -1,0 +1,31 @@
+// ForestSAR map: two hikers in small clearings at dusk, in ground fog. From the survey height the fog
+// washes the ground out; from 12 m inside a clearing it is clear. This is the case the reference dip
+// baseline (--dip on) is built for: a clearing it can descend into, with the person in it.
+// The clearings (radius 9 m at 74,-66 and 7.8 m at -58,16) were measured from depth on 2026-11-03.
+{
+  "id": "forest_clearing_01",
+  "mission": "forest_sar",
+  "description": "Two hikers in small forest clearings at dusk, in ground fog; seen from 12 m inside the clearing, hard to see from 55 m.",
+  "scene": {"base": "scene_forest_sar.jsonc", "robot_config": "robot_vivid_quad.jsonc", "camera": "Payload", "map": "ForestSAR"},
+  "dut_start": {"ned": [0, 0, -1], "yaw_deg": 0},
+  "search_area": {"polygon_ne": [[-100, -80], [100, -80], [100, 80], [-100, 80]], "altitude_m": 55, "ground_down_m": 0},
+  "targets": [
+    {"id": "Hiker1", "asset": "VIVID2_Hiker_RedJacket_LyingBack", "ned": [74, -66, 0], "yaw_deg": 30,
+     "description": "adult, red jacket, dark trousers, lying on her back"},
+    {"id": "Hiker2", "asset": "VIVID2_Hiker_GreenJacket_Crouching", "ned": [-58, 16, 0], "yaw_deg": 200,
+     "description": "adult, green jacket, crouching"}
+  ],
+  // Small, so both stay inside their clearings.
+  "target_jitter_m": 3,
+  "distractors": [
+    {"id": "Decoy1", "asset": "VIVID2_Decoy_Backpack_Red", "ned": [-50, 30, 0], "yaw_deg": 10, "description": "red backpack"},
+    {"id": "Decoy2", "asset": "VIVID2_Decoy_Tent_Green", "ned": [40, 55, 0], "yaw_deg": 0, "description": "green dome tent"},
+    {"id": "Decoy3", "asset": "VIVID2_Decoy_Tarp_Red", "ned": [-70, -60, 0], "yaw_deg": -20, "description": "red tarp"}
+  ],
+  "brief": "Two hikers, one in a red jacket and one in a green jacket, did not return from a forest walk. Ground fog is rising at dusk. One may be injured and lying down.",
+  "environment": {"time_of_day": "2026-09-28 17:30:00", "weather": {"fog": 0.05}, "wind_ned": [3, 1, 0]},
+  "limits": {"timeout_s": 1500, "max_speed_mps": 6, "min_agl_m": 2, "geofence_margin_m": 20, "energy_budget_m": 9000},
+  "success": {"localization_tolerance_m": 10, "require_all_targets": true},
+  // fog 0 is the clear-air control.
+  "sweep": {"environment.weather.fog": [0, 0.02, 0.05], "seeds": 3}
+}
