@@ -50,6 +50,9 @@ Subclass `vivid2.stack.base.Agent` and implement `async run(ctx)`. Use:
   height above ground, geofence margin and energy budget (no ground truth).
 - `await ctx.get_frame()`: the latest payload-camera frame with its pose and
   depth, or `None` if no image is ready yet.
+- `await ctx.get_nav_frame("Front")`: the forward camera (RGB + planar depth in
+  metres, 640 × 480, 90° FOV, pitched 10° down) for obstacle avoidance when
+  flying low among trees. These frames are not scored.
 - `ctx.controller`: `takeoff`, `fly_path` (returns immediately; poll
   `path_done()`), `goto`, `hover`, `return_and_land`.
 - `ctx.pose()`, `ctx.elapsed_s()`, `ctx.should_stop()`: drone pose, mission

@@ -24,7 +24,7 @@
   ],
   "brief": "Adult male hiker, 45, wearing a red jacket and dark trousers, reported a fall near the north end of the ridge trail around noon. He may be lying down and partly hidden under trees.",
   "environment": {"time_of_day": "2026-09-28 15:00:00", "weather": {}, "wind_ned": [3, 0, 0]},
-  "limits": {"timeout_s": 900, "max_speed_mps": 7, "min_agl_m": 25, "geofence_margin_m": 25, "energy_budget_m": 7000},
+  "limits": {"timeout_s": 900, "max_speed_mps": 7, "min_agl_m": 3, "geofence_margin_m": 25, "energy_budget_m": 7000},
   "success": {"localization_tolerance_m": 10, "require_all_targets": true},
   "sweep": {"seeds": 5}
 }

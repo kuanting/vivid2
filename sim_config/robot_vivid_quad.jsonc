@@ -410,6 +410,49 @@
       }
     },
     {
+      // Forward-looking camera for obstacle avoidance when flying low among trees (RGB + planar depth).
+      // Pitched 10 degrees down so the ground ahead is in view. Not used for scoring.
+      "id": "Front",
+      "type": "camera",
+      "enabled": true,
+      "parent-link": "Frame",
+      "capture-interval": 0.1,
+      "capture-settings": [
+        {
+          "image-type": 0,
+          "width": 640,
+          "height": 480,
+          "fov-degrees": 90,
+          "capture-enabled": true,
+          "streaming-enabled": false,
+          "pixels-as-float": false,
+          "compress": false,
+          "target-gamma": 2.5,
+          "auto-exposure-method": 0,
+          "auto-exposure-speed": 20.0,
+          "auto-exposure-bias": 0.0,
+          "auto-exposure-min-brightness": 0.0005,
+          "auto-exposure-max-brightness": 2.0,
+          "auto-exposure-histogram-log-min": -14.0,
+          "auto-exposure-histogram-log-max": 6.0
+        },
+        {
+          "image-type": 1,
+          "width": 640,
+          "height": 480,
+          "fov-degrees": 90,
+          "capture-enabled": true,
+          "streaming-enabled": false,
+          "pixels-as-float": false,
+          "compress": false
+        }
+      ],
+      "origin": {
+        "xyz": "0.25 0 0",
+        "rpy-deg": "0 -10 0"
+      }
+    },
+    {
       "id": "IMU1",
       "type": "imu",
       "enabled": true,

@@ -150,7 +150,15 @@ is only good for pipeline bring-up. It is meaningless for evaluating a VLM.
   `TreeDensity` 0.012, `ClearingFraction` 0.45, `UnderstoryDensity` 0.04,
   `GrassDensity` 0.4, `ClutterDensity` 0.002. With these the base map has about
   8,600 trees, 36,000 understory plants, 2,000 clutter objects and about
-  120,000 grass clumps. Understory and grass have no collision. The volume is
+  120,000 grass clumps. Trees, young birches, rocks, stumps and fallen logs
+  collide (BlockAll); ferns, shrubs and grass do not. The graph's mesh spawners
+  default to **no collision**, so each obstacle entry asks for it explicitly.
+  The pack's birches ship with one small capsule on the lower trunk;
+  `tools/apply_tree_collision.py` replaces it with a 24-hull convex
+  decomposition (trunk, then crown layers from about 4–6 m up). Run it once
+  after installing the pack. Checked in the sim on 2026-11-03: surface queries
+  at ten tree positions all hit the crown 8–19 m above the ground, and a drone
+  flown into a crown at 8 m reported a collision. The volume is
   set to **Generate On Demand**, so it never regenerates at runtime: generate it
   in the editor and save the level, which then stores every instance.
   Not done yet: thinning trees on steep slopes, and keeping a trail

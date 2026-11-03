@@ -116,6 +116,9 @@ To plug in your own stack, see [docs/adding_a_dut.md](docs/adding_a_dut.md).
 
 0. **SIL framework + Forest S&R.** Current phase.
 1. ForestSAR map (DEM terrain, Fab forest, PCG hiker placement); 20-scenario benchmark; local VLM vs Claude.
+   Includes dense-fog searches that can only be solved by flying low among solid trees
+   (see [missions.md](docs/missions.md#challenge-fly-low-in-the-woods)): a challenge for
+   autonomous low-altitude flight, not just perception.
 2. Wildfire map with fire-spread model; landslide map with before/after change ground truth.
 3. Vendor container interface (ROS 2 / gRPC), parallel headless runners, hidden holdout set, leaderboard.
 4. Processor-in-the-loop: PX4 HITL + companion computer running the vendor AI.

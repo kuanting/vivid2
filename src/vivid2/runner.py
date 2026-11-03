@@ -199,6 +199,8 @@ class SimMissionContext(MissionContext):
         self.depth_scale: Optional[float] = None  # metres per raw depth unit, detected in flight
         self._wall0 = time.monotonic()
         self._frame_id = 0
+        self._nav_frames = 0
+        self._nav_fov: Dict[str, float] = {}  # navigation camera -> FOV, filled by the runner
         self.reports: List[TargetReport] = []
         self._stop = False
 
@@ -264,6 +266,28 @@ class SimMissionContext(MissionContext):
         if self.viewer is not None:
             self.viewer.show_frame(frame, seg=seg, extra=f"t {self.elapsed_s():.0f} s  height {self.mission.ground_down_m - frame.cam_pos[2]:.0f} m")
         return frame
+
+    async def get_nav_frame(self, camera: str = "Front") -> Optional[Frame]:
+        from projectairsim.types import ImageType
+
+        if camera == self.camera_id:
+            raise ValueError("use get_frame() for the payload camera; navigation frames are not scored")
+        imgs = await asyncio.to_thread(self.drone.get_images, camera, [ImageType.SCENE, ImageType.DEPTH_PLANAR])
+        rgb_msg = imgs.get(ImageType.SCENE)
+        if not rgb_msg:
+            return None
+        depth = None
+        dmsg = imgs.get(ImageType.DEPTH_PLANAR)
+        if dmsg:
+            raw = _decode(dmsg, np.uint16, 1)
+            scale = self.depth_scale if self.depth_scale is not None else 1.0  # this plugin build packs whole metres
+            depth = raw.astype(np.float32) * scale
+            depth[(raw == 0) | (raw >= DEPTH_NO_DATA)] = 0.0
+        self._nav_frames += 1
+        return Frame(t_ns=int(rgb_msg["time_stamp"]), frame_id=-self._nav_frames, rgb=_decode(rgb_msg, np.uint8, 3),
+                     cam_pos=np.array([rgb_msg["pos_x"], rgb_msg["pos_y"], rgb_msg["pos_z"]]),
+                     cam_q=(rgb_msg["rot_w"], rgb_msg["rot_x"], rgb_msg["rot_y"], rgb_msg["rot_z"]),
+                     fov_deg=float(self._nav_fov.get(camera, 90.0)), depth=depth)
 
     def pose(self):
         p = self.drone.get_ground_truth_pose()
@@ -448,6 +472,11 @@ async def execute_run(
     ctx = SimMissionContext(run, world, drone, sc.get("camera", "Payload"), rec, controller, cam["fov-degrees"], frame_bank,
                             seg_ids=seg_ids, target_ids=[t["id"] for t in targets], start_ned=start_ned,
                             terrain=terrain, viewer=viewer)
+    for nav in ("Front",):
+        try:
+            ctx._nav_fov[nav] = float(camera_settings(scene, nav, sc.get("drone_name", "Drone1"))["fov-degrees"])
+        except StopIteration:
+            pass  # robot config without that camera
     meta = {
         "run_id": run.run_id, "scenario_id": run.scenario_id, "seed": run.seed, "params": run.params,
         "mission": run.spec["mission"], "agent": agent.describe(), "targets": targets,

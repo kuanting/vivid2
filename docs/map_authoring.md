@@ -47,6 +47,21 @@ count as visible when they aren't.
   (`ForestSAR_Open`, `ForestSAR_Dense`).
 - Scenarios name the map in `scene.map`.
 
+## Obstacles must collide
+
+Benchmarks reward flying low among trees, so everything a drone could hit needs
+collision, and collision that matches the shape. Check both levels:
+
+- **The mesh:** asset packs often give trees a token trunk capsule. Use a convex
+  decomposition that follows trunk and crown (`tools/apply_tree_collision.py`
+  for the Forest Fire pack), not one hull around the whole tree, which would
+  close the space under the canopy.
+- **The placement:** PCG's Static Mesh Spawner defaults to *no collision*. Set
+  the descriptor's collision profile to `BlockAll` for obstacles.
+- **Verify in Play,** not with editor line traces: the editor's trace tool skips
+  instanced meshes. `world.get_surface_elevation_at_point` over a tree must
+  return the crown top, and a drone flown into a tree must report a collision.
+
 ## Targets and distractors
 
 - **Asset names must be unique across all content**, Fab packs included.

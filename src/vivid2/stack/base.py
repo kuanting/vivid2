@@ -198,6 +198,15 @@ class MissionContext(abc.ABC):
     @abc.abstractmethod
     def elapsed_s(self) -> float: ...
 
+    async def get_nav_frame(self, camera: str = "Front") -> Optional[Frame]:
+        """RGB + planar depth (m) from a navigation camera, for obstacle avoidance.
+
+        The robot's ``Front`` camera looks forward, pitched 10 degrees down, 640x480,
+        90 degree FOV. These frames are not scored and carry no ground truth. A
+        context without navigation cameras returns None.
+        """
+        return None
+
 
 class Agent(abc.ABC):
     name = "agent"

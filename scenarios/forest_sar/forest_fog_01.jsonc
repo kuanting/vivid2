@@ -1,0 +1,28 @@
+// ForestSAR map: one hiker in dense fog at midday. The survey altitude sees almost nothing; the drone
+// has to fly low through the forest. Built to reward autonomous low-altitude flight among trees.
+{
+  "id": "forest_fog_01",
+  "mission": "forest_sar",
+  "description": "Hiker lying at the edge of a clearing in dense fog; from 60 m the ground is barely visible, from 20 m a hiker shows, from 10 m it is clear.",
+  "scene": {"base": "scene_forest_sar.jsonc", "robot_config": "robot_vivid_quad.jsonc", "camera": "Payload", "map": "ForestSAR"},
+  "dut_start": {"ned": [0, 0, -1], "yaw_deg": 0},
+  // altitude_m is only the suggested survey height (the reference agents fly it and mostly fail in this
+  // fog). A capable stack flies lower, using the Front depth camera to avoid trunks and crowns.
+  "search_area": {"polygon_ne": [[-100, -80], [100, -80], [100, 80], [-100, 80]], "altitude_m": 55, "ground_down_m": 0},
+  "targets": [
+    {"id": "Hiker1", "asset": "VIVID2_Hiker_RedJacket_LyingFront", "ned": [60, -45, 0], "yaw_deg": 70,
+     "description": "adult, red jacket, dark trousers, lying face down"}
+  ],
+  "target_jitter_m": 20,
+  "distractors": [
+    {"id": "Decoy1", "asset": "VIVID2_Decoy_Backpack_Red", "ned": [-50, 30, 0], "yaw_deg": 10, "description": "red backpack"},
+    {"id": "Decoy2", "asset": "VIVID2_Decoy_Tent_Orange", "ned": [40, 55, 0], "yaw_deg": 0, "description": "orange dome tent"},
+    {"id": "Decoy3", "asset": "VIVID2_Decoy_Tarp_Red", "ned": [-70, -60, 0], "yaw_deg": -20, "description": "red tarp"}
+  ],
+  "brief": "A hiker in a red jacket and dark trousers is overdue on a forest trail. Dense fog covers the area and visibility from the air is very poor. He may be lying down.",
+  // Project AirSim's weather fog saturates around 0.4 (0.8 looks the same).
+  "environment": {"time_of_day": "2026-09-28 12:00:00", "weather": {"fog": 0.4}, "wind_ned": [2, 0, 0]},
+  "limits": {"timeout_s": 1500, "max_speed_mps": 6, "min_agl_m": 2, "geofence_margin_m": 20, "energy_budget_m": 9000},
+  "success": {"localization_tolerance_m": 10, "require_all_targets": true},
+  "sweep": {"environment.weather.fog": [0.2, 0.4], "seeds": 3}
+}

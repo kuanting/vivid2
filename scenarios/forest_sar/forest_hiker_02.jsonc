@@ -1,4 +1,4 @@
-// ForestSAR map: two separated hikers at dusk with fog.
+// ForestSAR map: two separated hikers at dusk, in clear air or ground fog.
 {
   "id": "forest_hiker_02",
   "mission": "forest_sar",
@@ -23,10 +23,12 @@
     {"id": "Decoy5", "asset": "VIVID2_Decoy_Barrel_Blue", "ned": [170, 40, 0], "yaw_deg": 0, "description": "blue plastic drum"}
   ],
   "brief": "A father (yellow rain jacket) and his teenage son (dark blue hoodie) became separated while descending at dusk. Search for both; either may be crouching or lying down.",
-  // Project AirSim's fog is steep: from 60 m, 0.01 is light haze, 0.02 moderate (ground faint),
-  // 0.03 already hides the ground (2026-11-03 probes), so the sweep stays within 0-0.02.
-  "environment": {"time_of_day": "2026-09-28 17:30:00", "weather": {"fog": 0.01}, "wind_ned": [4, 2, 0]},
-  "limits": {"timeout_s": 1500, "max_speed_mps": 8, "min_agl_m": 25, "geofence_margin_m": 25, "energy_budget_m": 12000},
+  // Dense fog is part of the test, as in real searches. At dusk the fog lies on the ground: with
+  // fog 0.02 or 0.05 only the treetops show from 60 m, while from 20 m the ground and a hiker are
+  // visible and from 10 m they are clear (2026-11-03 probes). Finding them means flying low among
+  // the trees (crowns up to ~30 m, all with collision).
+  "environment": {"time_of_day": "2026-09-28 17:30:00", "weather": {"fog": 0.02}, "wind_ned": [4, 2, 0]},
+  "limits": {"timeout_s": 1500, "max_speed_mps": 8, "min_agl_m": 3, "geofence_margin_m": 25, "energy_budget_m": 12000},
   "success": {"localization_tolerance_m": 10, "require_all_targets": true},
-  "sweep": {"environment.weather.fog": [0.0, 0.01, 0.02], "seeds": 3}
+  "sweep": {"environment.weather.fog": [0.0, 0.02, 0.05], "seeds": 3}
 }
