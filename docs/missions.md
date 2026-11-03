@@ -76,7 +76,9 @@ to descend into vertically, are left for capable stacks. That is the headroom
 the benchmark measures.
 
 On ForestSAR about 37 % of the ground is open, but a dip can see only about
-15 % of a search area. `forest_clearing_01` puts its hikers inside clearings a
+15 % of a search area. On `ForestSAR_Open` it is 73 % and 62 %; on
+`ForestSAR_Dense` 4 % of the ground is open and nothing outside the launch
+clearing is wide enough to descend into, so the baseline does not dip at all. `forest_clearing_01` puts its hikers inside clearings a
 dip reaches; the other forest scenarios put them under crown edges, out of its
 reach. To place targets either way, record a survey with `--dip on
 --frame-bank rgbd` and run `python tools/dip_reach.py <run dir>`.
