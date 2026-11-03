@@ -98,3 +98,30 @@ def test_variant_maps_share_the_base_terrain(tmp_path):
     model, rec = load_for_run(tmp_path, {"scene": {"map": "Hill_Dense"}, "search_area": {"ground_down_m": 0.0}})
     assert rec["kind"] == "dtm" and rec["file"].endswith("terrain_dtm.npz") and "Hill_Dense" not in rec["file"]
     assert float(model.down_at(55, 0)) == pytest.approx(-5.5)
+
+
+def test_the_dut_gets_a_coarse_dem_not_the_scoring_terrain(blocks_run):
+    """Real crews carry a public 20-30 m DEM; the stack must never see the 1 m model."""
+    fine = TerrainModel(np.add.outer(np.arange(100.0), np.zeros(100)) * -0.1, n0=-50.0, e0=-50.0, cell_m=1.0,
+                        source="fine")
+    start = blocks_run.resolved_start(fine)
+    m = mission_spec(blocks_run, start, fine)
+    assert m.terrain is not None and m.terrain.cell_m == 20.0 and m.terrain.down.shape == (5, 5)
+    # block means of a plane are the plane itself (at block centres)
+    assert float(m.terrain.down_at(0.0, 0.0)) == pytest.approx(float(fine.down_at(0.0, 0.0)), abs=1e-6)
+    # flat maps: flat ground at the DUT's ground; the meta.json record summarises, never copies, the grid
+    flat = mission_spec(blocks_run, start)
+    assert flat.terrain.is_flat and float(flat.terrain.down_at(5, 5)) == flat.ground_down_m
+    rec = m.record()
+    assert "terrain" not in rec and rec["terrain_info"] == {"flat": False, "cell_m": 20.0, "source": m.terrain.source}
+    assert type(m).from_record(rec).terrain is None
+
+
+def test_downsample_ignores_missing_nodes():
+    d = np.zeros((4, 4))
+    d[0, 0] = np.nan
+    d[2:, 2:] = np.nan
+    c = TerrainModel(d, cell_m=1.0).downsample(2.0)
+    assert c.down.shape == (2, 2) and c.down[0, 0] == 0.0 and np.isnan(c.down[1, 1])
+    assert c.n0 == pytest.approx(0.5) and c.cell_m == 2.0
+    assert TerrainModel.flat(3.0).downsample(20.0).is_flat

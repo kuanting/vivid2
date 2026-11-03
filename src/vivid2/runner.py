@@ -9,7 +9,6 @@ import subprocess
 import threading
 import time
 import traceback
-from dataclasses import asdict
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Tuple
@@ -26,11 +25,12 @@ from vivid2.sim.segmentation import SegmentationError, assign_ids, palette, visi
 from vivid2.stack.base import Agent, Frame, GTAnnotation, MissionContext, MissionSpec, TargetReport
 from vivid2.stack.reference.controllers import AirSimController
 from vivid2.viewer import make_viewer
-from vivid2.terrain import load_for_run
+from vivid2.terrain import TerrainModel, load_for_run
 from vivid2.unreal_setup import status as unreal_status
 from vivid2.vlm.base import FRAME_JPEG_MAX_SIDE, JPEG_QUALITY, encode_jpeg_bytes, sha256_hex
 
 TRAJECTORY_HZ = 10.0
+DUT_DEM_CELL_M = 20.0  # cell size of the terrain model the DUT is given
 RTL_GRACE_S = 180.0
 
 
@@ -55,6 +55,8 @@ def mission_spec(run: Run, start_ned=None, terrain=None) -> MissionSpec:
     ground = float(s["search_area"].get("ground_down_m", 0.0))
     if terrain is not None and start_ned is not None:
         ground = float(terrain.down_at(start_ned[0], start_ned[1]))
+    # The DUT gets a coarse DEM, never the 1 m model the scoring uses.
+    dut_terrain = terrain.downsample(DUT_DEM_CELL_M) if terrain is not None else TerrainModel.flat(ground)
     return MissionSpec(
         mission=s["mission"],
         brief=s["brief"],
@@ -68,6 +70,7 @@ def mission_spec(run: Run, start_ned=None, terrain=None) -> MissionSpec:
         min_agl_m=lim.get("min_agl_m", 5.0),
         geofence_margin_m=lim.get("geofence_margin_m", 20.0),
         energy_budget_m=lim.get("energy_budget_m"),
+        terrain=dut_terrain,
     )
 
 
@@ -486,7 +489,7 @@ async def execute_run(
         "unreal": unreal_status(), "weights": weights or {},
         "config_hash": run_config_hash(run, agent.describe()),
         "map": sc.get("map"), "preflight": preflight,
-        "mission_spec": asdict(ctx.mission),  # what the DUT was told; open-loop evaluation reuses it
+        "mission_spec": ctx.mission.record(),  # what the DUT was told; open-loop evaluation reuses it
         "distractors": distractors, "segmentation_ids": seg_ids,
         "gt_version": 2 if seg_ids else 1,  # 2: ground truth carries per-target visible pixels
         "frame_bank": {"mode": frame_bank, "jpeg_quality": JPEG_QUALITY, "jpeg_max_side": FRAME_JPEG_MAX_SIDE,

@@ -1,7 +1,6 @@
 """Frame bank -> open-loop evaluation -> record/replay must reproduce scores exactly."""
 import asyncio
 import json
-from dataclasses import asdict
 
 import numpy as np
 from PIL import Image
@@ -51,7 +50,7 @@ def _banked_run(tmp_path, blocks_run, n=6):
     (run_dir / "frames.jsonl").write_text("".join(json.dumps(f) + "\n" for f in frames), encoding="utf-8")
     meta = {"run_id": blocks_run.run_id, "scenario_id": blocks_run.scenario_id, "seed": 0, "params": {},
             "mission": "forest_sar", "agent": {"agent": "survey"}, "targets": blocks_run.resolved_targets(),
-            "mission_spec": asdict(mission_spec(blocks_run)), "frame_bank": {"mode": "rgb"}}
+            "mission_spec": mission_spec(blocks_run).record(), "frame_bank": {"mode": "rgb"}}
     (run_dir / "meta.json").write_text(json.dumps(meta), encoding="utf-8")
     return run_dir
 

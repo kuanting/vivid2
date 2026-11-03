@@ -61,6 +61,26 @@ class TerrainModel:
         pos = np.asarray(pos, float)
         return self.down_at(pos[..., 0], pos[..., 1]) - pos[..., 2]
 
+    def downsample(self, cell_m: float) -> "TerrainModel":
+        """A coarser model: the mean of each ``cell_m`` square block of nodes.
+
+        Stands in for the public DEM a real crew carries (20-30 m). Flat ground,
+        or a grid already that coarse, is returned unchanged.
+        """
+        k = int(round(cell_m / self.cell_m))
+        if self.is_flat or k <= 1:
+            return self
+        nn, ne = (self.down.shape[0] // k) * k, (self.down.shape[1] // k) * k
+        if nn == 0 or ne == 0:
+            return self
+        blocks = self.down[:nn, :ne].reshape(nn // k, k, ne // k, k)
+        with np.errstate(invalid="ignore"):
+            valid = np.isfinite(blocks).sum(axis=(1, 3))
+            coarse = np.where(valid > 0, np.nansum(blocks, axis=(1, 3)) / np.maximum(valid, 1), np.nan)
+        off = (k - 1) / 2.0 * self.cell_m  # block centres
+        return TerrainModel(coarse, self.n0 + off, self.e0 + off, k * self.cell_m,
+                            f"{self.source}, mean of {k * self.cell_m:g} m blocks")
+
     def save(self, path: Union[str, Path]) -> None:
         np.savez_compressed(path, down=self.down.astype(np.float32), n0=self.n0, e0=self.e0,
                             cell_m=self.cell_m, source=self.source)

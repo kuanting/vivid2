@@ -48,6 +48,10 @@ Subclass `vivid2.stack.base.Agent` and implement `async run(ctx)`. Use:
 - `ctx.mission`: brief, search polygon, altitude, start position, the number
   of people to find, and the limits you are scored on: speed, timeout, minimum
   height above ground, geofence margin and energy budget (no ground truth).
+- `ctx.mission.terrain`: a coarse bare-ground model, like the public DEM a
+  real crew carries: 20 m cells on maps with relief, flat ground otherwise.
+  `terrain.down_at(n, e)` gives the NED down of the ground. It has no trees,
+  and it is never the 1 m model VIVID 2 scores height above ground with.
 - `await ctx.get_frame()`: the latest payload-camera frame with its pose and
   depth, or `None` if no image is ready yet.
 - `await ctx.get_nav_frame("Front")`: the forward camera (RGB + planar depth in

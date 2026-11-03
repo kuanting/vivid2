@@ -16,10 +16,12 @@ implementations live in ``vivid2.stack.reference``.
 from __future__ import annotations
 
 import abc
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, fields
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 import numpy as np
+
+from vivid2.terrain import TerrainModel
 
 
 @dataclass
@@ -115,6 +117,24 @@ class MissionSpec:
     min_agl_m: float = 5.0
     geofence_margin_m: float = 20.0
     energy_budget_m: Optional[float] = None  # path-length proxy for the battery
+    # Coarse bare-ground terrain, like the public DEM a real crew carries (20 m cells on maps
+    # with relief, flat ground otherwise): ``terrain.down_at(n, e)`` is the NED down of the
+    # ground. Never the simulator's 1 m model, and no trees.
+    terrain: Optional[TerrainModel] = field(default=None, repr=False, compare=False)
+
+    def record(self) -> Dict[str, Any]:
+        """JSON-ready fields for meta.json; the terrain is summarised, not copied."""
+        out = {f.name: getattr(self, f.name) for f in fields(self) if f.name != "terrain"}
+        t = self.terrain
+        out["terrain_info"] = None if t is None else {"flat": t.is_flat, "cell_m": None if t.is_flat else t.cell_m,
+                                                      "source": t.source}
+        return out
+
+    @classmethod
+    def from_record(cls, rec: Dict[str, Any]) -> "MissionSpec":
+        """Rebuild from ``record()`` output (without the terrain grid)."""
+        names = {f.name for f in fields(cls)} - {"terrain"}
+        return cls(**{k: v for k, v in rec.items() if k in names})
 
 
 class Perception(abc.ABC):

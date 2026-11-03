@@ -72,7 +72,7 @@ def evaluate_run(
     meta = json.loads((run_dir / "meta.json").read_text(encoding="utf-8"))
     if "mission_spec" not in meta:
         raise ValueError(f"{run_dir} has no mission_spec in meta.json (recorded before frame banks existed)")
-    mission = MissionSpec(**meta["mission_spec"])
+    mission = MissionSpec.from_record(meta["mission_spec"])
     frames = [f for f in _read_jsonl(run_dir / "frames.jsonl") if f.get("rgb")]
 
     out_dir = Path(out_root) / agent_name / meta["run_id"]
