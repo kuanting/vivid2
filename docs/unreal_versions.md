@@ -75,11 +75,83 @@ vivid2 unreal pack-plugin --plugin-dir ..\PASBlocks\Plugins --engine 5.8 --out d
 
 ## Packaged builds
 
+A packaged build runs the benchmark without Unreal: the cooked maps, the
+simulator and nothing else. Use it on every machine that only runs campaigns.
+
+### Making one
+
 ```powershell
-vivid2 unreal setup --engine 5.8 --download
-powershell -ExecutionPolicy Bypass -File tools\package_env.ps1 -Engine 5.8
-# -> build\VIVID2Env-ue5.8-Win64\Windows\VIVID2Env.exe
+vivid2 unreal setup --engine 5.8 --download      # once
+powershell -ExecutionPolicy Bypass -File tools\package_env.ps1 -Engine 5.8 -Zip
+# -> build\VIVID2Env-ue5.8-Win64\Windows\VIVID2Env.exe       (2.2 GB)
+# -> dist\VIVID2Env-ue5.8-Win64-<commit>.zip  + .sha256      (to copy to other machines)
 ```
+
+- About 6 minutes when the editor has already compiled the shaders. The
+  editor may stay open: only the game is compiled.
+- Cooked: `ForestSAR`, `ForestSAR_Open` and `ForestSAR_Dense` (`MapsToCook` in
+  `Config/DefaultGame.ini`). Also the content spawned at runtime: hikers and
+  decoys, the drone, and Project AirSim's weather actor.
+- `vivid2_build.json` next to the exe records the VIVID 2 commit and any
+  uncommitted changes to the project's content or config.
+- The build contains third-party content (Fab packs) in cooked form. Share
+  the zip as a binary download; never commit it.
+
+### Running one
+
+On any 64-bit Windows 10/11 machine with a DirectX 12 GPU:
+
+1. Unzip. On a fresh machine, run
+   `Engine\Extras\Redist\en-us\vc_redist.x64.exe` once.
+2. **Smart App Control must be off.** It blocks the unsigned game exe: the
+   launcher shows "Couldn't start ... CreateProcess() returned 11c7". Check it
+   with
+   `(Get-ItemProperty HKLM:\SYSTEM\CurrentControlSet\Control\CI\Policy).VerifiedAndReputablePolicyState`
+   (0 = off). Turn it off in Windows Security → App & browser control →
+   Smart App Control settings. Windows may not let you switch it back on
+   without a reset. A code-signed build would avoid this; none exists yet.
+3. Start one map. ForestSAR is the default, and it is ready in about 10 s:
+   ```powershell
+   VIVID2Env.exe /Game/VIVID2/Maps/ForestSAR_Open -windowed -ResX=1280 -ResY=720
+   ```
+   Use `-RenderOffScreen` for no window. Runs whose map is not the open one are
+   skipped by the preflight check: restart the build with the next map and run
+   the campaign again (finished runs are skipped).
+4. The simulator listens on every network interface: port 8989 for topics and
+   8990 for services. Use `-topicsport=` and `-servicesport=` to run two on one
+   machine. On first start, Windows Firewall asks to allow `VIVID2Env`. Allow
+   it if the runner is on another machine, then use
+   `vivid2 run ... --address <that machine's IP>`.
+
+Checked on 2026-11-04 against the editor, flying the same runs in both.
+Five surveys covered dusk with fog 0, 0.02 and 0.05, and noon with fog 0.2 and
+0.4. One dip run used dusk fog 0.05, and the oracle flew `ForestSAR_Open` and
+`ForestSAR_Dense`.
+- **Identical:** depth, hiker pixels (packaged/editor ratio 0.99–1.00) and
+  hiker contrast (within 1.4 ΔE).
+- **Dip run:** both made 12 dips with 0 collisions, and their lowest height
+  above ground was 11.84 m and 11.87 m. Both saw the hikers in the same 6 and
+  7 low frames.
+
+Settings that keep the images the same:
+- **Render quality** is fixed at Epic in `Config/DefaultGameUserSettings.ini`,
+  which is what the editor uses. A machine therefore can't drop to lower
+  quality on its own.
+- **Shader model** is SM5 in both the editor and the build.
+- **Frame rate** is capped at 30 fps (`t.MaxFPS` in `Config/DefaultEngine.ini`).
+  Camera auto-exposure adapts by speed × frame time each time a camera
+  captures. Uncapped, a packaged build runs at hundreds of fps, and its first
+  frames after the climb came out too dark or too bright for about 10 s. With
+  the cap they take about 3 frames to settle. Much faster adaptation is no
+  fix: the exposure then oscillates. The editor renders only a few frames per
+  second in the background, so it adapts almost at once. Benchmark results
+  should therefore come from packaged builds; use the editor for authoring.
+- **Lumen's stored lighting range** is moved down 6 stops
+  (`r.EyeAdaptation.CachedLightingPreExposure=-2`, range −14 to +6). At dusk
+  the cameras expose near −11, below the default range of −8 to +12. Unreal
+  then warns "Cached lighting in Lumen and real-time sky capture lighting is
+  going to be clipped", and bounce light and sky light lose precision. The
+  editor reads this setting when it starts.
 
 ## Upstream status
 

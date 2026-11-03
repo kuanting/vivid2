@@ -58,7 +58,9 @@ pip install -e ..\ProjectAirSim\client\python\projectairsim
 pip install -e ".[dev,claude]"          # add local-vlm for vLLM/Ollama
 pytest                                   # unit tests, no simulator needed
 
-# 2. Simulator. Either run a packaged VIVID2Env build (any user, no Unreal needed),
+# 2. Simulator. Either run a packaged VIVID2Env build (any user, no Unreal needed; benchmark results
+#    should come from one, see docs/unreal_versions.md "Packaged builds"):
+#      VIVID2Env.exe /Game/VIVID2/Maps/ForestSAR -windowed -ResX=1280 -ResY=720
 #    or set up the editor project for your engine (see docs/unreal_versions.md):
 pip install -e ".[setup]"                                   # gdown, for the Google Drive download
 vivid2 unreal setup --engine 5.8 --download                # prebuilt plugin for UE 5.8 (once published; until then use --plugin-dir)

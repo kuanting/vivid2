@@ -336,7 +336,9 @@
           "compress": false,
           "target-gamma": 2.5,
           // auto exposure, as on a real camera: the project default is a fixed exposure set for noon,
-          // which renders dusk scenes almost black (histogram method, fast adaptation)
+          // which renders dusk scenes almost black (histogram method). Unreal adapts by speed x frame time on
+          // each capture, so a game running at hundreds of fps adapts very slowly: packaged builds cap the
+          // frame rate at 30 (DefaultEngine.ini t.MaxFPS). Much faster speeds oscillate.
           "auto-exposure-method": 0,
           "auto-exposure-speed": 20.0,
           "auto-exposure-bias": 0.0,
@@ -376,7 +378,9 @@
           "compress": false,
           "target-gamma": 2.5,
           // auto exposure, as on a real camera: the project default is a fixed exposure set for noon,
-          // which renders dusk scenes almost black (histogram method, fast adaptation)
+          // which renders dusk scenes almost black (histogram method). Unreal adapts by speed x frame time on
+          // each capture, so a game running at hundreds of fps adapts very slowly: packaged builds cap the
+          // frame rate at 30 (DefaultEngine.ini t.MaxFPS). Much faster speeds oscillate.
           "auto-exposure-method": 0,
           "auto-exposure-speed": 20.0,
           "auto-exposure-bias": 0.0,

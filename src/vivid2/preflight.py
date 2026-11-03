@@ -49,7 +49,8 @@ def check_map(world, scene: Dict[str, Any]) -> List[str]:
         found = f"; the open level has {sorted(markers)}" if markers else ""
         raise PreflightError(
             f"the open Unreal level is not map {scene.get('map', '?')!r}: no actor matches {missing}{found}. "
-            "Open that map, press Play, and run again (finished runs are skipped)."
+            "Open that map and press Play (editor), or restart the packaged build with "
+            f"/Game/VIVID2/Maps/{scene.get('map', '<map>')}, then run again (finished runs are skipped)."
         )
     return patterns
 

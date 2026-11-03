@@ -115,9 +115,10 @@ def detect_depth_scale(raw: np.ndarray, cam_height_m: float) -> Optional[float]:
     return 0.001 if float(np.median(valid)) > 1000.0 else 1.0
 
 
-# What the runner itself does to a run (part of every run's config hash, so changing it re-runs on resume).
-# 2: segmentation visible pixels; 3: exposure settled before the mission, contrast (fog) in visibility.
-SIM_VERSION = 3
+# What the runner and the environment's settings do to a run (part of every run's config hash, so changing
+# it re-runs on resume). 2: segmentation visible pixels; 3: exposure settled before the mission, contrast
+# (fog) in visibility; 4: environment capped at 30 fps and Lumen's lighting range moved down for dusk.
+SIM_VERSION = 4
 
 
 def run_config_hash(run: Run, agent_desc: Dict[str, Any]) -> str:

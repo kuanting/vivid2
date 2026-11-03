@@ -32,3 +32,5 @@ unreal/VIVID2Env/Content/*
 
 # Local Claude Code settings
 .claude/settings.local.json
+# Copied into the project by the PixelStreaming plugin when packaging
+unreal/**/Samples/PixelStreaming/
