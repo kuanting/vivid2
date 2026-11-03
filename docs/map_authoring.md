@@ -38,6 +38,12 @@ count as visible when they aren't.
 - **No World Partition streaming** for the search area. Load the whole area
   (about 1 km²) at all times, or disable World Partition.
 - Avoid HLOD swaps over the search area, for the same reason.
+- **Turn off occlusion culling** (Project Settings > Engine > Rendering >
+  Occlusion Culling, `r.AllowOcclusionQueries=False`). With it on, the payload
+  camera reuses stale visibility, and landscape tiles go missing (white voids
+  under floating trees). In ForestSAR this hit 13 of 130 survey frames; with it
+  off, none. Check a new map with `tools/count_holes.py` on a survey recorded
+  with `--frame-bank rgb`.
 
 ## Map identity
 
