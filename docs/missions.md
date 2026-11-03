@@ -27,10 +27,14 @@ Real searches happen in fog, and a drone surveying from above the canopy
 cannot see the ground. Finding people then means flying low, among the trees.
 VIVID 2 is set up to reward stacks that can do that autonomously:
 
-- **The fog is real.** At dusk the fog lies on the ground. With fog 0.02 or 0.05
-  only the treetops show from 60 m, while from 20 m a hiker is visible and from
-  10 m clear. At midday fog 0.4 (the densest the simulator makes) leaves the
-  ground barely visible from 60 m.
+- **The fog is real.** At dusk the fog lies on the ground. With fog 0.05 the
+  ground is washed out from 55 m and a hiker barely shows, while from 12 m the
+  ground is clear. Fog 0.02 is in between. At midday the fog is thinner near
+  the ground: even fog 0.4 (the densest the simulator makes) only hazes it from
+  55 m, and a red jacket still shows.
+- **People blend in.** At dusk a yellow jacket among yellow birch crowns, or a
+  blue hoodie beside a fallen log, is hard to pick out even in clear air. From
+  55 m a person is only 100–250 pixels of a 1920 × 1440 image.
 - **The trees are solid.** Every tree has collision for its trunk and crown (24
   convex hulls per tree mesh). Below the crowns, about 4–6 m up, and between
   the trunks there is open space. Rocks, stumps and fallen logs collide too;
@@ -64,9 +68,11 @@ simplest safe version of this, to show the fog scenarios can be solved:
 5. A guard climbs when the mapped canopy or ground ahead comes within 10 m of
    the flight level.
 
-It never flies under the canopy or between trunks. People under the crowns,
-and spots too narrow to descend into vertically, are left for capable stacks.
-That is the headroom the benchmark measures.
+It never flies under the canopy or between trunks. From 12 m its camera sees
+about 20 × 15 m of ground, so it only finds people in or right next to a
+clearing at least 6 m in radius. People under the crowns, and spots too narrow
+to descend into vertically, are left for capable stacks. That is the headroom
+the benchmark measures.
 
 **The oracle sees through fog.** `coverage_gt` uses segmentation ground truth,
 which is geometry only, so in fog it is an upper bound on planning, not on
