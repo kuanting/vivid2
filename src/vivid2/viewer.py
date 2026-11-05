@@ -43,7 +43,7 @@ GREEN, YELLOW, GREY, MAGENTA, RED, WHITE = (60, 220, 60), (0, 220, 255), (150, 1
 
 class RunViewer:
     def __init__(self, chase_size=(420, 236), refresh_hz: float = 20.0):
-        import cv2  # optional dependency; raises ImportError if missing
+        import cv2
 
         self.cv2 = cv2
         self.chase_size = chase_size

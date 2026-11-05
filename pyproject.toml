@@ -9,12 +9,13 @@ description = "VIVID 2 - Virtual Validation for AI Drones, built on Project AirS
 readme = "README.md"
 license = { text = "MIT" }
 authors = [{ name = "K. T. Lai" }]
-requires-python = ">=3.9"
+requires-python = ">=3.10"
 dependencies = [
     "numpy>=1.23",
     "commentjson>=0.9",
     "jsonschema>=4.0",
     "pillow>=9.0",
+    "opencv-python>=4.8",  # dip baseline (canopy map), segmentation ground truth, --view windows
 ]
 
 [project.optional-dependencies]

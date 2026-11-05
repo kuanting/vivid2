@@ -53,7 +53,7 @@ tools/               packaging script
 ## Quick start
 
 ```powershell
-# 1. Python (Python 3.9+). Install the Project AirSim client from your fork, then VIVID 2.
+# 1. Python (Python 3.10+). Install the Project AirSim client from your fork, then VIVID 2.
 pip install -e ..\ProjectAirSim\client\python\projectairsim
 pip install -e ".[dev,claude]"          # add local-vlm for vLLM/Ollama
 pytest                                   # unit tests, no simulator needed

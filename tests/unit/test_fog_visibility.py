@@ -8,6 +8,7 @@ import asyncio
 from pathlib import Path
 
 import numpy as np
+import pytest
 
 from vivid2 import runner
 from vivid2.metrics.reasoning import reasoning_metrics
@@ -101,6 +102,7 @@ class _ExposureDrone:
 
 
 def test_exposure_settles_before_the_mission(monkeypatch):
+    pytest.importorskip("projectairsim")  # the Project AirSim client (not on PyPI, so not in CI)
     monkeypatch.setattr(runner, "EXPOSURE_PERIOD_S", 0.0)
     drone = _ExposureDrone(start=0.0)  # first capture black, as after a fog run
     out = asyncio.run(runner.settle_exposure(drone, ["Payload"]))
@@ -110,6 +112,7 @@ def test_exposure_settles_before_the_mission(monkeypatch):
 
 
 def test_exposure_gives_up_after_the_capture_limit(monkeypatch):
+    pytest.importorskip("projectairsim")  # the Project AirSim client (not on PyPI, so not in CI)
     monkeypatch.setattr(runner, "EXPOSURE_PERIOD_S", 0.0)
     drone = _ExposureDrone(start=255.0, rate=0.01)  # adapts too slowly to settle
     out = asyncio.run(runner.settle_exposure(drone, ["Payload", "Front"]))
