@@ -237,7 +237,8 @@ def main(argv=None) -> int:
                    help="low flight: after the survey, descend into the clearings mapped from the depth image "
                         "and look from about 12 m above the ground (default: off)")
     s.add_argument("--view", action="store_true",
-                   help="live windows: the payload frames with ground truth and the agent's decisions, and the chase camera")
+                   help="live windows: a preview of the payload camera from takeoff (not scored), then the payload "
+                        "frames the agent fetches, with ground truth and its decisions; and the chase camera")
     s.set_defaults(fn=cmd_run)
 
     s = sub.add_parser("eval-frames", help="evaluate a VLM offline on the saved frames of recorded runs")

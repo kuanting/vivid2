@@ -414,6 +414,42 @@
       }
     },
     {
+      // Live preview for people watching a run (vivid2 run --view): the Payload camera's mount and lens at a
+      // quarter of its pixels, shown from takeoff until the first scored frame. Never scored. Unreal renders a
+      // camera only while someone subscribes to it, so runs without --view never render it, and the runner
+      // unsubscribes at the first scored frame. Its own exposure, so it never changes Payload's.
+      "id": "PayloadPreview",
+      "type": "camera",
+      "enabled": true,
+      "parent-link": "Frame",
+      "capture-interval": 0.1,
+      "capture-settings": [
+        {
+          "image-type": 0,
+          "width": 960,
+          "height": 720,
+          "fov-degrees": 80,
+          "capture-enabled": true,
+          // streaming-enabled would add it to the game window's camera views
+          "streaming-enabled": false,
+          "pixels-as-float": false,
+          "compress": false,
+          "target-gamma": 2.5,
+          "auto-exposure-method": 0,
+          "auto-exposure-speed": 20.0,
+          "auto-exposure-bias": 0.0,
+          "auto-exposure-min-brightness": 0.0005,
+          "auto-exposure-max-brightness": 2.0,
+          "auto-exposure-histogram-log-min": -14.0,
+          "auto-exposure-histogram-log-max": 6.0
+        }
+      ],
+      "origin": {
+        "xyz": "0 0 0.15",
+        "rpy-deg": "0 -90 0"
+      }
+    },
+    {
       // Forward-looking camera for obstacle avoidance when flying low among trees (RGB + planar depth).
       // Pitched 10 degrees down so the ground ahead is in view. Not used for scoring.
       "id": "Front",

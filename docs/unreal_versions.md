@@ -141,11 +141,19 @@ Settings that keep the images the same:
 - **Frame rate** is capped at 30 fps (`t.MaxFPS` in `Config/DefaultEngine.ini`).
   Camera auto-exposure adapts by speed × frame time each time a camera
   captures. Uncapped, a packaged build runs at hundreds of fps, and its first
-  frames after the climb came out too dark or too bright for about 10 s. With
-  the cap they take about 3 frames to settle. Much faster adaptation is no
-  fix: the exposure then oscillates. The editor renders only a few frames per
-  second in the background, so it adapts almost at once. Benchmark results
-  should therefore come from packaged builds; use the editor for authoring.
+  frames after the climb came out too dark or too bright for about 10 s.
+  Much faster adaptation is no fix: the exposure then oscillates. The editor
+  renders only a few frames per second in the background, so it adapts almost
+  at once. Benchmark results should therefore come from packaged builds; use
+  the editor for authoring.
+- **Exposure warm-up at survey height.** Before the mission clock starts, the
+  runner captures from each camera until its exposure is steady. On the
+  ground, the payload camera sits centimetres above the terrain and renders
+  flat grey, so it is lifted to the survey height for its warm-up and then put
+  back. Without this, the first three survey frames at dusk were too dark
+  (brightness 23, 68 and 113 against 125 for the rest of the run). With it,
+  they match the rest (126, 125 and 127). `meta.json` records each warm-up
+  under `exposure`.
 - **Lumen's stored lighting range** is moved down 6 stops
   (`r.EyeAdaptation.CachedLightingPreExposure=-2`, range −14 to +6). At dusk
   the cameras expose near −11, below the default range of −8 to +12. Unreal

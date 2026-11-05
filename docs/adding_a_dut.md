@@ -52,8 +52,11 @@ Subclass `vivid2.stack.base.Agent` and implement `async run(ctx)`. Use:
   real crew carries: 20 m cells on maps with relief, flat ground otherwise.
   `terrain.down_at(n, e)` gives the NED down of the ground. It has no trees,
   and it is never the 1 m model VIVID 2 scores height above ground with.
+- `ctx.mission.camera`: the payload camera's `width`, `height` (pixels) and
+  `fov_deg`, for planning the survey before the first frame.
 - `await ctx.get_frame()`: the latest payload-camera frame with its pose and
-  depth, or `None` if no image is ready yet.
+  depth, or `None` if no image is ready yet. Every frame you fetch is recorded
+  and scored, so fetch frames where you search, not on the ground.
 - `await ctx.get_nav_frame("Front")`: the forward camera (RGB + planar depth in
   metres, 640 × 480, 90° FOV, pitched 10° down) for obstacle avoidance when
   flying low among trees. These frames are not scored.

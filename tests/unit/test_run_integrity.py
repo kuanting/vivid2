@@ -172,3 +172,16 @@ def test_cli_agent_choices_come_from_registry(capsys):
         main(["run", "--campaign", "x.jsonc", "--agent", "nope"])
     err = capsys.readouterr().err
     assert all(a in err for a in AGENTS)
+
+
+def test_payload_camera_is_lifted_straight_up_for_the_exposure_warm_up():
+    from vivid2.runner import lifted_pose
+    from vivid2.scenario import load_jsonc
+    from vivid2.sim.scene_builder import camera_config
+
+    robot = load_jsonc(Path(__file__).parents[2] / "sim_config" / "robot_vivid_quad.jsonc")
+    pose = lifted_pose(camera_config(robot, "Payload"), 55.0)
+    assert pose["translation"] == pytest.approx({"x": 0.0, "y": 0.0, "z": 0.15 - 55.0})
+    # rpy-deg "0 -90 0": still looking straight down (the recorded nadir frames have w = -y = 0.707)
+    r = pose["rotation"]
+    assert (r["w"], r["x"], r["y"], r["z"]) == pytest.approx((2 ** -0.5, 0.0, -(2 ** -0.5), 0.0))

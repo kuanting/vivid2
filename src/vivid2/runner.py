@@ -20,7 +20,7 @@ from vivid2.preflight import PreflightError, run_preflight, scenario_map
 from vivid2.recorder import Recorder, RunLog
 from vivid2.scenario import Campaign, Run
 from vivid2.scoring import layer_scores, overall_score, reasoning_score
-from vivid2.sim.scene_builder import build_scene, camera_settings, captures
+from vivid2.sim.scene_builder import build_scene, camera_config, camera_settings, captures
 from vivid2.sim.segmentation import SegmentationError, assign_ids, palette, visibility
 from vivid2.stack.base import Agent, Frame, GTAnnotation, MissionContext, MissionSpec, TargetReport
 from vivid2.stack.reference.controllers import AirSimController
@@ -42,7 +42,7 @@ def _wxyz(d: Dict[str, float]) -> Tuple[float, float, float, float]:
     return (d["w"], d["x"], d["y"], d["z"])
 
 
-def mission_spec(run: Run, start_ned=None, terrain=None) -> MissionSpec:
+def mission_spec(run: Run, start_ned=None, terrain=None, camera: Optional[Dict[str, Any]] = None) -> MissionSpec:
     """What the DUT is told. ``ground_down_m`` is the real ground under the start point.
 
     Scenarios author heights against flat ``search_area.ground_down_m``; on a map
@@ -70,6 +70,7 @@ def mission_spec(run: Run, start_ned=None, terrain=None) -> MissionSpec:
         min_agl_m=lim.get("min_agl_m", 5.0),
         geofence_margin_m=lim.get("geofence_margin_m", 20.0),
         energy_budget_m=lim.get("energy_budget_m"),
+        camera=dict(camera) if camera else None,
         terrain=dut_terrain,
     )
 
@@ -97,6 +98,9 @@ def serialize_requests(client) -> None:
     client.request_lock = lock
 
 
+# Camera the live view (--view) shows until the first scored frame; robot configs without it get no preview.
+PREVIEW_CAMERA = "PayloadPreview"
+
 DEPTH_NO_DATA = 65504  # float16 max: the plugin's value where nothing was rendered (0 is also no data)
 
 
@@ -117,8 +121,10 @@ def detect_depth_scale(raw: np.ndarray, cam_height_m: float) -> Optional[float]:
 
 # What the runner and the environment's settings do to a run (part of every run's config hash, so changing
 # it re-runs on resume). 2: segmentation visible pixels; 3: exposure settled before the mission, contrast
-# (fog) in visibility; 4: environment capped at 30 fps and Lumen's lighting range moved down for dusk.
-SIM_VERSION = 4
+# (fog) in visibility; 4: environment capped at 30 fps and Lumen's lighting range moved down for dusk;
+# 5: the mission spec carries the camera, so agents no longer take a frame on the ground before takeoff
+# (frame 1 is the first survey frame), and the payload camera's exposure settles at survey height.
+SIM_VERSION = 5
 
 
 def run_config_hash(run: Run, agent_desc: Dict[str, Any]) -> str:
@@ -158,30 +164,62 @@ EXPOSURE_PERIOD_S = 0.5
 EXPOSURE_SETTLED_GREY = 1.5  # spread of mean grey level (0-255) over the last 3 captures that counts as settled
 
 
-async def settle_exposure(drone, cameras: Sequence[str]) -> Dict[str, Dict[str, Any]]:
+def lifted_pose(camera: Dict[str, Any], lift_m: float) -> Dict[str, Dict[str, float]]:
+    """A camera's configured mount (relative to the drone, NED), raised ``lift_m`` straight up.
+
+    Rotation as configured (``rpy-deg``, applied yaw-pitch-roll), computed here because the
+    client's ``rpy_to_quaternion`` clips pitch at 89.9 degrees and a payload camera looks
+    straight down.
+    """
+    origin = camera.get("origin", {})
+    x, y, z = (float(v) for v in origin.get("xyz", "0 0 0").split())
+    r, p, yw = (np.radians(float(v)) / 2.0 for v in origin.get("rpy-deg", "0 0 0").split())
+    cr, sr, cp, sp, cy, sy = np.cos(r), np.sin(r), np.cos(p), np.sin(p), np.cos(yw), np.sin(yw)
+    q = (cr * cp * cy + sr * sp * sy, sr * cp * cy - cr * sp * sy, cr * sp * cy + sr * cp * sy, cr * cp * sy - sr * sp * cy)
+    return {"translation": {"x": x, "y": y, "z": z - float(lift_m)},
+            "rotation": {"w": float(q[0]), "x": float(q[1]), "y": float(q[2]), "z": float(q[3])}}
+
+
+async def settle_exposure(drone, cameras: Sequence[str],
+                          views: Optional[Dict[str, Dict[str, Any]]] = None) -> Dict[str, Dict[str, Any]]:
     """Capture from each camera until its auto exposure has settled to this run's light and fog.
 
     A camera's exposure state survives from the previous run in the same Unreal session, and it
     only adapts when the camera captures. Without this, the first frames of a run are too bright
     or too dark depending on what ran before (the very first one is sometimes black). Called
     before the mission clock starts; the frames are thrown away.
+
+    ``views`` moves a camera for the warm-up (camera id -> ``{"pose": lifted_pose(...), "lift_m": m}``)
+    and puts it back on its mount afterwards. The payload camera warms up at survey height: on
+    the ground it sits centimetres above the terrain, renders flat grey, and would settle to that,
+    leaving the first survey frames too dark at dusk.
     """
-    from projectairsim.types import ImageType
+    from projectairsim.types import ImageType, Pose, Quaternion, Vector3
 
     out: Dict[str, Dict[str, Any]] = {}
     for cam in cameras:
+        view = (views or {}).get(cam)
+        if view:
+            pose = Pose({"translation": Vector3(view["pose"]["translation"]),
+                         "rotation": Quaternion(view["pose"]["rotation"])})
+            await asyncio.to_thread(drone.set_camera_pose, cam, pose, True)
         greys: List[float] = []
         settled = False
-        for _ in range(EXPOSURE_MAX_CAPTURES):
-            imgs = await asyncio.to_thread(drone.get_images, cam, [ImageType.SCENE])
-            msg = imgs.get(ImageType.SCENE)
-            if msg:
-                greys.append(float(_decode(msg, np.uint8, 3).mean()))
-                if len(greys) >= 3 and greys[-1] > 1.0 and max(greys[-3:]) - min(greys[-3:]) < EXPOSURE_SETTLED_GREY:
-                    settled = True
-                    break
-            await asyncio.sleep(EXPOSURE_PERIOD_S)
-        out[cam] = {"captures": len(greys), "settled": settled, "mean_grey": [round(g, 1) for g in greys]}
+        try:
+            for _ in range(EXPOSURE_MAX_CAPTURES):
+                imgs = await asyncio.to_thread(drone.get_images, cam, [ImageType.SCENE])
+                msg = imgs.get(ImageType.SCENE)
+                if msg:
+                    greys.append(float(_decode(msg, np.uint8, 3).mean()))
+                    if len(greys) >= 3 and greys[-1] > 1.0 and max(greys[-3:]) - min(greys[-3:]) < EXPOSURE_SETTLED_GREY:
+                        settled = True
+                        break
+                await asyncio.sleep(EXPOSURE_PERIOD_S)
+        finally:
+            if view:
+                await asyncio.to_thread(drone.reset_camera_pose, cam, True)
+        out[cam] = {"captures": len(greys), "settled": settled, "mean_grey": [round(g, 1) for g in greys],
+                    **({"lifted_m": view["lift_m"]} if view else {})}
     return out
 
 
@@ -221,8 +259,10 @@ def write_bank_files(run_dir: Path, frame_id: int, jpeg: bytes, depth_m: Optiona
 class SimMissionContext(MissionContext):
     def __init__(self, run: Run, world, drone, camera_id: str, recorder: Recorder, controller: AirSimController,
                  fov_deg: float, frame_bank: str = "off", seg_ids: Optional[Dict[str, int]] = None,
-                 target_ids: Optional[List[str]] = None, start_ned=None, terrain=None, viewer=None):
+                 target_ids: Optional[List[str]] = None, start_ned=None, terrain=None, viewer=None,
+                 camera: Optional[Dict[str, Any]] = None):
         self.viewer = viewer  # optional live camera windows (vivid2.viewer.RunViewer)
+        self.preview_topic: Optional[str] = None  # the viewer's live preview, unsubscribed at the first frame
         if frame_bank not in FRAME_BANK_MODES:
             raise ValueError(f"frame_bank must be one of {FRAME_BANK_MODES}")
         self.frame_bank = frame_bank
@@ -236,7 +276,7 @@ class SimMissionContext(MissionContext):
         self.recorder = recorder
         self.controller = controller
         self.fov_deg = fov_deg
-        self.mission = mission_spec(run, start_ned, terrain)
+        self.mission = mission_spec(run, start_ned, terrain, camera)
         self.t0_ns = world.get_sim_time()
         self.last_t_ns = self.t0_ns  # last sim time seen, for logging after the connection drops
         self.depth_scale: Optional[float] = None  # metres per raw depth unit, detected in flight
@@ -311,6 +351,13 @@ class SimMissionContext(MissionContext):
         })
         if self.viewer is not None:
             self.viewer.show_frame(frame, seg=seg, extra=f"t {self.elapsed_s():.0f} s  height {self.mission.ground_down_m - frame.cam_pos[2]:.0f} m")
+        if self.preview_topic is not None:
+            # The test has started: stop the live preview, so Unreal stops rendering its camera.
+            topic, self.preview_topic = self.preview_topic, None
+            try:
+                await asyncio.to_thread(self.world.client.unsubscribe, topic)
+            except Exception:
+                pass
         return frame
 
     async def get_nav_frame(self, camera: str = "Front") -> Optional[Frame]:
@@ -398,6 +445,8 @@ async def _poll_trajectory(ctx: SimMissionContext, stop: asyncio.Event) -> None:
             p, t = await asyncio.to_thread(pose_and_time)
             ctx.last_t_ns = t
             ctx.recorder.log("trajectory", {"t": t, "pos": _xyz(p["translation"]), "q": list(_wxyz(p["rotation"]))})
+            if ctx.viewer is not None and ctx.viewer.live:
+                ctx.viewer.set_progress(ctx.mission.ground_down_m - p["translation"]["z"], (t - ctx.t0_ns) / 1e9)
         except Exception:
             pass
         await asyncio.sleep(1.0 / TRAJECTORY_HZ)
@@ -478,6 +527,8 @@ async def execute_run(
     from projectairsim import Drone
 
     agent = agent or agent_factory(run)
+    if viewer is not None:
+        viewer.start_run(f"{run.run_id}  {agent.name}")
     run_dir = Path(out_dir) / agent.name / run.run_id
     terrain, terrain_meta = load_for_run(sim_config_dir, run.spec)
     targets = run.resolved_targets(terrain)
@@ -510,11 +561,19 @@ async def execute_run(
                                               "impact_point": msg.get("impact_point")}),
     )
     apply_environment(world, run.spec.get("environment", {}))
+    preview = None
     if viewer is not None:
-        viewer.set_status(f"{run.run_id}  {agent.name}")
-        chase = drone.sensors.get("Chase", {}).get("scene_camera") if hasattr(drone, "sensors") else None
+        sensors = getattr(drone, "sensors", {})
+        chase = sensors.get("Chase", {}).get("scene_camera")
         if chase:
             client.subscribe(chase, viewer.chase_callback())
+        # Live preview of the payload view until the first scored frame (see vivid2.viewer).
+        preview = sensors.get(PREVIEW_CAMERA, {}).get("scene_camera")
+        if preview:
+            client.subscribe(preview, viewer.preview_callback())
+        else:
+            viewer.no_preview()
+        viewer.set_phase("on the ground, settling camera exposure (this camera sees nothing until takeoff)")
     cameras = [sc.get("camera", "Payload")]
     for nav in ("Front",):
         try:
@@ -522,12 +581,23 @@ async def execute_run(
             cameras.append(nav)
         except StopIteration:
             pass  # robot config without that camera
-    exposure = await settle_exposure(drone, cameras)  # before the mission clock starts
+    # Before the mission clock starts. The payload camera warms up lifted to the survey height, looking
+    # at the forest the survey will see; the Front camera warms up where it is.
+    lift = float(run.spec["search_area"]["altitude_m"])
+    payload_cam = sc.get("camera", "Payload")
+    views = {payload_cam: {"pose": lifted_pose(camera_config(scene, payload_cam, sc.get("drone_name", "Drone1")), lift),
+                           "lift_m": lift}}
+    exposure = await settle_exposure(drone, cameras, views)
 
     controller = AirSimController(drone, world.get_sim_time, rec.log)
     ctx = SimMissionContext(run, world, drone, sc.get("camera", "Payload"), rec, controller, cam["fov-degrees"], frame_bank,
                             seg_ids=seg_ids, target_ids=[t["id"] for t in targets], start_ned=start_ned,
-                            terrain=terrain, viewer=viewer)
+                            terrain=terrain, viewer=viewer,
+                            camera={"width": int(cam["width"]), "height": int(cam["height"]),
+                                    "fov_deg": float(cam["fov-degrees"])})
+    ctx.preview_topic = preview
+    if viewer is not None:
+        viewer.set_phase("mission clock started: taking off and climbing")
     for nav in ("Front",):
         try:
             ctx._nav_fov[nav] = float(camera_settings(scene, nav, sc.get("drone_name", "Drone1"))["fov-degrees"])

@@ -16,6 +16,14 @@ OpenCV windows (``projectairsim.image_utils.ImageDisplay``). VIVID 2 opens two:
     background.
 * **Chase**: the chase camera's stream, for seeing what the drone is doing.
 
+Before the first scored frame (scene loading, exposure warm-up, takeoff and the
+climb to survey height), the Payload window shows a **live preview** instead:
+the robot's ``PayloadPreview`` camera, which has the payload camera's mount and
+lens at a quarter of its pixels and its own exposure. It is marked "not scored".
+Unreal renders a camera only while someone subscribes to it, and the runner
+unsubscribes from the preview at the first scored frame, so the preview never
+touches the scored camera's images or exposure.
+
 The viewer is for people only. It runs in its own thread, keeps only the newest
 image per window and swallows its own errors, so it never changes a run.
 """
@@ -44,6 +52,12 @@ class RunViewer:
         self._payload: Optional[Dict[str, Any]] = None
         self._chase: Optional[np.ndarray] = None
         self._status = ""
+        self._live = False  # True from start_run() until the run's first scored frame
+        self._phase = ""
+        self._progress = ""
+        self._preview_msg = None
+        self._preview: Optional[np.ndarray] = None
+        self._has_preview: Optional[bool] = None  # None until the runner has looked for the camera
         self._dirty = False
         self._running = True
         self._thread = threading.Thread(target=self._loop, name="vivid2-viewer", daemon=True)
@@ -55,6 +69,53 @@ class RunViewer:
             self._status = text
             self._dirty = True
 
+    def start_run(self, status: str) -> None:
+        """A new run: back to the live preview until its first scored frame."""
+        with self._lock:
+            self._status = status
+            self._payload = None
+            self._live = True
+            self._phase = "loading the scene"
+            self._progress = ""
+            self._preview_msg = None
+            self._preview = None
+            self._has_preview = None
+            self._dirty = True
+
+    def no_preview(self) -> None:
+        """The robot has no preview camera: say so instead of waiting for one."""
+        with self._lock:
+            self._has_preview = False
+            self._dirty = True
+
+    def set_phase(self, text: str) -> None:
+        """What the run is doing before the test starts (shown on the preview)."""
+        with self._lock:
+            self._phase = text
+            self._dirty = True
+
+    def set_progress(self, height_m: float, elapsed_s: float) -> None:
+        """Drone height and mission time, shown on the preview."""
+        with self._lock:
+            if self._live:
+                self._progress = f"height {height_m:.0f} m  t {elapsed_s:.0f} s"
+                self._dirty = True
+
+    @property
+    def live(self) -> bool:
+        return self._live
+
+    def preview_callback(self) -> Callable[[Any, Dict[str, Any]], None]:
+        with self._lock:
+            self._has_preview = True
+
+        def cb(_topic, msg):
+            with self._lock:
+                if self._live:
+                    self._preview_msg = msg
+                    self._dirty = True
+        return cb
+
     def show_frame(self, frame, seg: Optional[np.ndarray] = None, extra: str = "") -> None:
         """A frame the agent fetched (``vivid2.stack.base.Frame``), plus its segmentation image."""
         try:
@@ -62,6 +123,8 @@ class RunViewer:
                 self._payload = {"frame_id": frame.frame_id, "image": frame.rgb, "depth": frame.depth, "seg": seg,
                                  "gt": list(frame.gt or []), "dets": [], "decision": None, "extra": extra,
                                  "t": frame.t_ns}
+                self._live = False
+                self._preview_msg = None
                 self._dirty = True
         except Exception:
             pass
@@ -161,6 +224,31 @@ class RunViewer:
         cv2.putText(img, line2, (8, h - 8), cv2.FONT_HERSHEY_SIMPLEX, 0.5, WHITE, 1, cv2.LINE_AA)
         return img
 
+    def _draw_preview(self, img: Optional[np.ndarray], phase: str, progress: str,
+                      has_preview: Optional[bool] = None) -> np.ndarray:
+        """The live preview before the first scored frame, in the same layout as a scored frame."""
+        cv2 = self.cv2
+        w = DISPLAY_WIDTH
+        if img is not None and getattr(img, "size", 0):
+            h = round(img.shape[0] * w / img.shape[1])
+            rgb = cv2.resize(np.ascontiguousarray(img[..., :3]), (w, h), interpolation=cv2.INTER_AREA)
+        else:
+            h = w * 3 // 4
+            rgb = np.zeros((h, w, 3), np.uint8)
+            msg = "this robot has no PayloadPreview camera" if has_preview is False else "waiting for the preview camera"
+            cv2.putText(rgb, msg, (20, h // 2), cv2.FONT_HERSHEY_SIMPLEX, 0.7, GREY, 1, cv2.LINE_AA)
+        cv2.rectangle(rgb, (0, 0), (w, 36), (0, 0, 0), -1)
+        cv2.putText(rgb, "LIVE PREVIEW - not scored", (8, 26), cv2.FONT_HERSHEY_SIMPLEX, 0.8, YELLOW, 2, cv2.LINE_AA)
+        depth = self._panel(None, (w // 2, h // 2), "depth: from the first test frame")
+        seg = self._panel(None, (w // 2, h - h // 2), "segmentation: from the first test frame")
+        out = np.hstack([rgb, np.vstack([depth, seg])])
+        cv2.rectangle(out, (0, h - 44), (out.shape[1], h), (0, 0, 0), -1)
+        cv2.putText(out, f"{self._status}  {phase}  {progress}", (8, h - 26),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.5, WHITE, 1, cv2.LINE_AA)
+        cv2.putText(out, "The test starts at survey height, with the payload camera's frame 1.", (8, h - 8),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.5, YELLOW, 1, cv2.LINE_AA)
+        return out
+
     def _inset(self, img: np.ndarray, g, k: float = 1.0, size=(384, 288), zoom: float = 6.0) -> Optional[np.ndarray]:
         """A magnified crop of the full-resolution image around a target that is (partly) in frame.
 
@@ -212,7 +300,10 @@ class RunViewer:
             while self._running:
                 with self._lock:
                     dirty, p, chase_msg = self._dirty, self._payload, getattr(self, "_chase_msg", None)
+                    live, preview_msg, phase, progress = self._live, self._preview_msg, self._phase, self._progress
+                    has_preview = self._has_preview
                     self._chase_msg = None
+                    self._preview_msg = None
                     self._dirty = False
                 chase = None
                 if chase_msg is not None:
@@ -222,8 +313,20 @@ class RunViewer:
                         chase = unpack_image(chase_msg)
                     except Exception:
                         chase = None
+                if preview_msg is not None:
+                    try:
+                        from projectairsim.utils import unpack_image
+
+                        self._preview = unpack_image(preview_msg)
+                    except Exception:
+                        pass
                 if dirty:
-                    if p is not None:
+                    if live:
+                        cv2.imshow("VIVID2 Payload", self._draw_preview(self._preview, phase, progress, has_preview))
+                        if "p" not in placed:
+                            cv2.moveWindow("VIVID2 Payload", 40, 40)
+                            placed.add("p")
+                    elif p is not None:
                         cv2.imshow("VIVID2 Payload", self._draw_payload(p))
                         if "p" not in placed:
                             cv2.moveWindow("VIVID2 Payload", 40, 40)

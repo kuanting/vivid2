@@ -1,5 +1,6 @@
 """End-to-end agent -> recorder -> metrics -> scoring, with the simulator faked."""
 import asyncio
+import json
 
 import numpy as np
 
@@ -76,3 +77,13 @@ def test_report_renders(tmp_path, blocks_run):
     out = write_report(tmp_path)
     html = out.read_text(encoding="utf-8")
     assert "coverage_gt" in html and "blind" in html and "<table>" in html
+
+
+def test_first_frame_is_taken_at_survey_height(tmp_path, blocks_run):
+    """The mission spec carries the camera, so no frame is taken on the ground before takeoff."""
+    _, world = _fly(tmp_path, blocks_run, NeverReasoner(), None, "first")
+    frames = [json.loads(l) for l in open(tmp_path / "first" / blocks_run.run_id / "frames.jsonl")]
+    m = world.mission
+    survey_down = m.ground_down_m - m.altitude_m
+    assert frames[0]["frame_id"] == 1
+    assert abs(frames[0]["cam_pos"][2] - survey_down) < 1.0

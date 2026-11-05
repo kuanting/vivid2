@@ -67,6 +67,11 @@ def _camera(robot_or_scene: Dict[str, Any], camera_id: str, drone_name: str) -> 
     return next(s for s in robot["sensors"] if s["id"] == camera_id)
 
 
+def camera_config(robot_or_scene: Dict[str, Any], camera_id: str, drone_name: str = "Drone1") -> Dict[str, Any]:
+    """Return the whole sensor entry of ``camera_id`` (mount ``origin`` and capture settings)."""
+    return _camera(robot_or_scene, camera_id, drone_name)
+
+
 def camera_settings(robot_or_scene: Dict[str, Any], camera_id: str, drone_name: str = "Drone1") -> Dict[str, Any]:
     """Return the RGB capture settings of ``camera_id`` from a loaded scene or robot dict."""
     return next(c for c in _camera(robot_or_scene, camera_id, drone_name)["capture-settings"] if c["image-type"] == 0)

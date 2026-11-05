@@ -46,3 +46,47 @@ def test_high_resolution_frames_are_scaled_for_display_but_insets_keep_detail():
     inset = out[720 - 52 - 288:720 - 52, 8:8 + 384]
     red = (inset[..., 2] > 200) & (inset[..., 1] < 50)
     assert red.sum() > 200                                  # the line, magnified ~3x from camera pixels
+
+
+def _live_viewer():
+    v = _viewer()
+    import threading
+    v._lock = threading.Lock()
+    v._payload, v._preview_msg, v._preview, v._has_preview, v._dirty = None, None, None, False, False
+    return v
+
+
+def test_preview_until_the_first_scored_frame():
+    from vivid2.stack.base import Frame
+
+    v = _live_viewer()
+    v.start_run("run1  survey")
+    assert v.live
+    cb = v.preview_callback()
+    cb("topic", {"msg": 1})
+    assert v._preview_msg == {"msg": 1}
+    v.set_progress(23.4, 9.0)
+    assert v._progress == "height 23 m  t 9 s"
+    rgb = np.zeros((720, 960, 3), np.uint8)
+    v.show_frame(Frame(t_ns=1, frame_id=1, rgb=rgb, depth=None, cam_pos=np.zeros(3), cam_q=(1, 0, 0, 0), fov_deg=80))
+    assert not v.live
+    cb("topic", {"msg": 2})                  # late preview messages are dropped once the test runs
+    assert v._preview_msg is None
+    v.set_progress(55.0, 30.0)
+    assert v._progress == "height 23 m  t 9 s"
+    v.start_run("run2  survey")              # the next run starts with the preview again
+    assert v.live and v._payload is None
+
+
+def test_preview_panel_has_the_scored_layout_and_is_marked():
+    v = _live_viewer()
+    v.start_run("run1  survey")
+    img = np.full((720, 960, 3), 90, np.uint8)
+    out = v._draw_preview(img, "taking off", "height 5 m  t 3 s")
+    assert out.shape == (720, 1440, 3)                      # same window as a scored frame
+    banner = out[0:36, 0:400]
+    assert ((banner[..., 1] > 200) & (banner[..., 2] > 200)).any()   # yellow "not scored" banner
+    assert out[400, 400].mean() == pytest.approx(90, abs=1)          # the preview image itself
+    assert v._draw_preview(None, "loading the scene", "").shape == (720, 1440, 3)   # camera not known yet
+    blank = v._draw_preview(None, "warm-up", "", has_preview=False)
+    assert blank.shape == (720, 1440, 3)

@@ -140,7 +140,7 @@ def test_the_descent_stops_above_an_obstacle(tmp_path, blocks_run):
                         FoggyPerception(run.resolved_targets()), frame_period_s=0.0, dip=DipSettings())
     agent._survey_down = -35.0
     agent._reported = []
-    agent._lf_start(world.mission, None)
+    agent._lf_start(world.mission, (640, 480), 90.0)
     world.pos = np.array([t[0], t[1], -35.0])
     agent._lf_observe(_nadir_frame(world))
     i, j = agent._canopy._cell(t[0], t[1])
@@ -163,7 +163,7 @@ def test_dips_stop_when_time_runs_short(tmp_path, blocks_run):
     agent = SearchAgent("gt-dip", LawnmowerPlanner(), DetectionThresholdReasoner(0.5), None,
                         frame_period_s=1.0, dip=DipSettings())
     agent._survey_down = -35.0
-    agent._lf_start(world.mission, None)
+    agent._lf_start(world.mission, (640, 480), 90.0)
     spot = Clearing(40.0, 40.0, 10.0)
     here = np.array([0.0, 0.0, -35.0])
     assert agent._dip_affordable(world, here, spot)

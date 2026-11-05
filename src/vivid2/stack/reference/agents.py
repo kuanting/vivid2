@@ -38,6 +38,19 @@ HOME_SKIP_M = 25.0          # no dips into the launch clearing
 GROUND_TOLERANCE_M = 3.0  # a depth point this far above the coarse terrain is not on the ground
 
 
+async def camera_geometry(ctx: MissionContext):
+    """Payload camera ((width, height), fov_deg) for planning the survey before the first frame.
+
+    From the mission spec; a context that doesn't describe its camera costs one frame, taken
+    where the drone stands.
+    """
+    cam = ctx.mission.camera
+    if cam:
+        return (int(cam["width"]), int(cam["height"])), float(cam["fov_deg"])
+    probe = await ctx.get_frame()
+    return ((probe.width, probe.height), probe.fov_deg) if probe is not None else ((640, 480), 90.0)
+
+
 def ray_to_terrain(frame: Frame, u: float, v: float, terrain: TerrainModel, iterations: int = 4) -> Optional[np.ndarray]:
     """Where the pixel's ray meets the (smooth, coarse) terrain: a few flat-ground steps."""
     down = float(terrain.down_at(frame.cam_pos[0], frame.cam_pos[1]))
@@ -116,20 +129,19 @@ class LowFlightMixin:
     low: Optional[DipSettings] = None
     frame_period_s: float = 1.0
 
-    def _lf_start(self, mission, probe: Optional[Frame]) -> None:
+    def _lf_start(self, mission, wh, fov: float) -> None:
         self._canopy: Optional[CanopyMap] = None
         self._dips = 0
         self._climbs = 0
         self._odo_m = 0.0
         self._last_pos: Optional[np.ndarray] = None
-        self._t_ns = probe.t_ns if probe is not None else 0
+        self._t_ns = 0  # sim time of the newest frame
         self._assess_s = 0.0  # running mean wall time of one look (reasoner call)
         if self.low is None:
             return
         terrain = mission.terrain if mission.terrain is not None else TerrainModel.flat(mission.ground_down_m)
         self._canopy = CanopyMap(mission.search_polygon_ne, terrain, self.low.cell_m, self.low.open_height_m)
-        w, h, fov = (probe.width, probe.height, probe.fov_deg) if probe is not None else (640, 480, 90.0)
-        foot = min(nadir_footprint(self._dip_height(mission), w, h, fov))
+        foot = min(nadir_footprint(self._dip_height(mission), wh[0], wh[1], fov))
         self._dip_spacing = max(2.0 * self.low.min_radius_m, 0.8 * foot)
 
     def _lf_observe(self, frame: Frame) -> None:
@@ -374,15 +386,13 @@ class SearchAgent(LowFlightMixin, Agent):
 
     async def run(self, ctx: MissionContext) -> None:
         m = ctx.mission
-        probe = await ctx.get_frame()  # learn camera geometry for planning
-        wh = (probe.width, probe.height) if probe else (640, 480)
-        fov = probe.fov_deg if probe else 90.0
+        wh, fov = await camera_geometry(ctx)
         path = self.planner.plan(m, fov, wh)
         self._survey_down = m.ground_down_m - m.altitude_m
         self._reported: List[np.ndarray] = []
         self._dismissed: List[np.ndarray] = []
         self._verifications = 0
-        self._lf_start(m, probe)
+        self._lf_start(m, wh, fov)
 
         await ctx.controller.takeoff(self._survey_down)
         here, _ = ctx.pose()
@@ -620,11 +630,10 @@ class SurveyAgent(LowFlightMixin, Agent):
 
     async def run(self, ctx: MissionContext) -> None:
         m = ctx.mission
-        probe = await ctx.get_frame()
-        wh = (probe.width, probe.height) if probe else (640, 480)
-        path = self.planner.plan(m, probe.fov_deg if probe else 90.0, wh)
+        wh, fov = await camera_geometry(ctx)
+        path = self.planner.plan(m, fov, wh)
         self._survey_down = m.ground_down_m - m.altitude_m
-        self._lf_start(m, probe)
+        self._lf_start(m, wh, fov)
         await ctx.controller.takeoff(self._survey_down)
         here, _ = ctx.pose()
         self._path = [[float(v) for v in here]] + [list(w) for w in path]

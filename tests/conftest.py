@@ -80,7 +80,7 @@ class FakeWorld(MissionContext):
         self.surface = surface
         self.surface_max_m = surface_max_m
         self.recorder = recorder
-        self.mission = mission_spec(run)
+        self.mission = mission_spec(run, camera={"width": width, "height": height, "fov_deg": fov})
         self.targets = targets if targets is not None else run.resolved_targets()
         self.pos = np.asarray(run.spec["dut_start"]["ned"], float)
         self.path: List[np.ndarray] = []

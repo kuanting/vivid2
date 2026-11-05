@@ -118,6 +118,8 @@ class MissionSpec:
     min_agl_m: float = 5.0
     geofence_margin_m: float = 20.0
     energy_budget_m: Optional[float] = None  # path-length proxy for the battery
+    # The payload camera, so a stack can plan before its first frame: {"width": px, "height": px, "fov_deg": deg}.
+    camera: Optional[Dict[str, Any]] = None
     # Coarse bare-ground terrain, like the public DEM a real crew carries (20 m cells on maps
     # with relief, flat ground otherwise): ``terrain.down_at(n, e)`` is the NED down of the
     # ground. Never the simulator's 1 m model, and no trees.
