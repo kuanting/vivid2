@@ -99,6 +99,39 @@
   scored on the same plane. A terrain-following planner (M3.4) will replace
   this fixed altitude.
 
+## YOLO baseline
+
+`coverage_yolo` flies the same zig-zag as the other reference agents and looks
+with an off-the-shelf COCO person detector. The default is YOLOX-s (Apache-2.0),
+downloaded to the VIVID 2 cache on first use and checked by SHA-256.
+
+- **Tiled at full resolution.** From 55 m a person is about 15×20 px of a
+  1920×1440 frame. Shrunk to the detector's 640 px input, that would be 5×7 px.
+  So the frame is cut into 12 overlapping 640 px tiles, plus one pass over the
+  whole frame for people seen up close. The boxes are merged with NMS.
+- **One threshold, 0.3,** YOLOX's conventional value. Calibrating it on frames
+  the benchmark does not use gave no usable operating point, so it is not tuned
+  on the benchmark (`tools/calibrate_detector.py`, notes in
+  `stack/reference/detectors.py`).
+  - Plain: a detection at 0.3 or more is reported.
+  - With `--verify on`: 0.15 is enough to go and look, and most close-ups (or
+    dip looks) must reach 0.3.
+- **Two variants in the benchmark:**
+  - `coverage_yolo`, the plain zig-zag;
+  - `coverage_yolo --verify on --dip on`, which flies like `vlm --dip`. The
+    only difference from Claude is the eyes.
+- **Detector time is thinking time** and takes mission time. The execution
+  provider (DirectML, CUDA or CPU) is part of the agent's settings. On an RTX
+  5090 laptop with DirectML, a frame takes about 120 ms.
+- **Offline:** `vivid2 eval-frames <runs> --agent coverage_yolo` scores the
+  detector on saved frames, like a VLM.
+- **What it sees** (offline, earlier ForestSAR frames, at 0.3):
+  - no hiker from 55 m (0 of 104 frames with a visible hiker);
+  - 33% of low frames with a visible hiker (18 of 54), precision 0.47.
+
+  Claude found about 90% on comparable low frames. A COCO detector rarely
+  recognises people seen from straight above.
+
 ## Closer look before reporting (reference agents)
 
 Search crews survey from a safe height, then go and look closer at anything

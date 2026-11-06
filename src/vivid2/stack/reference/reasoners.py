@@ -173,6 +173,19 @@ def parse_assessment(out: Any, width: int, height: int) -> Assessment:
     )
 
 
+class DetectorReasoner(Reasoner):
+    """A detector and a score threshold as one reasoner: evaluates a detector on saved frames
+    (``vivid2 eval-frames --agent coverage_yolo``), where reasoners get no detections."""
+
+    def __init__(self, perception, threshold: float):
+        self.perception = perception
+        self.threshold = threshold
+        self.name = f"detector_threshold:{getattr(perception, 'model_name', perception.name)}"
+
+    def assess(self, frame: Frame, detections: List[Detection], mission: MissionSpec) -> Tuple[Assessment, UsageStats]:
+        return DetectionThresholdReasoner(self.threshold).assess(frame, self.perception.detect(frame), mission)
+
+
 class DetectionThresholdReasoner(Reasoner):
     """No-VLM baseline: declare a find when the best detection clears a threshold."""
 

@@ -27,6 +27,9 @@ claude = ["anthropic>=2.3"]
 local-vlm = ["openai>=1.40"]
 # Google Drive downloads of the prebuilt UE plugin zip
 setup = ["gdown>=5"]
+# The YOLO baseline (coverage_yolo, hybrid). For a GPU, install instead: onnxruntime-directml (Windows)
+# or onnxruntime-gpu (Linux, CUDA); only one onnxruntime package may be installed.
+yolo = ["onnxruntime>=1.18"]
 dev = ["pytest>=7"]
 
 [project.scripts]

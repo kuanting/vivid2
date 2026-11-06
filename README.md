@@ -107,10 +107,15 @@ every frame, so their replays mostly miss (a miss is scored as an abstention).
 | `--agent` | Perception | Reasoner | Purpose |
 |---|---|---|---|
 | `coverage_gt` | Simulator ground truth (occlusion- and fog-checked) | Threshold | Oracle upper bound |
-| `coverage_yolo` | ONNX YOLO (`--yolo-model`) | Threshold | Classic CV baseline |
+| `coverage_yolo` | YOLOX-s, COCO, tiled at full resolution (`pip install -e ".[yolo]"`) | Threshold | Off-the-shelf detector baseline |
 | `vlm` | none | VLM on raw frames | VLM-only baseline |
-| `hybrid` | ONNX YOLO | VLM verifies candidates | Detector + VLM |
+| `hybrid` | YOLOX-s | VLM verifies candidates | Detector + VLM |
 | `survey` | none | none | Records the frame bank for `eval-frames` |
+
+The YOLO baseline downloads YOLOX-s (Apache-2.0) on first use. Any YOLOX or
+YOLOv8/YOLO11-format ONNX file works via `--yolo-model path.onnx`.
+`--verify on --dip on` gives it the same closer looks and dips as `vlm --dip`, so
+only the eyes differ. See [docs/architecture.md](docs/architecture.md#yolo-baseline).
 
 To plug in your own stack, see [docs/adding_a_dut.md](docs/adding_a_dut.md).
 

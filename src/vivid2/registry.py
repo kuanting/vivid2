@@ -9,6 +9,7 @@
 from __future__ import annotations
 
 import re
+from pathlib import Path
 from dataclasses import dataclass, field
 from typing import Any, Dict
 
@@ -54,6 +55,15 @@ def make_vlm(opts: Dict[str, Any], closed_loop: bool = False):
     return inner
 
 
+def make_detector(model: str):
+    """The tiled ONNX person detector for a KNOWN_DETECTORS name or a file path (downloaded if needed)."""
+    from vivid2.stack.reference.detectors import resolve_detector
+    from vivid2.stack.reference.perception import OnnxYoloDetector
+
+    path, entry = resolve_detector(model)
+    return OnnxYoloDetector(path, fmt=entry.get("format"), model_name=entry["name"], model_sha8=entry["sha256"][:8])
+
+
 def vlm_agent_name(kind: str, vlm, tiles: str = "1x1") -> str:
     """``vlm-claude-opus-5-5`` (``-t2x2`` when frames are sent as tiles); replayed answers get a
     ``-replay`` suffix so they never overwrite live runs."""
@@ -79,6 +89,9 @@ class AgentFactory:
     @property
     def name(self) -> str:
         name = vlm_agent_name(self.kind, self._vlm, self.tiles) if self._vlm is not None else self.kind
+        if self.kind == "coverage_yolo":
+            name += "-" + re.sub(r"[^A-Za-z0-9._-]+", "_", Path(self.yolo_model).stem if Path(self.yolo_model).suffix
+                                 else self.yolo_model)
         if self.verify != self.default_verify:  # keep runs with the non-default behaviour apart
             name += "-verify" if self.verify else "-noverify"
         if self.dip:
@@ -104,14 +117,24 @@ class AgentFactory:
     def tiles(self) -> str:
         return self.opts.get("vlm_tiles") or "1x1"
 
+    @property
+    def yolo_model(self) -> str:
+        """A detector name from KNOWN_DETECTORS (default yolox-s) or a path to an ONNX file."""
+        from vivid2.stack.reference.detectors import DEFAULT_DETECTOR
+
+        return self.opts.get("yolo_model") or DEFAULT_DETECTOR
+
+    @property
+    def yolo_threshold(self) -> float:
+        """Detection score that counts as a find: --yolo-threshold, else the named detector's calibrated one."""
+        from vivid2.stack.reference.detectors import KNOWN_DETECTORS
+
+        t = self.opts.get("yolo_threshold")
+        return float(t) if t is not None else float(KNOWN_DETECTORS.get(self.yolo_model, {}).get("threshold", 0.3))
+
     def _yolo(self):
         if self._detector is None:
-            from vivid2.stack.reference.perception import OnnxYoloDetector
-
-            path = self.opts.get("yolo_model")
-            if not path:
-                raise ValueError(f"agent {self.kind} needs --yolo-model path/to/model.onnx")
-            self._detector = OnnxYoloDetector(path)
+            self._detector = make_detector(self.yolo_model)
         return self._detector
 
     def __call__(self, run: Run) -> Agent:
@@ -127,7 +150,12 @@ class AgentFactory:
             return SearchAgent(self.name, planner, DetectionThresholdReasoner(0.5),
                                GroundTruthPerception(run.resolved_targets()), **kw)
         if self.kind == "coverage_yolo":
-            return SearchAgent(self.name, planner, DetectionThresholdReasoner(0.5), self._yolo(), **kw)
+            # One threshold T. With closer looks, half of T is enough to go and look; a report needs
+            # the majority of the close-ups (or dip looks) at T.
+            t = self.yolo_threshold
+            look = t / 2 if self.verify else t
+            return SearchAgent(self.name, planner, DetectionThresholdReasoner(look), self._yolo(),
+                               min_confidence=t, candidate_confidence=look, **kw)
         if self.kind == "vlm":
             return SearchAgent(self.name, planner, VLMReasoner(self._vlm, tiles=self.tiles), None, **kw)
         return SearchAgent(self.name, planner, VLMReasoner(self._vlm, tiles=self.tiles), self._yolo(), **kw)

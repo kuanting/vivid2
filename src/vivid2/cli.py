@@ -63,6 +63,13 @@ def cmd_run(args) -> int:
     return 0
 
 
+def _add_yolo_args(s) -> None:
+    s.add_argument("--yolo-model", help="person detector for coverage_yolo / hybrid: a name (default yolox-s, "
+                                        "downloaded on first use) or a path to an ONNX file (YOLOX or YOLOv8 format)")
+    s.add_argument("--yolo-threshold", type=float,
+                   help="detection score that counts as a find (default: the named detector's calibrated value)")
+
+
 def _add_vlm_args(s) -> None:
     s.add_argument("--vlm", choices=["anthropic", "local"])
     s.add_argument("--vlm-model")
@@ -88,17 +95,34 @@ def cmd_eval_frames(args) -> int:
         print("error: no runs with a frame bank under " + ", ".join(args.runs)
               + " (record one with: vivid2 run ... --agent survey --frame-bank rgb)", file=sys.stderr)
         return 1
-    opts = {k: v for k, v in vars(args).items() if k.startswith("vlm") and v is not None}
-    try:
-        vlm = make_vlm(opts)
-    except ValueError as e:
-        print(f"error: {e}", file=sys.stderr)
-        return 2
-    tiles = args.vlm_tiles or "1x1"
-    reasoner = VLMReasoner(vlm, tiles=tiles)
-    name = vlm_agent_name("vlm", vlm, tiles)
-    desc = {"agent": name, "mode": "open_loop", "reasoner": reasoner.name, "reasoner_model": vlm.model,
-            "provider": vlm.fingerprint(), "tiles": tiles}
+    if args.agent == "coverage_yolo":
+        from vivid2.registry import AgentFactory
+        from vivid2.stack.reference.reasoners import DetectorReasoner
+
+        opts = {k: v for k, v in vars(args).items() if k.startswith("yolo") and v is not None}
+        try:
+            factory = AgentFactory("coverage_yolo", opts)
+            detector = factory._yolo()
+        except ValueError as e:
+            print(f"error: {e}", file=sys.stderr)
+            return 2
+        reasoner = DetectorReasoner(detector, factory.yolo_threshold)
+        name = factory.name
+        desc = {"agent": name, "mode": "open_loop", "reasoner": reasoner.name, "threshold": factory.yolo_threshold,
+                "perception": {k: v for k, v in vars(detector).items()
+                               if not k.startswith("_") and isinstance(v, (bool, int, float, str))}}
+    else:
+        opts = {k: v for k, v in vars(args).items() if k.startswith("vlm") and v is not None}
+        try:
+            vlm = make_vlm(opts)
+        except ValueError as e:
+            print(f"error: {e}", file=sys.stderr)
+            return 2
+        tiles = args.vlm_tiles or "1x1"
+        reasoner = VLMReasoner(vlm, tiles=tiles)
+        name = vlm_agent_name("vlm", vlm, tiles)
+        desc = {"agent": name, "mode": "open_loop", "reasoner": reasoner.name, "reasoner_model": vlm.model,
+                "provider": vlm.fingerprint(), "tiles": tiles}
     print(f"{name}: evaluating {len(runs)} runs")
     results = evaluate_runs(runs, reasoner, name, desc, Path(args.out) if args.out else None, args.concurrency)
     decisions = sum(r["metrics"]["reasoning"]["decisions"] for r in results if r["metrics"]["reasoning"])
@@ -225,7 +249,7 @@ def main(argv=None) -> int:
     s.add_argument("--airsim-root", default=str(Path(__file__).resolve().parents[3] / "ProjectAirSim"),
                    help="ProjectAirSim checkout, used to stamp the build commit into run metadata")
     _add_vlm_args(s)
-    s.add_argument("--yolo-model", help="ONNX YOLO person detector for coverage_yolo / hybrid")
+    _add_yolo_args(s)
     s.add_argument("--sidelap", type=float)
     s.add_argument("--frame-period-s", dest="frame_period_s", type=float)
     s.add_argument("--frame-bank", choices=["off", "rgb", "rgbd"], default="rgb",
@@ -241,9 +265,12 @@ def main(argv=None) -> int:
                         "frames the agent fetches, with ground truth and its decisions; and the chase camera")
     s.set_defaults(fn=cmd_run)
 
-    s = sub.add_parser("eval-frames", help="evaluate a VLM offline on the saved frames of recorded runs")
+    s = sub.add_parser("eval-frames", help="evaluate a VLM (or the YOLO detector) offline on the saved frames of recorded runs")
     s.add_argument("runs", nargs="+", help="run, agent or campaign directories containing frame banks")
+    s.add_argument("--agent", choices=["vlm", "coverage_yolo"], default="vlm",
+                   help="vlm (default): a VLM looks at each frame; coverage_yolo: the person detector and its threshold")
     _add_vlm_args(s)
+    _add_yolo_args(s)
     s.add_argument("--concurrency", type=int, default=4, help="parallel VLM calls (use 1 for a local model)")
     s.add_argument("--out", help="default: <campaign>/openloop next to the source runs")
     s.set_defaults(fn=cmd_eval_frames)
