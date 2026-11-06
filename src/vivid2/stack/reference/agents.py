@@ -51,6 +51,17 @@ async def camera_geometry(ctx: MissionContext):
     return ((probe.width, probe.height), probe.fov_deg) if probe is not None else ((640, 480), 90.0)
 
 
+async def pace(ctx: MissionContext, started_s: float, period_s: float) -> None:
+    """Wait until ``period_s`` of mission time has passed since ``started_s`` (``ctx.elapsed_s()``).
+
+    Mission time, not wall time: the simulator is paused while VIVID 2 records a
+    frame, so wall-clock pacing would take fewer frames on a slower machine.
+    """
+    wait = period_s - (ctx.elapsed_s() - started_s)
+    if wait > 0:
+        await ctx.sleep(wait)
+
+
 def ray_to_terrain(frame: Frame, u: float, v: float, terrain: TerrainModel, iterations: int = 4) -> Optional[np.ndarray]:
     """Where the pixel's ray meets the (smooth, coarse) terrain: a few flat-ground steps."""
     down = float(terrain.down_at(frame.cam_pos[0], frame.cam_pos[1]))
@@ -136,7 +147,7 @@ class LowFlightMixin:
         self._odo_m = 0.0
         self._last_pos: Optional[np.ndarray] = None
         self._t_ns = 0  # sim time of the newest frame
-        self._assess_s = 0.0  # running mean wall time of one look (reasoner call)
+        self._assess_s = 0.0  # running mean mission time of one look (perception + reasoner)
         if self.low is None:
             return
         terrain = mission.terrain if mission.terrain is not None else TerrainModel.flat(mission.ground_down_m)
@@ -401,10 +412,10 @@ class SearchAgent(LowFlightMixin, Agent):
 
         finished = False  # everyone found, or the reasoner asked to go home
         while not ctx.should_stop() and not ctx.controller.path_done():
-            t_loop = asyncio.get_running_loop().time()
+            t_loop = ctx.elapsed_s()
             frame = await ctx.get_frame()
             if frame is None:
-                await asyncio.sleep(NO_FRAME_RETRY_S)  # don't hammer the sim while no image is available
+                await ctx.sleep(NO_FRAME_RETRY_S)  # don't hammer the sim while no image is available
                 continue
             self._lf_observe(frame)
             if await self._lf_guard(ctx):
@@ -415,9 +426,7 @@ class SearchAgent(LowFlightMixin, Agent):
                 break
             if step == "resumed":
                 continue
-            wait = self.frame_period_s - (asyncio.get_running_loop().time() - t_loop)
-            if wait > 0:
-                await asyncio.sleep(wait)
+            await pace(ctx, t_loop, self.frame_period_s)
 
         if self.low is not None and not finished and not ctx.should_stop():
             await self._lf_tour(ctx, self._dip_look)
@@ -465,10 +474,10 @@ class SearchAgent(LowFlightMixin, Agent):
         for _ in range(self.low.dip_frames):
             if ctx.should_stop():
                 break
-            t_loop = asyncio.get_running_loop().time()
+            t_loop = ctx.elapsed_s()
             frame = await ctx.get_frame()
             if frame is None:
-                await asyncio.sleep(NO_FRAME_RETRY_S)
+                await ctx.sleep(NO_FRAME_RETRY_S)
                 continue
             self._lf_observe(frame)
             a, _ = await self._assess(ctx, frame, phase="dip")
@@ -476,9 +485,7 @@ class SearchAgent(LowFlightMixin, Agent):
                 at = geolocate(frame, a.pixel[0], a.pixel[1], m.ground_down_m, m.terrain)
                 if at is not None:
                     yes.append((at, a, frame))
-            wait = self.frame_period_s - (asyncio.get_running_loop().time() - t_loop)
-            if wait > 0:
-                await asyncio.sleep(wait)
+            await pace(ctx, t_loop, self.frame_period_s)
         # The largest group of looks that agree on where the person is
         best: List[Any] = []
         for at, _, _ in yes:
@@ -500,7 +507,8 @@ class SearchAgent(LowFlightMixin, Agent):
         return all(np.linalg.norm(ned[:2] - k[:2]) > self.dedup_radius_m for k in known)
 
     async def _assess(self, ctx: MissionContext, frame: Frame, phase: str = "survey"):
-        t0 = asyncio.get_running_loop().time()
+        # The agent's thinking takes mission time: the drone flies on (or hovers) meanwhile.
+        t0 = ctx.elapsed_s()
         dets = []
         if self.perception is not None:
             dets = await asyncio.to_thread(self.perception.detect, frame)
@@ -509,8 +517,8 @@ class SearchAgent(LowFlightMixin, Agent):
                 "dets": [{"label": d.label, "bbox": list(d.bbox), "score": d.score} for d in dets],
             })
         assessment, usage = await asyncio.to_thread(self.reasoner.assess, frame, dets, ctx.mission)
-        ctx.log("decisions", {**decision_record(frame, assessment, usage), "phase": phase})
-        took = asyncio.get_running_loop().time() - t0
+        took = ctx.elapsed_s() - t0
+        ctx.log("decisions", {**decision_record(frame, assessment, usage), "phase": phase, "response_s": round(took, 3)})
         self._assess_s = took if not getattr(self, "_assess_s", 0.0) else 0.8 * self._assess_s + 0.2 * took
         return assessment, dets
 
@@ -559,6 +567,7 @@ class SearchAgent(LowFlightMixin, Agent):
                 break
             close = await ctx.get_frame()
             if close is None:
+                await ctx.sleep(NO_FRAME_RETRY_S)
                 continue
             self._lf_observe(close)
             looks += 1
@@ -639,17 +648,15 @@ class SurveyAgent(LowFlightMixin, Agent):
         self._path = [[float(v) for v in here]] + [list(w) for w in path]
         await ctx.controller.fly_path(path, m.max_speed_mps)
         while not ctx.should_stop() and not ctx.controller.path_done():
-            t_loop = asyncio.get_running_loop().time()
+            t_loop = ctx.elapsed_s()
             frame = await ctx.get_frame()
             if frame is None:
-                await asyncio.sleep(NO_FRAME_RETRY_S)
+                await ctx.sleep(NO_FRAME_RETRY_S)
                 continue
             self._lf_observe(frame)
             if await self._lf_guard(ctx):
                 continue
-            wait = self.frame_period_s - (asyncio.get_running_loop().time() - t_loop)
-            if wait > 0:
-                await asyncio.sleep(wait)
+            await pace(ctx, t_loop, self.frame_period_s)
         if self.low is not None and not ctx.should_stop():
             await self._lf_tour(ctx, self._dip_record)
         await ctx.controller.return_and_land(m.start_ned, m.max_speed_mps)
@@ -659,10 +666,8 @@ class SurveyAgent(LowFlightMixin, Agent):
         for _ in range(self.low.dip_frames):
             if ctx.should_stop():
                 break
-            t_loop = asyncio.get_running_loop().time()
+            t_loop = ctx.elapsed_s()
             frame = await ctx.get_frame()
             if frame is not None:
                 self._lf_observe(frame)
-            wait = self.frame_period_s - (asyncio.get_running_loop().time() - t_loop)
-            if wait > 0:
-                await asyncio.sleep(wait)
+            await pace(ctx, t_loop, self.frame_period_s)

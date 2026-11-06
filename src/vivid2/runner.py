@@ -3,8 +3,11 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import functools
 import hashlib
 import json
+import os
+import platform
 import subprocess
 import threading
 import time
@@ -32,6 +35,10 @@ from vivid2.vlm.base import FRAME_JPEG_MAX_SIDE, JPEG_QUALITY, encode_jpeg_bytes
 TRAJECTORY_HZ = 10.0
 DUT_DEM_CELL_M = 20.0  # cell size of the terrain model the DUT is given
 RTL_GRACE_S = 180.0
+HARD_TIMEOUT_WALL_FACTOR = 3.0  # wall-clock safety net, in case the simulator stops answering
+CAPTURE_MARGIN_S = 0.05  # a lockstep frame lets the simulator run the camera's capture-interval plus this
+LOCKSTEP_REGISTER_S = 0.02  # wall time for the server to take the image request before the clock moves
+LOCKSTEP_TIMEOUT_S = 15.0  # wall time to receive a lockstep frame (Project AirSim gives up after 5 s)
 
 
 def _xyz(d: Dict[str, float]) -> List[float]:
@@ -98,6 +105,32 @@ def serialize_requests(client) -> None:
     client.request_lock = lock
 
 
+ASYNC_RECV_TIMEOUT_S = 6 * 3600.0
+
+
+def allow_long_async_requests(client) -> None:
+    """Give each async request (a move: takeoff, a whole survey path, landing) ASYNC_RECV_TIMEOUT_S.
+
+    The client's socket gives up on a reply after 300 s of wall time, and an async request's context
+    inherits that. A survey path is one request that lasts until the drone arrives, and with the
+    simulator paused while frames are sent and recorded, its wall time is far longer than its
+    mission time. Synchronous requests keep 300 s; ``run_agent`` stops a run that hangs.
+    """
+    sock = getattr(client, "socket_services", None)
+    if sock is None:
+        return
+    from pynng import lib
+
+    raw_new_context = sock.new_context
+
+    def new_context():
+        ctx = raw_new_context()
+        lib.nng_ctx_set_ms(ctx._context[0], b"recv-timeout", int(ASYNC_RECV_TIMEOUT_S * 1000))
+        return ctx
+
+    sock.new_context = new_context
+
+
 # Camera the live view (--view) shows until the first scored frame; robot configs without it get no preview.
 PREVIEW_CAMERA = "PayloadPreview"
 
@@ -123,8 +156,11 @@ def detect_depth_scale(raw: np.ndarray, cam_height_m: float) -> Optional[float]:
 # it re-runs on resume). 2: segmentation visible pixels; 3: exposure settled before the mission, contrast
 # (fog) in visibility; 4: environment capped at 30 fps and Lumen's lighting range moved down for dusk;
 # 5: the mission spec carries the camera, so agents no longer take a frame on the ground before takeoff
-# (frame 1 is the first survey frame), and the payload camera's exposure settles at survey height.
-SIM_VERSION = 5
+# (frame 1 is the first survey frame), and the payload camera's exposure settles at survey height;
+# 6: payload frames in lockstep (the simulator runs one capture step per frame and is paused while the
+# images are sent and recorded), agents pace frames by mission (sim) time, so the frames a run takes no
+# longer depend on the machine's speed; a find is timed when it is reported.
+SIM_VERSION = 6
 
 
 def run_config_hash(run: Run, agent_desc: Dict[str, Any]) -> str:
@@ -162,6 +198,15 @@ def apply_environment(world, env: Dict[str, Any]) -> None:
 EXPOSURE_MAX_CAPTURES = 20
 EXPOSURE_PERIOD_S = 0.5
 EXPOSURE_SETTLED_GREY = 1.5  # spread of mean grey level (0-255) over the last 3 captures that counts as settled
+
+
+def capture_step_ns(camera: Dict[str, Any]) -> int:
+    """Mission time a lockstep frame lets the simulator run: the camera's capture-interval plus a margin.
+
+    The camera captures at the first rendered pose more than capture-interval after its last capture,
+    so a step this long always yields a frame, however close together the agent asks for them.
+    """
+    return int(round((float(camera.get("capture-interval", 0.2)) + CAPTURE_MARGIN_S) * 1e9))
 
 
 def lifted_pose(camera: Dict[str, Any], lift_m: float) -> Dict[str, Dict[str, float]]:
@@ -223,6 +268,24 @@ async def settle_exposure(drone, cameras: Sequence[str],
     return out
 
 
+@functools.lru_cache(maxsize=1)
+def host_info() -> Dict[str, Any]:
+    """The machine VIVID 2 and the agent ran on (the simulator may run on another: ``sim_address``).
+
+    Agents think in mission time, so a model's speed on this hardware (or its API's) is part of a result.
+    """
+    info: Dict[str, Any] = {"node": platform.node(), "os": platform.platform(), "python": platform.python_version(),
+                            "cpu": platform.processor(), "cpus": os.cpu_count()}
+    try:
+        out = subprocess.run(["nvidia-smi", "--query-gpu=name,memory.total,driver_version", "--format=csv,noheader"],
+                             capture_output=True, text=True, timeout=10)
+        if out.returncode == 0:
+            info["gpus"] = [line.strip() for line in out.stdout.splitlines() if line.strip()]
+    except (OSError, subprocess.SubprocessError):
+        pass
+    return info
+
+
 def projectairsim_commit(airsim_root: Optional[str]) -> Optional[str]:
     if not airsim_root:
         return None
@@ -280,22 +343,101 @@ class SimMissionContext(MissionContext):
         self.t0_ns = world.get_sim_time()
         self.last_t_ns = self.t0_ns  # last sim time seen, for logging after the connection drops
         self.depth_scale: Optional[float] = None  # metres per raw depth unit, detected in flight
-        self._wall0 = time.monotonic()
         self._frame_id = 0
         self._nav_frames = 0
         self._nav_fov: Dict[str, float] = {}  # navigation camera -> FOV, filled by the runner
         self.reports: List[TargetReport] = []
         self._stop = False
+        self.pause_to_record = True  # off if the simulator's clock cannot pause (logged once)
+        self.lockstep = True  # off if a lockstep frame fails (logged once); frames then cost machine time
+        self.capture_step_ns = int(0.25e9)  # set from the camera's capture-interval by the runner
 
     # -- MissionContext API -------------------------------------------------
     async def get_frame(self) -> Optional[Frame]:
+        """The next payload frame; it costs one capture step of mission time on any machine.
+
+        Lockstep: pause the simulator, ask for the images, let it run exactly ``capture_step_ns``
+        (the camera captures in that time), then receive and record the images while it stays
+        paused. Unreal takes a second or more to read back and send three 1920x1440 images, and
+        how long depends on the machine; paused, that costs no mission time. Nor does VIVID 2's own
+        work (ground truth, encoding, saving). If a lockstep frame fails, frames are fetched with the
+        simulator running from then on (machine-dependent, logged once) and only that work is paused.
+        """
         from projectairsim.types import ImageType
 
         types = [ImageType.SCENE, ImageType.DEPTH_PLANAR] + ([ImageType.SEGMENTATION] if self.seg_ids else [])
-        imgs = await asyncio.to_thread(self.drone.get_images, self.camera_id, types)
-        rgb_msg = imgs.get(ImageType.SCENE)
-        if not rgb_msg:
-            return None
+        imgs = None
+        paused = False
+        if self.lockstep:
+            try:
+                t_request, t_fetched, imgs = await self._fetch_lockstep(types)
+                paused = True
+            except Exception as e:
+                self.lockstep = False
+                self.recorder.log("events", {"t": self.last_t_ns, "kind": "lockstep_unavailable", "error": repr(e)})
+                with contextlib.suppress(Exception):
+                    await self._resume()
+        if imgs is None:
+            t_request = self.sim_time_or_last()
+            imgs = await asyncio.to_thread(self.drone.get_images, self.camera_id, types)
+            paused = await self._pause()
+            t_fetched = self.sim_time_or_last()
+        wall0 = time.monotonic()
+        try:
+            rgb_msg = imgs.get(ImageType.SCENE)
+            if not rgb_msg:
+                return None
+            return await self._record_frame(imgs, rgb_msg, t_request, t_fetched, wall0)
+        finally:
+            if paused:
+                await self._resume()
+
+    async def _fetch_lockstep(self, types) -> Tuple[int, int, Dict[int, Any]]:
+        """Pause, request the images, run one capture step, receive them paused.
+
+        Returns (sim time at the request, sim time after the step, images by type). The simulator
+        is left paused; the caller resumes it.
+        """
+        w = self.world
+        client = w.client
+        await asyncio.to_thread(w.pause)
+        t_request = int(await asyncio.to_thread(w.get_sim_time))
+        req = {"method": f"{self.drone.sensors_topic}/{self.camera_id}/GetImages",
+               "params": {"image_type_ids": [int(t) for t in types]}, "version": 1.0}
+        # Its own socket context, as request_async uses, but without request_async's done-callback,
+        # which disconnects the client when a request fails.
+        sock = client.socket_services.new_context()
+        reply = None
+        try:
+            await sock.asend(client.preprocess_request(req))
+            reply = asyncio.ensure_future(sock.arecv_msg())
+            await asyncio.sleep(LOCKSTEP_REGISTER_S)
+            t_fetched = int(await asyncio.to_thread(w.continue_for_sim_time, self.capture_step_ns, True))
+            msg = await asyncio.wait_for(asyncio.shield(reply), timeout=LOCKSTEP_TIMEOUT_S)
+        finally:
+            if reply is not None and not reply.done():
+                reply.cancel()
+            sock.close()
+        data = client.postprocess_response(msg)
+        return t_request, t_fetched, {int(k): v for k, v in data.items()}
+
+    async def _pause(self) -> bool:
+        if not self.pause_to_record:
+            return False
+        try:
+            await asyncio.to_thread(self.world.pause)
+            return True
+        except Exception as e:  # e.g. a real-time clock, which cannot pause
+            self.pause_to_record = False
+            self.recorder.log("events", {"t": self.last_t_ns, "kind": "pause_unavailable", "error": repr(e)})
+            return False
+
+    async def _resume(self) -> None:
+        await asyncio.to_thread(self.world.resume)
+
+    async def _record_frame(self, imgs, rgb_msg, t_request: int, t_fetched: int, wall0: float) -> Frame:
+        from projectairsim.types import ImageType
+
         rgb = _decode(rgb_msg, np.uint8, 3)
         depth = None
         dmsg = imgs.get(ImageType.DEPTH_PLANAR)
@@ -348,6 +490,9 @@ class SimMissionContext(MissionContext):
             "width": frame.width, "height": frame.height, "fov_deg": frame.fov_deg,
             "gt": [_gt_record(g) for g in gt], **bank,
             **({"distractors_visible": distractors_seen} if distractors_seen else {}),
+            # mission time the frame took (one capture step in lockstep), and VIVID 2's work on it (paused)
+            "capture_s": round(max(0, t_fetched - t_request) / 1e9, 3),
+            "record_wall_s": round(time.monotonic() - wall0, 3),
         })
         if self.viewer is not None:
             self.viewer.show_frame(frame, seg=seg, extra=f"t {self.elapsed_s():.0f} s  height {self.mission.ground_down_m - frame.cam_pos[2]:.0f} m")
@@ -386,10 +531,21 @@ class SimMissionContext(MissionContext):
         p = self.drone.get_ground_truth_pose()
         return np.asarray(_xyz(p["translation"])), _wxyz(p["rotation"])
 
+    async def sleep(self, seconds: float) -> None:
+        # The simulator runs at about real time between frames, so a wall sleep gets close; then top up.
+        target = self.elapsed_s() + seconds
+        while not self.should_stop():
+            left = target - self.elapsed_s()
+            if left <= 0.001:
+                return
+            await asyncio.sleep(min(left, 1.0))
+
     def report_target(self, report: TargetReport) -> None:
         self.reports.append(report)
-        self.recorder.log("reports", {"t": report.t_ns, "frame_id": report.frame_id, "ned": report.ned,
-                                      "confidence": report.confidence, "source": report.source, "note": report.note})
+        # "t" is the frame the find was made on; "t_report" when the agent reported it (after thinking)
+        self.recorder.log("reports", {"t": report.t_ns, "t_report": self.sim_time_or_last(), "frame_id": report.frame_id,
+                                      "ned": report.ned, "confidence": report.confidence, "source": report.source,
+                                      "note": report.note})
         if self.viewer is not None:
             self.viewer.note("reports", {"frame_id": report.frame_id})
 
@@ -431,6 +587,31 @@ def _decode(msg: Dict[str, Any], dtype, channels: int) -> np.ndarray:
     return arr.reshape(shape)
 
 
+async def run_agent(agent: Agent, ctx: MissionContext, hard_s: float) -> bool:
+    """Run the agent; stop it if it overruns ``hard_s`` of mission time. True if it was stopped.
+
+    Mission time, because the simulator is paused while frames are recorded. A wall-clock limit
+    (HARD_TIMEOUT_WALL_FACTOR x) still catches a simulator that stops answering. The agent's own
+    errors are raised.
+    """
+    task = asyncio.create_task(agent.run(ctx))
+    wall_end = time.monotonic() + HARD_TIMEOUT_WALL_FACTOR * hard_s
+    try:
+        while True:
+            done, _ = await asyncio.wait({task}, timeout=1.0)
+            if done:
+                task.result()
+                return False
+            if ctx.elapsed_s() > hard_s or time.monotonic() > wall_end:
+                task.cancel()
+                with contextlib.suppress(asyncio.CancelledError, Exception):
+                    await task
+                return True
+    finally:
+        if not task.done():
+            task.cancel()
+
+
 async def _poll_trajectory(ctx: SimMissionContext, stop: asyncio.Event) -> None:
     lock = getattr(ctx.world.client, "request_lock", None) or contextlib.nullcontext()
 
@@ -440,10 +621,15 @@ async def _poll_trajectory(ctx: SimMissionContext, stop: asyncio.Event) -> None:
         with lock:
             return ctx.drone.get_ground_truth_pose(), ctx.world.get_sim_time()
 
+    last = None
     while not stop.is_set():
         try:
             p, t = await asyncio.to_thread(pose_and_time)
             ctx.last_t_ns = t
+            if last is not None and t <= last:  # paused while a frame is recorded
+                await asyncio.sleep(1.0 / TRAJECTORY_HZ)
+                continue
+            last = t
             ctx.recorder.log("trajectory", {"t": t, "pos": _xyz(p["translation"]), "q": list(_wxyz(p["rotation"]))})
             if ctx.viewer is not None and ctx.viewer.live:
                 ctx.viewer.set_progress(ctx.mission.ground_down_m - p["translation"]["z"], (t - ctx.t0_ns) / 1e9)
@@ -596,6 +782,7 @@ async def execute_run(
                             camera={"width": int(cam["width"]), "height": int(cam["height"]),
                                     "fov_deg": float(cam["fov-degrees"])})
     ctx.preview_topic = preview
+    ctx.capture_step_ns = capture_step_ns(camera_config(scene, sc.get("camera", "Payload"), sc.get("drone_name", "Drone1")))
     if viewer is not None:
         viewer.set_phase("mission clock started: taking off and climbing")
     for nav in ("Front",):
@@ -609,7 +796,8 @@ async def execute_run(
         "search_area": run.spec["search_area"], "limits": run.spec["limits"], "success": run.spec.get("success", {}),
         "start_ned": start_ned, "terrain": terrain_meta, "t0_ns": ctx.t0_ns, "wall_start": datetime.now().isoformat(),
         "projectairsim_commit": projectairsim_commit(airsim_root), "scenario_source": run.source,
-        "unreal": unreal_status(), "weights": weights or {},
+        "unreal": unreal_status(), "host": host_info(), "sim_address": getattr(client, "address", None),
+        "weights": weights or {},
         "config_hash": run_config_hash(run, agent.describe()),
         "map": sc.get("map"), "preflight": preflight,
         "mission_spec": ctx.mission.record(),  # what the DUT was told; open-loop evaluation reuses it
@@ -626,11 +814,10 @@ async def execute_run(
     poller = asyncio.create_task(_poll_trajectory(ctx, stop))
     end_reason = "completed"
     try:
-        await asyncio.wait_for(agent.run(ctx), timeout=run.spec["limits"]["timeout_s"] * 2 + RTL_GRACE_S)
-        if ctx.elapsed_s() >= ctx.mission.timeout_s:
+        if await run_agent(agent, ctx, run.spec["limits"]["timeout_s"] * 2 + RTL_GRACE_S):
+            end_reason = "hard_timeout"
+        elif ctx.elapsed_s() >= ctx.mission.timeout_s:
             end_reason = "timeout"
-    except asyncio.TimeoutError:
-        end_reason = "hard_timeout"
     except Exception as e:
         end_reason = "error"
         rec.log("events", {"t": ctx.sim_time_or_last(), "kind": "error", "error": repr(e), "trace": traceback.format_exc()})
@@ -639,7 +826,10 @@ async def execute_run(
         await poller
         client.unsubscribe_all()  # before closing the recorder, so no late callback writes to it
         meta.update({"end_ns": ctx.sim_time_or_last(), "end_reason": end_reason, "wall_end": datetime.now().isoformat(),
-                     "depth_metres_per_unit": ctx.depth_scale})
+                     "depth_metres_per_unit": ctx.depth_scale,
+                     # lockstep stays True unless a frame failed (see the lockstep_unavailable event)
+                     "frame_timing": {"lockstep": ctx.lockstep, "capture_step_s": ctx.capture_step_ns / 1e9,
+                                      "pause_to_record": ctx.pause_to_record}})
         rec.write_json("meta.json", meta)
         rec.close()
     return score_run_dir(run_dir, weights)
@@ -720,6 +910,7 @@ async def _run_all(runs, campaign, agent_factory, out, sim_cfg, address, resume,
                 "running? In the editor, open the map and press Play (or start the packaged build). Stopping.")
             break
         serialize_requests(client)
+        allow_long_async_requests(client)
         try:
             r = await execute_run(client, run, agent_factory, sim_cfg, out, campaign.weights, airsim_root, agent=agent,
                                   frame_bank=frame_bank, viewer=viewer)

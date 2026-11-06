@@ -58,6 +58,8 @@ def reasoning_metrics(log: RunLog, layer: str = "reasoner") -> Optional[Dict[str
             tn += 1
 
     lat = np.asarray([r.get("latency_s", 0.0) for r in recs])
+    # mission time from frame to decision (perception + reasoner, closed loop only)
+    resp = np.asarray([r["response_s"] for r in recs if r.get("response_s") is not None])
     precision = tp / (tp + fp) if tp + fp else None
     recall = tp / (tp + fn) if tp + fn else None
     if precision is None or recall is None:
@@ -80,6 +82,8 @@ def reasoning_metrics(log: RunLog, layer: str = "reasoner") -> Optional[Dict[str
         "grounding_accuracy": grounded / grounding_trials if grounding_trials else None,
         "latency_mean_s": float(lat.mean()),
         "latency_p95_s": float(np.percentile(lat, 95)),
+        "response_mean_s": float(resp.mean()) if resp.size else None,
+        "response_p95_s": float(np.percentile(resp, 95)) if resp.size else None,
         "input_tokens": int(sum(r.get("input_tokens", 0) for r in recs)),
         "output_tokens": int(sum(r.get("output_tokens", 0) for r in recs)),
         "cost_usd": float(sum(r.get("cost_usd", 0.0) for r in recs)),

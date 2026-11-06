@@ -25,7 +25,9 @@ def match_reports(
             if d < best_d:
                 best, best_d = tgt, d
         if best is not None and best_d <= tolerance_m:
-            claimed[best["id"]] = {"t": rep["t"], "error_m": best_d, "confidence": rep.get("confidence")}
+            # timed when reported (the agent's thinking counts); older runs only have the frame time
+            claimed[best["id"]] = {"t": rep.get("t_report", rep["t"]), "error_m": best_d,
+                                   "confidence": rep.get("confidence")}
         else:
             # A repeat report of an already-found target is not a false alarm.
             dup = any(

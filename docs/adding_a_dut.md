@@ -56,7 +56,8 @@ Subclass `vivid2.stack.base.Agent` and implement `async run(ctx)`. Use:
   `fov_deg`, for planning the survey before the first frame.
 - `await ctx.get_frame()`: the latest payload-camera frame with its pose and
   depth, or `None` if no image is ready yet. Every frame you fetch is recorded
-  and scored, so fetch frames where you search, not on the ground.
+  and scored, so fetch frames where you search, not on the ground. Each costs
+  0.25 s of mission time (one capture step), whatever the machine.
 - `await ctx.get_nav_frame("Front")`: the forward camera (RGB + planar depth in
   metres, 640 × 480, 90° FOV, pitched 10° down) for obstacle avoidance when
   flying low among trees. These frames are not scored.
@@ -64,6 +65,12 @@ Subclass `vivid2.stack.base.Agent` and implement `async run(ctx)`. Use:
   `path_done()`), `goto`, `hover`, `return_and_land`.
 - `ctx.pose()`, `ctx.elapsed_s()`, `ctx.should_stop()`: drone pose, mission
   time, and whether the time limit is up.
+- `await ctx.sleep(seconds)`: wait in mission time. Pace your agent with this
+  and `ctx.elapsed_s()`, not `asyncio.sleep` or the wall clock. VIVID 2 pauses
+  the simulator while it records each frame, so wall time runs ahead of mission
+  time by an amount that depends on the machine. Your agent's own thinking
+  takes mission time, as on a real drone: the drone keeps flying while your
+  model answers.
 - `ctx.report_target(TargetReport(...))`: a found person, as a NED position.
 - `ctx.log("detections" | "decisions", {...})`: lets VIVID 2 score your
   perception and reasoning layers. The record formats are listed in

@@ -16,6 +16,7 @@ implementations live in ``vivid2.stack.reference``.
 from __future__ import annotations
 
 import abc
+import asyncio
 from dataclasses import dataclass, field, fields
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
@@ -220,6 +221,20 @@ class MissionContext(abc.ABC):
 
     @abc.abstractmethod
     def elapsed_s(self) -> float: ...
+
+    async def sleep(self, seconds: float) -> None:
+        """Wait ``seconds`` of mission time (sim time, as ``elapsed_s``).
+
+        Pace with this, not ``asyncio.sleep``: VIVID 2 pauses the simulator while
+        it records each frame, so wall time runs ahead of mission time by an
+        amount that depends on the machine.
+        """
+        target = self.elapsed_s() + seconds
+        while not self.should_stop():
+            left = target - self.elapsed_s()
+            if left <= 0:
+                return
+            await asyncio.sleep(min(left, 0.05))
 
     async def get_nav_frame(self, camera: str = "Front") -> Optional[Frame]:
         """RGB + planar depth (m) from a navigation camera, for obstacle avoidance.

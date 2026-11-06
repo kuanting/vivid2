@@ -9,12 +9,16 @@ shared between models, efforts or frames never returns the wrong answer.
 Replay is exact on saved frames (``vivid2 eval-frames``). Closed-loop runs
 re-render every frame, and renders are rarely byte-identical, so a closed-loop
 replay mostly misses; a miss is an error, scored as an abstention.
+
+In closed loop the agent's thinking takes mission time, so ``hold_latency``
+makes a cached answer take as long as the original call did.
 """
 from __future__ import annotations
 
 import hashlib
 import json
 import threading
+import time
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -35,13 +39,14 @@ def cache_key(fingerprint: Dict[str, Any], images: List[ImageInput], prompt: str
 
 
 class ReplayVLM(VLMProvider):
-    def __init__(self, cache_path: str, inner: VLMProvider, mode: str = "record"):
+    def __init__(self, cache_path: str, inner: VLMProvider, mode: str = "record", hold_latency: bool = False):
         """``inner`` is needed in both modes: its fingerprint is part of the key."""
         if mode not in ("record", "replay"):
             raise ValueError("mode must be 'record' or 'replay'")
         self.path = Path(cache_path)
         self.mode = mode
         self.inner = inner
+        self.hold_latency = hold_latency
         self.model = inner.model
         self._lock = threading.Lock()
         self.cache: Dict[str, Dict[str, Any]] = {}
@@ -59,6 +64,8 @@ class ReplayVLM(VLMProvider):
                         getattr(self.inner, "max_image_side", 1024))
         rec = self.cache.get(key)
         if rec is not None:
+            if self.hold_latency:
+                time.sleep(float(rec.get("latency_s") or 0.0))
             # The recorded usage, so replayed metrics match the original run exactly.
             return dict(rec["output"]), UsageStats(
                 latency_s=rec["latency_s"], input_tokens=rec["input_tokens"], output_tokens=rec["output_tokens"],

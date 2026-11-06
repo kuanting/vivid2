@@ -149,9 +149,12 @@ class FakeWorld(MissionContext):
     def pose(self):
         return self.pos.copy(), (1.0, 0.0, 0.0, 0.0)
 
+    async def sleep(self, seconds: float) -> None:
+        self.advance(seconds)  # mission time; the drone flies on meanwhile
+
     def report_target(self, report: TargetReport) -> None:
         self.reports.append(report)
-        self.recorder.log("reports", {"t": report.t_ns, "frame_id": report.frame_id, "ned": report.ned,
+        self.recorder.log("reports", {"t": report.t_ns, "t_report": self.t_ns, "frame_id": report.frame_id, "ned": report.ned,
                                       "confidence": report.confidence, "source": report.source, "note": report.note})
 
     def should_stop(self) -> bool:

@@ -37,6 +37,37 @@
   and `vivid2 eval-frames` replays them through any model offline (open loop).
   Open-loop results are scored on the reasoning layer only and listed in their
   own scorecard table.
+- **Results don't depend on the machine's speed.** The simulator runs in real
+  time, and three things take time during a run:
+  - **Taking a photo** uses lockstep. The runner pauses the simulator and asks
+    for the images. It then lets the simulator run exactly one capture step:
+    the camera's `capture-interval` plus 0.05 s, so 0.25 s for the payload
+    camera. The photo is taken at the pose where the simulator paused. Unreal
+    needs a second or more to read back and send three 1920×1440 images (1.2 s
+    on an RTX 5090 laptop), and that happens while the simulator stays paused.
+    So every photo costs the same 0.25 s of mission time on any machine.
+    `frames.jsonl` records it as `capture_s`.
+  - **VIVID 2's own work on each frame** (ground truth, JPEG encoding,
+    saving) also happens with the simulator paused, so the drone doesn't fly
+    further on a slower machine. It is recorded as `record_wall_s`.
+  - The cost is wall time. A run takes longer than its mission time: about
+    1.7 s more per frame on that laptop (1.2 s sending the images, 0.5 s
+    recording them).
+  - If a lockstep frame fails, the run fetches frames with the simulator
+    running from then on. That cost then depends on the machine. The run logs
+    a `lockstep_unavailable` event, and `meta.json` records it under
+    `frame_timing`.
+  - **The agent's thinking takes mission time**, as on a real drone: the drone
+    flies on, or hovers, while the model answers. Decisions record it as
+    `response_s`. A find is timed when the agent reports it, not when its frame
+    was taken. Each run's `meta.json` records the machine (`host`) and the
+    simulator's address, since a model's speed depends on its hardware or API.
+    In closed-loop runs, replayed VLM answers take as long as the original call.
+
+  Agents pace themselves in mission time with `ctx.sleep()` and
+  `ctx.elapsed_s()`. The reference agents take a frame every `frame_period_s`
+  of mission time. The hard time limit (twice the timeout plus 180 s) is
+  mission time as well.
 - **Missing layers are not zero.** If a stack doesn't expose separate
   detections, its perception score is `n/a` and the layer is left out of the
   weighted overall score.

@@ -22,8 +22,11 @@ from vivid2.stack.reference.reasoners import DetectionThresholdReasoner, VLMReas
 AGENTS = ("coverage_gt", "coverage_yolo", "vlm", "hybrid", "survey")
 
 
-def make_vlm(opts: Dict[str, Any]):
-    """Build the VLM provider from CLI options, wrapped in the record/replay cache if one is given."""
+def make_vlm(opts: Dict[str, Any], closed_loop: bool = False):
+    """Build the VLM provider from CLI options, wrapped in the record/replay cache if one is given.
+
+    ``closed_loop``: cached answers take as long as the original call (thinking takes mission time).
+    """
     kind = opts.get("vlm", "anthropic")
     if kind == "anthropic":
         from vivid2.vlm.anthropic_provider import DEFAULT_MODEL, AnthropicVLM
@@ -45,7 +48,7 @@ def make_vlm(opts: Dict[str, Any]):
     if opts.get("vlm_cache"):
         from vivid2.vlm.replay import ReplayVLM
 
-        return ReplayVLM(opts["vlm_cache"], inner, mode=mode)
+        return ReplayVLM(opts["vlm_cache"], inner, mode=mode, hold_latency=closed_loop)
     if mode == "replay":
         raise ValueError("--vlm-cache-mode replay needs --vlm-cache path/to/cache.jsonl")
     return inner
@@ -70,7 +73,7 @@ class AgentFactory:
     def __post_init__(self):
         if self.kind not in AGENTS:
             raise ValueError(f"unknown agent {self.kind!r}; choose from {AGENTS}")
-        self._vlm = make_vlm(self.opts) if self.kind in ("vlm", "hybrid") else None
+        self._vlm = make_vlm(self.opts, closed_loop=True) if self.kind in ("vlm", "hybrid") else None
         self._detector = None
 
     @property
