@@ -12,6 +12,9 @@ Streams:
     decisions   {t, frame_id, layer, output{...}, latency_s, input_tokens, output_tokens, cost_usd, model}
     reports     {t, frame_id, ned[3], confidence, source, note}
     events      {t, kind, ...}
+    comms       {t_send, t_deliver, from, to, seq, bytes, delivered, reason}   (teams; written only when used)
+
+Team runs add ``drone`` to every record (``other_drone`` to drone-drone collisions).
 """
 from __future__ import annotations
 
@@ -24,6 +27,7 @@ from typing import Any, Dict, List
 import numpy as np
 
 STREAMS = ("trajectory", "collisions", "frames", "detections", "decisions", "reports", "events")
+OPTIONAL_STREAMS = ("comms",)  # opened on first use, so single-drone run folders don't change
 
 
 def _default(o: Any):
@@ -47,6 +51,8 @@ class Recorder:
         with self._lock:
             if self._closed:  # a late sim callback after the run ended
                 return
+            if stream not in self._files and stream in OPTIONAL_STREAMS:
+                self._files[stream] = open(self.run_dir / f"{stream}.jsonl", "w", encoding="utf-8")
             self._files[stream].write(line + "\n")
 
     def write_json(self, name: str, obj: Dict[str, Any]) -> None:
@@ -72,7 +78,7 @@ class RunLog:
         meta_path = run_dir / "meta.json"
         meta = json.loads(meta_path.read_text(encoding="utf-8")) if meta_path.exists() else {}
         streams = {}
-        for s in STREAMS:
+        for s in STREAMS + OPTIONAL_STREAMS:
             p = run_dir / f"{s}.jsonl"
             streams[s] = (
                 [json.loads(l) for l in p.read_text(encoding="utf-8").splitlines() if l.strip()]

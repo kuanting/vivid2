@@ -39,6 +39,35 @@
         "yaw_deg": {"type": "number", "default": 0}
       }
     },
+    "fleet": {
+      "type": "object",
+      "description": "A team of drones (default: one drone at dut_start). Sweepable, e.g. \"fleet.size\": [1, 2, 4]",
+      "additionalProperties": false,
+      "properties": {
+        "size": {"type": "integer", "minimum": 1, "maximum": 4, "default": 1},
+        "spacing_m": {"type": "number", "minimum": 10, "default": 10,
+                      "description": "distance between launch pads in the automatic layout around dut_start"},
+        "drones": {
+          "type": "array", "minItems": 1, "maxItems": 4,
+          "description": "explicit launch pads (the first `size` are used) instead of the automatic layout",
+          "items": {
+            "type": "object", "required": ["ned"], "additionalProperties": false,
+            "properties": {"ned": {"$ref": "#/$defs/vec3"}, "yaw_deg": {"type": "number", "default": 0}}
+          }
+        }
+      }
+    },
+    "comms": {
+      "type": "object",
+      "description": "The radio between the drones of a distributed team (see vivid2/radio.py)",
+      "additionalProperties": false,
+      "properties": {
+        "range_m": {"type": "number", "exclusiveMinimum": 0},
+        "latency_s": {"type": "number", "minimum": 0, "default": 0.1},
+        "bandwidth_kbps": {"type": "number", "exclusiveMinimum": 0},
+        "loss": {"type": "number", "minimum": 0, "maximum": 1, "default": 0}
+      }
+    },
     "search_area": {
       "type": "object",
       "required": ["polygon_ne", "altitude_m"],
@@ -111,7 +140,9 @@
         "max_speed_mps": {"type": "number", "default": 8},
         "min_agl_m": {"type": "number", "default": 5},
         "geofence_margin_m": {"type": "number", "default": 20},
-        "energy_budget_m": {"type": "number", "description": "path-length proxy for battery budget"}
+        "energy_budget_m": {"type": "number", "description": "path-length proxy for battery budget (per drone)"},
+        "min_separation_m": {"type": "number", "minimum": 0, "default": 5,
+                             "description": "teams: drones closer than this (3D) are penalised in the safety score"}
       }
     },
     "success": {

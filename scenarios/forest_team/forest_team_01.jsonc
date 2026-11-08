@@ -1,0 +1,46 @@
+// ForestSAR map: a team search. Four hikers scattered over a 650 x 550 m valley side at dusk,
+// three times the area of the single-drone scenarios, with limits one drone cannot meet.
+{
+  "id": "forest_team_01",
+  "mission": "forest_sar",
+  "description": "Four scattered hikers over 650 x 550 m at dusk in light fog; flown by teams of 1, 2 and 4 drones.",
+  "scene": {"base": "scene_forest_sar.jsonc", "robot_config": "robot_vivid_quad.jsonc", "camera": "Payload", "map": "ForestSAR"},
+  "dut_start": {"ned": [0, 0, -1], "yaw_deg": 0},
+  // Pads 10 m apart around the start, inside the 30 x 30 m launch clearing. The team size is swept.
+  "fleet": {"size": 4, "spacing_m": 10},
+  // The radio of a distributed team: drones more than 400 m apart cannot hear each other (the area's
+  // diagonal is 850 m), 0.2 s delay, 250 kbit/s per drone, 2 % of messages lost.
+  "comms": {"range_m": 400, "latency_s": 0.2, "bandwidth_kbps": 250, "loss": 0.02},
+  // Ground in this area lies 13 m below to 10 m above the start (228-268 m), so 60 m above the start
+  // keeps at least 18 m over the tallest birches (about 31 m) and is at most 73 m above the ground.
+  "search_area": {"polygon_ne": [[-250, -325], [400, -325], [400, 225], [-250, 225]], "altitude_m": 60, "ground_down_m": 0},
+  "targets": [
+    {"id": "Hiker1", "asset": "VIVID2_Hiker_RedJacket_LyingBack", "ned": [300, -250, 0], "yaw_deg": 35,
+     "description": "man, red jacket, dark trousers, lying on his back"},
+    {"id": "Hiker2", "asset": "VIVID2_Hiker_YellowJacket_Crouching", "ned": [320, 150, 0], "yaw_deg": 200,
+     "description": "woman, yellow rain jacket, crouching"},
+    {"id": "Hiker3", "asset": "VIVID2_Hiker_BlueHoodie_LyingFront", "ned": [-200, -260, 0], "yaw_deg": 110,
+     "description": "teenager, dark blue hoodie, lying face down"},
+    {"id": "Hiker4", "asset": "VIVID2_Hiker_GreenJacket_Crouching", "ned": [-180, 170, 0], "yaw_deg": 300,
+     "description": "man, green jacket, crouching"}
+  ],
+  "target_jitter_m": 25,
+  // Decoys in the hikers' colours, one or two per quarter of the area.
+  "distractors": [
+    {"id": "Decoy1", "asset": "VIVID2_Decoy_Tarp_Red", "ned": [120, -120, 0], "yaw_deg": 20, "description": "red tarp"},
+    {"id": "Decoy2", "asset": "VIVID2_Decoy_Backpack_Red", "ned": [-60, 60, 0], "yaw_deg": 70, "description": "red backpack"},
+    {"id": "Decoy3", "asset": "VIVID2_Decoy_SleepingBag_Blue", "ned": [250, 0, 0], "yaw_deg": 110, "description": "blue sleeping bag"},
+    {"id": "Decoy4", "asset": "VIVID2_Decoy_Jacket_Yellow", "ned": [-230, -50, 0], "yaw_deg": 40, "description": "dropped yellow jacket"},
+    {"id": "Decoy5", "asset": "VIVID2_Decoy_Tent_Green", "ned": [60, 180, 0], "yaw_deg": 60, "description": "green dome tent"},
+    {"id": "Decoy6", "asset": "VIVID2_Decoy_Barrel_Blue", "ned": [-100, -200, 0], "yaw_deg": 0, "description": "blue plastic drum"}
+  ],
+  "brief": "A group of four hikers scattered after a rockfall on the valley side at dusk: a man in a red jacket (injured, lying down), a woman in a yellow rain jacket, a teenager in a dark blue hoodie and a man in a green jacket. Any of them may be crouching or lying down, some under trees. Find all four.",
+  "environment": {"time_of_day": "2026-09-28 17:30:00", "weather": {"fog": 0.02}, "wind_ned": [3, 1, 0]},
+  // Calibrated with the reference team (coverage_gt, offline team simulator, 2026-11-08): one drone
+  // surveys 70 % of the area before the timeout (2 of 4 hikers) and runs past its battery; two drones
+  // find everyone in about 300 s, four in about 150 s. The battery (path-length budget) is per drone.
+  "limits": {"timeout_s": 480, "max_speed_mps": 8, "min_agl_m": 3, "geofence_margin_m": 25, "energy_budget_m": 3500,
+             "min_separation_m": 5},
+  "success": {"localization_tolerance_m": 10, "require_all_targets": true},
+  "sweep": {"fleet.size": [1, 2, 4], "seeds": 3}
+}

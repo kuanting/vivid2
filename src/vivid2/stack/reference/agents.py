@@ -1,7 +1,6 @@
 """Reference agents: a modular search agent (Perception -> Reasoner -> Planner -> Controller) and a survey agent."""
 from __future__ import annotations
 
-import asyncio
 import math
 from typing import Any, Awaitable, Callable, Dict, List, Optional
 
@@ -426,7 +425,7 @@ class SearchAgent(LowFlightMixin, Agent):
                 break
             if step == "resumed":
                 continue
-            await pace(ctx, t_loop, self.frame_period_s)
+            await self._pace(ctx, t_loop)
 
         if self.low is not None and not finished and not ctx.should_stop():
             await self._lf_tour(ctx, self._dip_look)
@@ -466,6 +465,10 @@ class SearchAgent(LowFlightMixin, Agent):
     def _all_found(self, ctx: MissionContext) -> bool:
         return len(self._reported) >= ctx.mission.expected_targets
 
+    async def _pace(self, ctx: MissionContext, t_loop: float) -> None:
+        """Wait for the next photo: ``frame_period_s`` after this one was asked for."""
+        await pace(ctx, t_loop, self.frame_period_s)
+
     async def _dip_look(self, ctx: MissionContext, spot: Clearing) -> None:
         """Look ``dip_frames`` times from the bottom of a dip; report a find a majority agree on."""
         m = ctx.mission
@@ -485,7 +488,7 @@ class SearchAgent(LowFlightMixin, Agent):
                 at = geolocate(frame, a.pixel[0], a.pixel[1], m.ground_down_m, m.terrain)
                 if at is not None:
                     yes.append((at, a, frame))
-            await pace(ctx, t_loop, self.frame_period_s)
+            await self._pace(ctx, t_loop)
         # The largest group of looks that agree on where the person is
         best: List[Any] = []
         for at, _, _ in yes:
@@ -511,12 +514,12 @@ class SearchAgent(LowFlightMixin, Agent):
         t0 = ctx.elapsed_s()
         dets = []
         if self.perception is not None:
-            dets = await asyncio.to_thread(self.perception.detect, frame)
+            dets = await ctx.think(self.perception.detect, frame)
             ctx.log("detections", {
                 "t": frame.t_ns, "frame_id": frame.frame_id, "layer": "perception", "phase": phase,
                 "dets": [{"label": d.label, "bbox": list(d.bbox), "score": d.score} for d in dets],
             })
-        assessment, usage = await asyncio.to_thread(self.reasoner.assess, frame, dets, ctx.mission)
+        assessment, usage = await ctx.think(self.reasoner.assess, frame, dets, ctx.mission)
         took = ctx.elapsed_s() - t0
         ctx.log("decisions", {**decision_record(frame, assessment, usage), "phase": phase, "response_s": round(took, 3)})
         self._assess_s = took if not getattr(self, "_assess_s", 0.0) else 0.8 * self._assess_s + 0.2 * took

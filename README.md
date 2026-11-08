@@ -119,6 +119,14 @@ only the eyes differ. See [docs/architecture.md](docs/architecture.md#yolo-basel
 
 To plug in your own stack, see [docs/adding_a_dut.md](docs/adding_a_dut.md).
 
+### Teams of drones
+
+Scenarios can be flown by teams of up to four drones (`fleet.size`), as one central agent
+commanding every drone (`--team central`) or one agent per drone that shares only what it sends
+over a simulated radio (`--team dist`). `campaigns/forest_team_v1.jsonc` flies a 650 × 550 m
+search with 1, 2 and 4 drones and reports how each team stack scales. See
+[docs/teams.md](docs/teams.md).
+
 ## Roadmap
 
 0. **SIL framework + Forest S&R.** Current phase.

@@ -20,13 +20,16 @@ import numpy as np
 
 from vivid2 import metrics as vmetrics
 from vivid2.preflight import PreflightError, run_preflight, scenario_map
+from vivid2.radio import Radio, RadioProfile
 from vivid2.recorder import Recorder, RunLog
 from vivid2.scenario import Campaign, Run
 from vivid2.scoring import layer_scores, overall_score, reasoning_score
 from vivid2.sim.scene_builder import build_scene, camera_config, camera_settings, captures
 from vivid2.sim.segmentation import SegmentationError, assign_ids, palette, visibility
-from vivid2.stack.base import Agent, Frame, GTAnnotation, MissionContext, MissionSpec, TargetReport
+from vivid2.stack.base import (Agent, DistributedTeam, FleetAgent, Frame, GTAnnotation, MissionContext, MissionSpec,
+                               TargetReport)
 from vivid2.stack.reference.controllers import AirSimController
+from vivid2.team_runtime import FLEET_VERSION, ClockState, SimFleetContext, TeamAgentError, TeamRuntime, run_tasks
 from vivid2.viewer import make_viewer
 from vivid2.terrain import TerrainModel, load_for_run
 from vivid2.unreal_setup import status as unreal_status
@@ -39,6 +42,7 @@ HARD_TIMEOUT_WALL_FACTOR = 3.0  # wall-clock safety net, in case the simulator s
 CAPTURE_MARGIN_S = 0.05  # a lockstep frame lets the simulator run the camera's capture-interval plus this
 LOCKSTEP_REGISTER_S = 0.02  # wall time for the server to take the image request before the clock moves
 LOCKSTEP_TIMEOUT_S = 15.0  # wall time to receive a lockstep frame (Project AirSim gives up after 5 s)
+TEAM_REPLY_EXTRA_S = 5.0  # more wall time per extra drone in a team's photo batch
 
 
 def _xyz(d: Dict[str, float]) -> List[float]:
@@ -49,19 +53,25 @@ def _wxyz(d: Dict[str, float]) -> Tuple[float, float, float, float]:
     return (d["w"], d["x"], d["y"], d["z"])
 
 
-def mission_spec(run: Run, start_ned=None, terrain=None, camera: Optional[Dict[str, Any]] = None) -> MissionSpec:
+def mission_spec(run: Run, start_ned=None, terrain=None, camera: Optional[Dict[str, Any]] = None,
+                 datum_ned=None, drone_id: Optional[str] = None, team: Optional[List[Dict[str, Any]]] = None,
+                 team_mode: Optional[str] = None) -> MissionSpec:
     """What the DUT is told. ``ground_down_m`` is the real ground under the start point.
 
     Scenarios author heights against flat ``search_area.ground_down_m``; on a map
     with relief that plane can be hundreds of metres off, so the DUT gets the
     terrain height at its start instead (flat maps: unchanged). ``altitude_m``
     is then height above the start's ground.
+
+    In a team, ``start_ned`` is the drone's own pad and ``datum_ned`` the centre of the pads
+    (``dut_start``): every drone measures heights from the ground there.
     """
     s = run.spec
     lim = s["limits"]
     ground = float(s["search_area"].get("ground_down_m", 0.0))
-    if terrain is not None and start_ned is not None:
-        ground = float(terrain.down_at(start_ned[0], start_ned[1]))
+    datum = datum_ned if datum_ned is not None else start_ned
+    if terrain is not None and datum is not None:
+        ground = float(terrain.down_at(datum[0], datum[1]))
     # The DUT gets a coarse DEM, never the 1 m model the scoring uses.
     dut_terrain = terrain.downsample(DUT_DEM_CELL_M) if terrain is not None else TerrainModel.flat(ground)
     return MissionSpec(
@@ -79,6 +89,10 @@ def mission_spec(run: Run, start_ned=None, terrain=None, camera: Optional[Dict[s
         energy_budget_m=lim.get("energy_budget_m"),
         camera=dict(camera) if camera else None,
         terrain=dut_terrain,
+        drone_id=drone_id,
+        team=team,
+        team_mode=team_mode,
+        min_separation_m=float(lim.get("min_separation_m", 5.0)) if team else None,
     )
 
 
@@ -171,8 +185,10 @@ def run_config_hash(run: Run, agent_desc: Dict[str, Any]) -> str:
     agent's configuration and ``SIM_VERSION``, so changing any of them forces a
     re-run on resume.
     """
-    blob = json.dumps({"spec": run.spec, "seed": run.seed, "agent": agent_desc, "sim": SIM_VERSION},
-                      sort_keys=True, default=str)
+    fp: Dict[str, Any] = {"spec": run.spec, "seed": run.seed, "agent": agent_desc, "sim": SIM_VERSION}
+    if run.fleet_size > 1:
+        fp["fleet_rt"] = FLEET_VERSION  # team runs only: single-drone hashes stay as they were
+    blob = json.dumps(fp, sort_keys=True, default=str)
     return hashlib.sha1(blob.encode()).hexdigest()[:12]
 
 
@@ -319,11 +335,26 @@ def write_bank_files(run_dir: Path, frame_id: int, jpeg: bytes, depth_m: Optiona
     return out
 
 
+def _shared(name: str):
+    """A context attribute that lives in the run's clock state (shared by a team's drones)."""
+    return property(lambda self: getattr(self.clock, name), lambda self, v: setattr(self.clock, name, v))
+
+
 class SimMissionContext(MissionContext):
+    """One drone's view of a live run. ``team`` (a TeamRuntime) when it flies in a team."""
+
+    t0_ns = _shared("t0_ns")
+    last_t_ns = _shared("last_t_ns")
+    depth_scale = _shared("depth_scale")
+    lockstep = _shared("lockstep")
+    pause_to_record = _shared("pause_to_record")
+    capture_step_ns = _shared("capture_step_ns")
+
     def __init__(self, run: Run, world, drone, camera_id: str, recorder: Recorder, controller: AirSimController,
                  fov_deg: float, frame_bank: str = "off", seg_ids: Optional[Dict[str, int]] = None,
                  target_ids: Optional[List[str]] = None, start_ned=None, terrain=None, viewer=None,
-                 camera: Optional[Dict[str, Any]] = None):
+                 camera: Optional[Dict[str, Any]] = None, drone_id: Optional[str] = None,
+                 team: Optional[TeamRuntime] = None, datum_ned=None, team_info=None, team_mode: Optional[str] = None):
         self.viewer = viewer  # optional live camera windows (vivid2.viewer.RunViewer)
         self.preview_topic: Optional[str] = None  # the viewer's live preview, unsubscribed at the first frame
         if frame_bank not in FRAME_BANK_MODES:
@@ -339,18 +370,15 @@ class SimMissionContext(MissionContext):
         self.recorder = recorder
         self.controller = controller
         self.fov_deg = fov_deg
-        self.mission = mission_spec(run, start_ned, terrain, camera)
-        self.t0_ns = world.get_sim_time()
-        self.last_t_ns = self.t0_ns  # last sim time seen, for logging after the connection drops
-        self.depth_scale: Optional[float] = None  # metres per raw depth unit, detected in flight
-        self._frame_id = 0
-        self._nav_frames = 0
+        self.mission = mission_spec(run, start_ned, terrain, camera, datum_ned=datum_ned, drone_id=drone_id,
+                                    team=team_info, team_mode=team_mode)
+        self.team = team
+        self.drone_id = drone_id or "Drone1"
+        # The clock (t0, frame ids, lockstep...): the team's, or this drone's own.
+        self.clock = team if team is not None else ClockState(world.get_sim_time())
         self._nav_fov: Dict[str, float] = {}  # navigation camera -> FOV, filled by the runner
         self.reports: List[TargetReport] = []
         self._stop = False
-        self.pause_to_record = True  # off if the simulator's clock cannot pause (logged once)
-        self.lockstep = True  # off if a lockstep frame fails (logged once); frames then cost machine time
-        self.capture_step_ns = int(0.25e9)  # set from the camera's capture-interval by the runner
 
     # -- MissionContext API -------------------------------------------------
     async def get_frame(self) -> Optional[Frame]:
@@ -365,7 +393,9 @@ class SimMissionContext(MissionContext):
         """
         from projectairsim.types import ImageType
 
-        types = [ImageType.SCENE, ImageType.DEPTH_PLANAR] + ([ImageType.SEGMENTATION] if self.seg_ids else [])
+        if self.team is not None:
+            return await self.team.get_frame(self)  # in the team's next batch
+        types = self.image_types()
         imgs = None
         paused = False
         if self.lockstep:
@@ -387,6 +417,33 @@ class SimMissionContext(MissionContext):
             rgb_msg = imgs.get(ImageType.SCENE)
             if not rgb_msg:
                 return None
+            return await self._record_frame(imgs, rgb_msg, t_request, t_fetched, wall0)
+        finally:
+            if paused:
+                await self._resume()
+
+    def image_types(self) -> list:
+        from projectairsim.types import ImageType
+
+        return [ImageType.SCENE, ImageType.DEPTH_PLANAR] + ([ImageType.SEGMENTATION] if self.seg_ids else [])
+
+    async def _running_frame(self) -> Optional[Frame]:
+        """A photo fetched with the simulator running, then recorded paused (a team after lockstep failed)."""
+        from projectairsim.types import ImageType
+
+        t_request = self.sim_time_or_last()
+        imgs = await asyncio.to_thread(self.drone.get_images, self.camera_id, self.image_types())
+        paused = await self._pause()
+        t_fetched = self.sim_time_or_last()
+        wall0 = time.monotonic()
+        try:
+            rgb_msg = imgs.get(ImageType.SCENE)
+            if not rgb_msg:
+                return None
+            if self.team is not None:
+                self.team.frame_id += 1
+                self.team.frame_owner[self.team.frame_id] = self.drone_id
+                return await self._record_frame(imgs, rgb_msg, t_request, t_fetched, wall0, frame_id=self.team.frame_id)
             return await self._record_frame(imgs, rgb_msg, t_request, t_fetched, wall0)
         finally:
             if paused:
@@ -426,6 +483,8 @@ class SimMissionContext(MissionContext):
             return False
         try:
             await asyncio.to_thread(self.world.pause)
+            if self.team is not None:
+                self.team.ledger.paused()
             return True
         except Exception as e:  # e.g. a real-time clock, which cannot pause
             self.pause_to_record = False
@@ -434,8 +493,17 @@ class SimMissionContext(MissionContext):
 
     async def _resume(self) -> None:
         await asyncio.to_thread(self.world.resume)
+        if self.team is not None:
+            self.team.ledger.resumed()
 
-    async def _record_frame(self, imgs, rgb_msg, t_request: int, t_fetched: int, wall0: float) -> Frame:
+    async def _record_frame(self, imgs, rgb_msg, t_request: int, t_fetched: int, wall0: float,
+                            frame_id: Optional[int] = None, deferred: Optional[list] = None,
+                            batch: Optional[int] = None) -> Frame:
+        """Decode, add ground truth, encode and log one photo (the simulator is paused).
+
+        A team batch passes the ``frame_id`` it assigned and a ``deferred`` list, which collects
+        the ``frames`` record so the batch can write its records in frame order.
+        """
         from projectairsim.types import ImageType
 
         rgb = _decode(rgb_msg, np.uint8, 3)
@@ -472,11 +540,13 @@ class SimMissionContext(MissionContext):
                 gt.append(GTAnnotation(oid, tuple(v["bbox_vis"]), v["visible_px"], tuple(v["bbox_vis"]), v.get("contrast")))
         distractors_seen = {oid: v["visible_px"] for oid, v in vis.items()
                             if oid not in self.target_ids and v["visible_px"]}
-        self._frame_id += 1
+        if frame_id is None:
+            self.clock.frame_id += 1
+            frame_id = self.clock.frame_id
         # encoded once at camera resolution; what a VLM is sent is derived from these bytes (vlm_views)
         jpeg = await asyncio.to_thread(encode_jpeg_bytes, rgb, FRAME_JPEG_MAX_SIDE)
         frame = Frame(
-            t_ns=int(rgb_msg["time_stamp"]), frame_id=self._frame_id, rgb=rgb, depth=depth,
+            t_ns=int(rgb_msg["time_stamp"]), frame_id=frame_id, rgb=rgb, depth=depth,
             cam_pos=np.array([rgb_msg["pos_x"], rgb_msg["pos_y"], rgb_msg["pos_z"]]),
             cam_q=(rgb_msg["rot_w"], rgb_msg["rot_x"], rgb_msg["rot_y"], rgb_msg["rot_z"]),
             fov_deg=self.fov_deg, gt=gt, jpeg=jpeg,
@@ -485,17 +555,27 @@ class SimMissionContext(MissionContext):
         if self.frame_bank != "off":
             bank = await asyncio.to_thread(write_bank_files, self.recorder.run_dir, frame.frame_id, jpeg,
                                            depth if self.frame_bank == "rgbd" else None)
-        self.recorder.log("frames", {
-            "t": frame.t_ns, "frame_id": frame.frame_id, "cam_pos": frame.cam_pos, "cam_q": list(frame.cam_q),
+        record = {
+            "t": frame.t_ns, "frame_id": frame.frame_id,
+            **({"drone": self.drone_id, "batch": batch} if self.team is not None else {}),
+            "cam_pos": frame.cam_pos, "cam_q": list(frame.cam_q),
             "width": frame.width, "height": frame.height, "fov_deg": frame.fov_deg,
             "gt": [_gt_record(g) for g in gt], **bank,
             **({"distractors_visible": distractors_seen} if distractors_seen else {}),
             # mission time the frame took (one capture step in lockstep), and VIVID 2's work on it (paused)
             "capture_s": round(max(0, t_fetched - t_request) / 1e9, 3),
             "record_wall_s": round(time.monotonic() - wall0, 3),
-        })
+        }
+        if deferred is not None:
+            deferred.append((frame.frame_id, record))
+        else:
+            self.recorder.log("frames", record)
         if self.viewer is not None:
-            self.viewer.show_frame(frame, seg=seg, extra=f"t {self.elapsed_s():.0f} s  height {self.mission.ground_down_m - frame.cam_pos[2]:.0f} m")
+            extra = f"t {self.elapsed_s():.0f} s  height {self.mission.ground_down_m - frame.cam_pos[2]:.0f} m"
+            if self.team is not None:
+                self.viewer.show_frame(frame, seg=seg, extra=f"{self.drone_id}  {extra}", drone=self.drone_id)
+            else:
+                self.viewer.show_frame(frame, seg=seg, extra=extra)
         if self.preview_topic is not None:
             # The test has started: stop the live preview, so Unreal stops rendering its camera.
             topic, self.preview_topic = self.preview_topic, None
@@ -510,7 +590,11 @@ class SimMissionContext(MissionContext):
 
         if camera == self.camera_id:
             raise ValueError("use get_frame() for the payload camera; navigation frames are not scored")
-        imgs = await asyncio.to_thread(self.drone.get_images, camera, [ImageType.SCENE, ImageType.DEPTH_PLANAR])
+        if self.team is not None:
+            async with self.team.nav_gate():
+                imgs = await asyncio.to_thread(self.drone.get_images, camera, [ImageType.SCENE, ImageType.DEPTH_PLANAR])
+        else:
+            imgs = await asyncio.to_thread(self.drone.get_images, camera, [ImageType.SCENE, ImageType.DEPTH_PLANAR])
         rgb_msg = imgs.get(ImageType.SCENE)
         if not rgb_msg:
             return None
@@ -521,8 +605,8 @@ class SimMissionContext(MissionContext):
             scale = self.depth_scale if self.depth_scale is not None else 1.0  # this plugin build packs whole metres
             depth = raw.astype(np.float32) * scale
             depth[(raw == 0) | (raw >= DEPTH_NO_DATA)] = 0.0
-        self._nav_frames += 1
-        return Frame(t_ns=int(rgb_msg["time_stamp"]), frame_id=-self._nav_frames, rgb=_decode(rgb_msg, np.uint8, 3),
+        self.clock.nav_frames += 1
+        return Frame(t_ns=int(rgb_msg["time_stamp"]), frame_id=-self.clock.nav_frames, rgb=_decode(rgb_msg, np.uint8, 3),
                      cam_pos=np.array([rgb_msg["pos_x"], rgb_msg["pos_y"], rgb_msg["pos_z"]]),
                      cam_q=(rgb_msg["rot_w"], rgb_msg["rot_x"], rgb_msg["rot_y"], rgb_msg["rot_z"]),
                      fov_deg=float(self._nav_fov.get(camera, 90.0)), depth=depth)
@@ -532,6 +616,9 @@ class SimMissionContext(MissionContext):
         return np.asarray(_xyz(p["translation"])), _wxyz(p["rotation"])
 
     async def sleep(self, seconds: float) -> None:
+        if self.team is not None:  # a batch of photos starting just before may wake it early
+            await self.team.sleep_until(self.elapsed_s() + seconds, self.should_stop)
+            return
         # The simulator runs at about real time between frames, so a wall sleep gets close; then top up.
         target = self.elapsed_s() + seconds
         while not self.should_stop():
@@ -540,22 +627,41 @@ class SimMissionContext(MissionContext):
                 return
             await asyncio.sleep(min(left, 1.0))
 
+    async def think(self, fn, *args, **kwargs):
+        if self.team is None:
+            return await super().think(fn, *args, **kwargs)
+        w0 = time.monotonic()
+        result = await super().think(fn, *args, **kwargs)
+        w1 = time.monotonic()
+        # Wall time the clock stood still (other drones' photos) while this drone was thinking.
+        paused = self.team.ledger.overlap(w0, w1)
+        st = self.team.think_stats.setdefault(self.drone_id, {"calls": 0, "wall_s": 0.0, "paused_s": 0.0})
+        st["calls"] += 1
+        st["wall_s"] += w1 - w0
+        st["paused_s"] += paused
+        if paused > 0:
+            await self.sleep(paused)
+        return result
+
     def report_target(self, report: TargetReport) -> None:
         self.reports.append(report)
         # "t" is the frame the find was made on; "t_report" when the agent reported it (after thinking)
         self.recorder.log("reports", {"t": report.t_ns, "t_report": self.sim_time_or_last(), "frame_id": report.frame_id,
+                                      **({"drone": self.drone_id} if self.team is not None else {}),
                                       "ned": report.ned, "confidence": report.confidence, "source": report.source,
                                       "note": report.note})
         if self.viewer is not None:
             self.viewer.note("reports", {"frame_id": report.frame_id})
 
     def log(self, stream: str, record: Dict[str, Any]) -> None:
+        if self.team is not None:
+            record = {**record, "drone": self.drone_id}
         self.recorder.log(stream, record)
         if self.viewer is not None and stream in ("detections", "decisions"):
             self.viewer.note(stream, record)
 
     def should_stop(self) -> bool:
-        return self._stop or self.elapsed_s() >= self.mission.timeout_s
+        return self._stop or self.clock.stop or self.elapsed_s() >= self.mission.timeout_s
 
     def elapsed_s(self) -> float:
         return (self.world.get_sim_time() - self.t0_ns) / 1e9
@@ -676,6 +782,7 @@ def score_run_dir(run_dir: Path, weights: Optional[Dict[str, float]] = None) -> 
         "run_id": meta["run_id"], "scenario_id": meta["scenario_id"], "agent": meta["agent"]["agent"],
         "agent_config": meta["agent"], "seed": meta["seed"], "params": meta["params"],
         "metrics": m, "scores": scores, "reasoning_summary": m.get("reasoning"),
+        **({"team": {"mode": meta["team"].get("mode"), "size": meta["team"].get("size")}} if meta.get("team") else {}),
     }
     with open(Path(run_dir) / "result.json", "w", encoding="utf-8") as f:
         json.dump(result, f, indent=2, default=lambda o: o.tolist() if hasattr(o, "tolist") else str(o))
@@ -713,6 +820,12 @@ async def execute_run(
     from projectairsim import Drone
 
     agent = agent or agent_factory(run)
+    if run.fleet_size > 1 or not isinstance(agent, Agent):
+        if isinstance(agent, Agent):
+            raise ValueError(f"{run.run_id} flies a team of {run.fleet_size}: it needs a team agent "
+                             "(vivid2 run --team central|dist)")
+        return await execute_team_run(client, run, agent, sim_config_dir, out_dir, weights, airsim_root,
+                                      frame_bank, viewer)
     if viewer is not None:
         viewer.start_run(f"{run.run_id}  {agent.name}")
     run_dir = Path(out_dir) / agent.name / run.run_id
@@ -833,6 +946,208 @@ async def execute_run(
         rec.write_json("meta.json", meta)
         rec.close()
     return score_run_dir(run_dir, weights)
+
+
+async def execute_team_run(client, run: Run, agent, sim_config_dir: str, out_dir: Path,
+                           weights: Optional[Dict[str, float]] = None, airsim_root: Optional[str] = None,
+                           frame_bank: str = "off", viewer=None) -> Dict[str, Any]:
+    """A run with a team of drones: a FleetAgent (central) or a DistributedTeam (one agent per drone).
+
+    Like ``execute_run``, plus: one drone per launch pad, photos taken in shared lockstep batches
+    (``vivid2.team_runtime``), and every record tagged with its ``drone``.
+    """
+    from projectairsim import Drone
+
+    if not isinstance(agent, (FleetAgent, DistributedTeam)):
+        raise TypeError(f"a team run needs a FleetAgent or a DistributedTeam, not {type(agent).__name__}")
+    if viewer is not None:
+        viewer.start_run(f"{run.run_id}  {agent.name}")
+    run_dir = Path(out_dir) / agent.name / run.run_id
+    terrain, terrain_meta = load_for_run(sim_config_dir, run.spec)
+    targets = run.resolved_targets(terrain)
+    distractors = run.resolved_distractors(terrain)
+    centre = run.resolved_start(terrain)  # the pads sit around it; the team's height datum
+    fleet = run.resolved_fleet(terrain)
+    ids = [d["id"] for d in fleet]
+    if isinstance(agent, DistributedTeam) and len(agent.agents) != len(fleet):
+        raise ValueError(f"{agent.name}: {len(agent.agents)} agents for a team of {len(fleet)}")
+    sc = run.spec["scene"]
+    camera_id = sc.get("camera", "Payload")
+    scene = build_scene(run, sim_config_dir, targets, distractors, centre, fleet=fleet)
+    cam = camera_settings(scene, camera_id, ids[0])
+
+    try:
+        world = load_world(client, scene, sim_config_dir)
+    except Exception as e:
+        raise PreflightError(
+            f"loading the scene failed ({e!r}). Check that map {sc.get('map', '?')!r} is open and that it has "
+            f"the assets {sorted({t['asset'] for t in targets})}."
+        ) from e
+    preflight = run_preflight(world, run.spec, targets + distractors)
+    seg_ids: Dict[str, int] = {}
+    if captures(scene, camera_id, 3, ids[0]):
+        try:
+            seg_ids = assign_ids(world, targets, distractors)
+        except SegmentationError as e:
+            raise PreflightError(str(e)) from e
+
+    rec = Recorder(run_dir)
+    drones = {i: Drone(client, world, i) for i in ids}
+    for name, drone in drones.items():
+        def on_collision(_, msg, name=name):  # the name bound now: each drone's own callback
+            other = msg.get("object_name")
+            rec.log("collisions", {"t": msg.get("time_stamp"), "object_name": other,
+                                   "impact_point": msg.get("impact_point"), "drone": name,
+                                   **({"other_drone": other} if other in drones else {})})
+        client.subscribe(drone.robot_info["collision_info"], on_collision)
+    apply_environment(world, run.spec.get("environment", {}))
+    lead = drones[ids[0]]
+    preview = None
+    if viewer is not None:  # the live view follows the first drone
+        sensors = getattr(lead, "sensors", {})
+        chase = sensors.get("Chase", {}).get("scene_camera")
+        if chase:
+            client.subscribe(chase, viewer.chase_callback())
+        preview = sensors.get(PREVIEW_CAMERA, {}).get("scene_camera")
+        if preview:
+            client.subscribe(preview, viewer.preview_callback())
+        else:
+            viewer.no_preview()
+        viewer.set_phase(f"team of {len(ids)} on the ground, settling camera exposure")
+    cameras = [camera_id]
+    for nav in ("Front",):
+        try:
+            camera_settings(scene, nav, ids[0])
+            cameras.append(nav)
+        except StopIteration:
+            pass
+    lift = float(run.spec["search_area"]["altitude_m"])
+    views = {camera_id: {"pose": lifted_pose(camera_config(scene, camera_id, ids[0]), lift), "lift_m": lift}}
+    exposure = {}
+    for i in ids:  # one drone at a time: the client's synchronous requests take turns anyway
+        exposure[i] = await settle_exposure(drones[i], cameras, views)
+
+    n = len(ids)
+    team = TeamRuntime(world, rec, ids, register_s=LOCKSTEP_REGISTER_S,
+                       reply_timeout_s=LOCKSTEP_TIMEOUT_S + TEAM_REPLY_EXTRA_S * (n - 1))
+    team.capture_step_ns = capture_step_ns(camera_config(scene, camera_id, ids[0]))
+    team_info = [{"id": d["id"], "start_ned": list(d["ned"])} for d in fleet]
+    mode = agent.team_mode
+    camera = {"width": int(cam["width"]), "height": int(cam["height"]), "fov_deg": float(cam["fov-degrees"])}
+    ctxs: Dict[str, SimMissionContext] = {}
+    for k, d in enumerate(fleet):
+        name = d["id"]
+        tagged = (lambda stream, record, name=name: rec.log(stream, {**record, "drone": name}))
+        controller = AirSimController(drones[name], world.get_sim_time, tagged)
+        ctx = SimMissionContext(run, world, drones[name], camera_id, rec, controller, cam["fov-degrees"], frame_bank,
+                                seg_ids=seg_ids, target_ids=[t["id"] for t in targets], start_ned=d["ned"],
+                                terrain=terrain, viewer=viewer, camera=camera, drone_id=name,
+                                team=team, datum_ned=centre, team_info=team_info, team_mode=mode)
+        for nav in cameras[1:]:
+            ctx._nav_fov[nav] = float(camera_settings(scene, nav, name)["fov-degrees"])
+        ctxs[name] = ctx
+    ctxs[ids[0]].preview_topic = preview
+    team_mission = mission_spec(run, centre, terrain, camera, datum_ned=centre, team=team_info, team_mode=mode)
+    if viewer is not None:
+        viewer.set_phase("mission clock started: taking off and climbing")
+    meta = {
+        "run_id": run.run_id, "scenario_id": run.scenario_id, "seed": run.seed, "params": run.params,
+        "mission": run.spec["mission"], "agent": agent.describe(), "targets": targets,
+        "search_area": run.spec["search_area"], "limits": run.spec["limits"], "success": run.spec.get("success", {}),
+        "start_ned": list(fleet[0]["ned"]),  # the first drone's pad, for tools that read one start
+        "fleet": [{"id": d["id"], "start_ned": list(d["ned"]), "yaw_deg": d["yaw_deg"]} for d in fleet],
+        "team": {"mode": mode, "size": n, "centre_ned": list(centre)},
+        "comms": run.spec.get("comms"),
+        "terrain": terrain_meta, "t0_ns": team.t0_ns, "wall_start": datetime.now().isoformat(),
+        "projectairsim_commit": projectairsim_commit(airsim_root), "scenario_source": run.source,
+        "unreal": unreal_status(), "host": host_info(), "sim_address": getattr(client, "address", None),
+        "weights": weights or {},
+        "config_hash": run_config_hash(run, agent.describe()),
+        "map": sc.get("map"), "preflight": preflight,
+        "mission_spec": team_mission.record(),
+        "distractors": distractors, "segmentation_ids": seg_ids,
+        "gt_version": 3 if seg_ids else 1,
+        "sim_version": SIM_VERSION, "fleet_version": FLEET_VERSION, "exposure": exposure,
+        "frame_bank": {"mode": frame_bank, "jpeg_quality": JPEG_QUALITY, "jpeg_max_side": FRAME_JPEG_MAX_SIDE,
+                       "depth": "uint16 mm, half resolution, 0 = no data"},
+    }
+    rec.write_json("meta.json", meta)
+
+    lead_ctx = ctxs[ids[0]]
+    if isinstance(agent, FleetAgent):
+        named = {"team": agent.run(SimFleetContext(team_mission, ctxs, team))}
+    else:
+        # The drones share only what they send over the scenario's radio.
+        profile = RadioProfile.from_spec(run.spec.get("comms"))
+
+        def position(i):
+            return team.last_pos.get(i) if i in team.last_pos else ctxs[i].pose()[0]
+
+        radio = Radio(profile, ids, clock=lead_ctx.elapsed_s, t_ns=lead_ctx.sim_time_or_last, position=position,
+                      log=rec.log, seed=run.seed)
+        for i, c in ctxs.items():
+            c.radio = radio.port(i, c.sleep)
+        meta["comms"] = profile.record()
+        rec.write_json("meta.json", meta)
+        named = {i: a.run(ctxs[i]) for i, a in zip(ids, agent.agents)}
+    stop = asyncio.Event()
+    poller = asyncio.create_task(_poll_team_trajectory(team, ctxs, stop))
+    end_reason = "completed"
+    try:
+        if await run_tasks(named, lead_ctx.elapsed_s, run.spec["limits"]["timeout_s"] * 2 + RTL_GRACE_S,
+                           HARD_TIMEOUT_WALL_FACTOR):
+            end_reason = "hard_timeout"
+        elif lead_ctx.elapsed_s() >= lead_ctx.mission.timeout_s:
+            end_reason = "timeout"
+    except Exception as e:
+        end_reason = "error"
+        who = e.who if isinstance(e, TeamAgentError) else None
+        err = e.error if isinstance(e, TeamAgentError) else e
+        rec.log("events", {"t": lead_ctx.sim_time_or_last(), "kind": "error", "error": repr(err),
+                           **({"drone": who} if who and who in ctxs else {}), "trace": traceback.format_exc()})
+    finally:
+        team.stop = True
+        stop.set()
+        await poller
+        client.unsubscribe_all()
+        meta.update({"end_ns": lead_ctx.sim_time_or_last(), "end_reason": end_reason,
+                     "wall_end": datetime.now().isoformat(), "depth_metres_per_unit": team.depth_scale,
+                     "frame_timing": team.timing(),
+                     "think": {i: {k: round(v, 3) for k, v in st.items()} for i, st in team.think_stats.items()}})
+        rec.write_json("meta.json", meta)
+        rec.close()
+    return score_run_dir(run_dir, weights)
+
+
+async def _poll_team_trajectory(team: TeamRuntime, ctxs: Dict[str, "SimMissionContext"], stop: asyncio.Event) -> None:
+    """Every drone's pose at one sim time, 10 Hz (one ``trajectory`` record per drone)."""
+    world = team.world
+    lock = getattr(world.client, "request_lock", None) or contextlib.nullcontext()
+    lead = next(iter(ctxs.values()))
+
+    def poses_and_time():
+        with lock:
+            return [(i, c.drone.get_ground_truth_pose()) for i, c in ctxs.items()], world.get_sim_time()
+
+    last = None
+    while not stop.is_set():
+        try:
+            poses, t = await asyncio.to_thread(poses_and_time)
+            team.last_t_ns = t
+            if last is not None and t <= last:  # paused while photos are recorded
+                await asyncio.sleep(1.0 / TRAJECTORY_HZ)
+                continue
+            last = t
+            for i, p in poses:
+                team.recorder.log("trajectory", {"t": t, "pos": _xyz(p["translation"]), "q": list(_wxyz(p["rotation"])),
+                                                 "drone": i})
+                team.last_pos[i] = _xyz(p["translation"])
+            if lead.viewer is not None:
+                lead.viewer.set_team_progress({i: lead.mission.ground_down_m - p["translation"]["z"] for i, p in poses},
+                                              (t - team.t0_ns) / 1e9)
+        except Exception:
+            pass
+        await asyncio.sleep(1.0 / TRAJECTORY_HZ)
 
 
 def order_runs(runs: List[Run]) -> List[Run]:

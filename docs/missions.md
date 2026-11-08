@@ -20,6 +20,7 @@ person and report each one's position, then return home.
 | `forest_hiker_02` | ForestSAR | 2 hikers at dusk; 5 decoys | fog 0 / 0.02 / 0.05 × 3 seeds |
 | `forest_fog_01` | ForestSAR | 1 hiker in dense fog at midday; 3 decoys | fog 0.2 / 0.4 × 3 seeds |
 | `forest_clearing_01` | ForestSAR | 2 hikers in small clearings at dusk; 3 decoys | fog 0 / 0.02 / 0.05 × 3 seeds |
+| `forest_team_01` (`scenarios/forest_team/`) | ForestSAR | 4 hikers scattered over 650 × 550 m at dusk, light fog; 6 decoys | team of 1 / 2 / 4 drones × 3 seeds ([teams.md](teams.md)) |
 
 ### Challenge: fly low in the woods
 

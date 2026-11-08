@@ -44,11 +44,16 @@ def cmd_run(args) -> int:
     if args.seeds is not None:
         campaign.seeds = args.seeds
     opts = {k: v for k, v in vars(args).items()
-            if k.startswith(("vlm", "yolo", "sidelap", "frame_period", "verify", "dip")) and v is not None}
+            if k.startswith(("vlm", "yolo", "sidelap", "frame_period", "verify", "dip", "team")) and v is not None}
     try:
         factory = AgentFactory(args.agent, opts)
     except ValueError as e:
         print(f"error: {e}", file=sys.stderr)
+        return 2
+    teams = sorted({r.scenario_id for r in campaign.runs() if r.fleet_size > 1})
+    if teams and factory.team is None:
+        print(f"error: {', '.join(teams)} fly teams of drones (fleet.size > 1): add --team central (one agent "
+              "commands every drone) or --team dist (one agent per drone, radio only)", file=sys.stderr)
         return 2
     results = asyncio.run(execute_campaign(campaign, factory, Path(args.out), address=args.address,
                                            resume=not args.no_resume, airsim_root=args.airsim_root,
@@ -260,6 +265,9 @@ def main(argv=None) -> int:
     s.add_argument("--dip", choices=["on", "off"],
                    help="low flight: after the survey, descend into the clearings mapped from the depth image "
                         "and look from about 12 m above the ground (default: off)")
+    s.add_argument("--team", choices=["central", "dist"],
+                   help="fly scenarios with fleet.size > 1 as a team: central (one agent commands every drone) or "
+                        "dist (one agent per drone; they share only what they send over the scenario's radio)")
     s.add_argument("--view", action="store_true",
                    help="live windows: a preview of the payload camera from takeoff (not scored), then the payload "
                         "frames the agent fetches, with ground truth and its decisions; and the chase camera")

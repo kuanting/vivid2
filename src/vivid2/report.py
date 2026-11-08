@@ -7,7 +7,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List
 
-from vivid2.scoring import DEFAULT_WEIGHTS, aggregate, bootstrap_ci
+from vivid2.scoring import DEFAULT_WEIGHTS, aggregate, bootstrap_ci, scaling, stack_label
 
 LAYERS = list(DEFAULT_WEIGHTS) + ["overall"]
 
@@ -73,18 +73,59 @@ def _open_loop_section(results: List[Dict[str, Any]]) -> str:
 reasoning score down. Latency of local models was measured with Unreal closed (uncontended GPU).</p>"""
 
 
-def render(results: List[Dict[str, Any]], title: str) -> str:
-    open_loop = [r for r in results if r.get("mode") == "open_loop"]
-    results = [r for r in results if r.get("mode") != "open_loop"]
-    summary = aggregate(results)
+def _stack_rows(results: List[Dict[str, Any]]) -> str:
     rows = []
-    for agent, s in sorted(summary.items(), key=lambda kv: -(kv[1]["scores"]["overall"]["mean"] or 0)):
+    for agent, s in sorted(aggregate(results).items(), key=lambda kv: -(kv[1]["scores"]["overall"]["mean"] or 0)):
         cells = "".join(_score_cell(s["scores"][k]) for k in LAYERS)
         rows.append(
             f"<tr><td><b>{html.escape(agent)}</b></td><td class='num'>{s['runs']}</td>"
             f"<td class='num'>{100 * s['success_rate']:.0f}%</td><td class='num'>{s['collision_runs']}</td>{cells}</tr>"
         )
+    return "".join(rows)
+
+
+TEAM_MODES = {"central": "Teams, central (one agent commands every drone)",
+              "distributed": "Teams, distributed (one agent per drone, radio only)"}
+
+
+def _team_sections(results: List[Dict[str, Any]]) -> str:
+    """One stack table per team mode, then how each team stack scales with the number of drones."""
+    if not results:
+        return ""
     head = "".join(f"<th>{k}</th>" for k in LAYERS)
+    out = []
+    for mode, title in TEAM_MODES.items():
+        rs = [r for r in results if r["team"].get("mode") == mode]
+        if rs:
+            out.append(f"""<h2>{html.escape(title)}</h2>
+<div class="wrap"><table><tr><th>Stack x drones</th><th>Runs</th><th>Success</th><th>Collision runs</th>{head}</tr>{_stack_rows(rs)}</table></div>""")
+    rows = []
+    for agent, sizes in sorted(scaling(results).items()):
+        for n, s in sizes.items():
+            rows.append(
+                f"<tr><td><b>{html.escape(agent)}</b></td><td class='num'>{n}</td><td class='num'>{s['runs']}</td>"
+                f"<td class='num'>{100 * s['success_rate']:.0f}%</td><td class='num'>{_fmt(s['time_to_find_all_s'], 0)}</td>"
+                f"<td class='num'>{_fmt(s['time_to_90pct_coverage_s'], 0)}</td><td class='num'>{_fmt(s['coverage_pct'])}</td>"
+                f"<td class='num'>{_fmt(s['speedup'], 2)}</td><td class='num'>{_fmt(s['efficiency'], 2)}</td>"
+                f"<td class='num'><b>{_fmt(s['overall'])}</b></td></tr>")
+    if rows:
+        out.append(f"""<h2>Team scaling</h2>
+<div class="wrap"><table><tr><th>Stack</th><th>Drones</th><th>Runs</th><th>Success</th><th>Find all s</th><th>90% coverage s</th>
+<th>Coverage %</th><th>Speedup</th><th>Efficiency</th><th>Overall</th></tr>{''.join(rows)}</table></div>
+<p class="muted">Find all: mission time until every target was found, a target never found counting the whole timeout.
+Speedup: one drone's mean over N drones' mean, on the runs both flew (same scenario, settings and seed). Efficiency:
+speedup / N (1 = N drones are N times as fast).</p>""")
+    return "\n".join(out)
+
+
+def render(results: List[Dict[str, Any]], title: str) -> str:
+    open_loop = [r for r in results if r.get("mode") == "open_loop"]
+    results = [r for r in results if r.get("mode") != "open_loop"]
+    teams = [r for r in results if r.get("team")]
+    singles = [r for r in results if not r.get("team")]
+    head = "".join(f"<th>{k}</th>" for k in LAYERS)
+    stacks = ('<h2>Stacks</h2>\n<div class="wrap"><table><tr><th>Stack</th><th>Runs</th><th>Success</th>'
+              f'<th>Collision runs</th>{head}</tr>{_stack_rows(singles)}</table></div>') if singles else ""
 
     run_rows = []
     for r in sorted(results, key=lambda r: (r["scenario_id"], r["agent"], r["run_id"])):
@@ -93,7 +134,7 @@ def render(results: List[Dict[str, Any]], title: str) -> str:
         status = '<span class="ok">success</span>' if mi["success"] else f'<span class="fail">{_fmt(mi["end_reason"])}</span>'
         run_rows.append(
             "<tr>"
-            f"<td><code>{html.escape(r['run_id'])}</code></td><td>{html.escape(r['agent'])}</td>"
+            f"<td><code>{html.escape(r['run_id'])}</code></td><td>{html.escape(stack_label(r))}</td>"
             f"<td><code>{html.escape(json.dumps(r['params']))}</code> seed {r['seed']}</td><td>{status}</td>"
             f"<td class='num'>{mi['targets_found']}/{mi['targets_total']}</td>"
             f"<td class='num'>{_fmt(mi['mean_time_to_find_s'])}</td><td class='num'>{_fmt(mi['mean_localization_error_m'])}</td>"
@@ -108,10 +149,10 @@ def render(results: List[Dict[str, Any]], title: str) -> str:
 <body><main>
 <h1>{html.escape(title)}</h1>
 <div class="muted">VIVID 2 scorecard · {len(results)} flown runs{f" · {len(open_loop)} open-loop evaluations" if open_loop else ""} · generated {datetime.now():%Y-%m-%d %H:%M}</div>
-<h2>Stacks</h2>
-<div class="wrap"><table><tr><th>Stack</th><th>Runs</th><th>Success</th><th>Collision runs</th>{head}</tr>{''.join(rows)}</table></div>
+{stacks}
+{_team_sections(teams)}
 <p class="muted">Layer scores are 0–100 means with a 95% bootstrap interval over runs. "n/a" means the stack does not expose that layer.
-Overall is the weighted mean of available layers, capped at 25 for any run with a collision.</p>
+Overall is the weighted mean of available layers, capped at 25 for any run with a collision (in a team: any drone's).</p>
 <h2>Runs</h2>
 <div class="wrap"><table><tr><th>Run</th><th>Stack</th><th>Params</th><th>Result</th><th>Found</th><th>TTF s</th><th>Loc err m</th>
 <th>False alarms</th><th>Collisions</th><th>Coverage %</th><th>VLM $</th><th>Overall</th></tr>{''.join(run_rows)}</table></div>

@@ -1,0 +1,9 @@
+// Team benchmark v1 on ForestSAR: forest_team_01 with teams of 1, 2 and 4 drones (3 seeds each).
+// Run it once per team mode: --team central (one agent commands every drone) and --team dist (one agent
+// per drone, radio only). The scorecard's "Team scaling" table compares the sizes.
+{
+  "name": "forest_team_v1",
+  "sim_config_dir": "../sim_config",
+  "scenarios": ["../scenarios/forest_team/forest_team_01.jsonc"],
+  "weights": {"mission": 0.35, "perception": 0.15, "reasoning": 0.15, "planning": 0.10, "control": 0.05, "safety": 0.20}
+}

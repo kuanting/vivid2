@@ -10,12 +10,13 @@ from vivid2.metrics.perception import perception_metrics
 from vivid2.metrics.planning import planning_metrics
 from vivid2.metrics.reasoning import reasoning_metrics
 from vivid2.metrics.safety import safety_metrics
+from vivid2.metrics.team import is_team, team_metrics
 from vivid2.recorder import RunLog
 
 
 def compute_all(log_or_dir: Union[RunLog, str, Path]) -> Dict[str, Any]:
     log = log_or_dir if isinstance(log_or_dir, RunLog) else RunLog.load(Path(log_or_dir))
-    return {
+    out = {
         "mission": mission_metrics(log),
         "perception": perception_metrics(log),
         "reasoning": reasoning_metrics(log),
@@ -23,6 +24,9 @@ def compute_all(log_or_dir: Union[RunLog, str, Path]) -> Dict[str, Any]:
         "control": control_metrics(log),
         "safety": safety_metrics(log),
     }
+    if is_team(log.meta):
+        out["team"] = team_metrics(log)
+    return out
 
 
 __all__ = ["compute_all", "reasoning_metrics"]

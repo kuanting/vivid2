@@ -5,6 +5,10 @@
     vlm            lawnmower + VLM reasoner on raw frames            (VLM-only stack)
     hybrid         lawnmower + ONNX YOLO detector + VLM verification (detector proposes, VLM decides)
     survey         lawnmower, records every frame, no decisions      (frame bank for offline VLM comparison)
+
+With ``--team central`` or ``--team dist`` (scenarios with ``fleet.size``), any of the search stacks
+flies as a team: each drone searches its own strip at its own height and shares its finds
+(``vivid2.stack.reference.team``), as one central agent or one agent per drone over the radio.
 """
 from __future__ import annotations
 
@@ -14,13 +18,14 @@ from dataclasses import dataclass, field
 from typing import Any, Dict
 
 from vivid2.scenario import Run
-from vivid2.stack.base import Agent
+from vivid2.stack.base import Agent, DistributedTeam
 from vivid2.stack.reference.agents import SearchAgent, SurveyAgent
 from vivid2.stack.reference.lowflight import DipSettings
-from vivid2.stack.reference.planners import LawnmowerPlanner
+from vivid2.stack.reference.planners import LawnmowerPlanner, StripPlanner
 from vivid2.stack.reference.reasoners import DetectionThresholdReasoner, VLMReasoner
 
 AGENTS = ("coverage_gt", "coverage_yolo", "vlm", "hybrid", "survey")
+TEAM_MODES = {"central": "central", "dist": "distributed"}  # --team value -> team_mode
 
 
 def make_vlm(opts: Dict[str, Any], closed_loop: bool = False):
@@ -83,6 +88,10 @@ class AgentFactory:
     def __post_init__(self):
         if self.kind not in AGENTS:
             raise ValueError(f"unknown agent {self.kind!r}; choose from {AGENTS}")
+        if self.team is not None and self.team not in TEAM_MODES:
+            raise ValueError(f"unknown team mode {self.team!r}; choose from {sorted(TEAM_MODES)}")
+        if self.team is not None and self.kind == "survey":
+            raise ValueError("the survey agent flies alone; teams search with coverage_gt, coverage_yolo, vlm or hybrid")
         self._vlm = make_vlm(self.opts, closed_loop=True) if self.kind in ("vlm", "hybrid") else None
         self._detector = None
 
@@ -96,7 +105,14 @@ class AgentFactory:
             name += "-verify" if self.verify else "-noverify"
         if self.dip:
             name += "-dip"
+        if self.team is not None:  # central and distributed runs of a team never share a folder
+            name += f"-{self.team}"
         return name
+
+    @property
+    def team(self):
+        """None (one drone), "central" or "dist"."""
+        return self.opts.get("team")
 
     @property
     def dip(self) -> bool:
@@ -137,25 +153,39 @@ class AgentFactory:
             self._detector = make_detector(self.yolo_model)
         return self._detector
 
-    def __call__(self, run: Run) -> Agent:
-        planner = LawnmowerPlanner(sidelap=float(self.opts.get("sidelap", 0.2)))
+    def __call__(self, run: Run):
+        """One Agent, or for ``--team`` a TeamOf (central) or DistributedTeam of one agent per drone."""
+        if self.team is None:
+            return self._agent(run, LawnmowerPlanner(sidelap=self.sidelap), SearchAgent)
+        from vivid2.stack.reference.team import TeamOf, TeamSearchAgent
+
+        n = run.fleet_size
+        agents = [self._agent(run, StripPlanner(i, n, sidelap=self.sidelap), TeamSearchAgent, index=i, size=n)
+                  for i in range(n)]
+        return TeamOf(self.name, agents) if TEAM_MODES[self.team] == "central" else DistributedTeam(self.name, agents)
+
+    @property
+    def sidelap(self) -> float:
+        return float(self.opts.get("sidelap", 0.2))
+
+    def _agent(self, run: Run, planner, cls, **team) -> Agent:
         period = float(self.opts.get("frame_period_s", 1.0 if self._vlm is None else 2.0))
         dip = DipSettings() if self.dip else None
         if self.kind == "survey":
             return SurveyAgent(self.name, planner, frame_period_s=period, dip=dip)
-        kw = {"frame_period_s": period, "verify": self.verify, "dip": dip}
+        kw = {"frame_period_s": period, "verify": self.verify, "dip": dip, **team}
         if self.kind == "coverage_gt":
             from vivid2.stack.reference.perception import GroundTruthPerception
 
-            return SearchAgent(self.name, planner, DetectionThresholdReasoner(0.5),
-                               GroundTruthPerception(run.resolved_targets()), **kw)
+            return cls(self.name, planner, DetectionThresholdReasoner(0.5),
+                       GroundTruthPerception(run.resolved_targets()), **kw)
         if self.kind == "coverage_yolo":
             # One threshold T. With closer looks, half of T is enough to go and look; a report needs
             # the majority of the close-ups (or dip looks) at T.
             t = self.yolo_threshold
             look = t / 2 if self.verify else t
-            return SearchAgent(self.name, planner, DetectionThresholdReasoner(look), self._yolo(),
-                               min_confidence=t, candidate_confidence=look, **kw)
+            return cls(self.name, planner, DetectionThresholdReasoner(look), self._yolo(),
+                       min_confidence=t, candidate_confidence=look, **kw)
         if self.kind == "vlm":
-            return SearchAgent(self.name, planner, VLMReasoner(self._vlm, tiles=self.tiles), None, **kw)
-        return SearchAgent(self.name, planner, VLMReasoner(self._vlm, tiles=self.tiles), self._yolo(), **kw)
+            return cls(self.name, planner, VLMReasoner(self._vlm, tiles=self.tiles), None, **kw)
+        return cls(self.name, planner, VLMReasoner(self._vlm, tiles=self.tiles), self._yolo(), **kw)

@@ -91,6 +91,50 @@ class Run:
         ned = list(self.spec["dut_start"]["ned"])
         return _snap(ned, terrain, self.authored_ground_down_m) if terrain is not None else ned
 
+    @property
+    def fleet_size(self) -> int:
+        return fleet_size(self.spec)
+
+    def resolved_fleet(self, terrain=None) -> List[Dict[str, Any]]:
+        """Every drone's id and launch pad, ``[{"id", "ned", "yaw_deg"}]``, set on the terrain like the start.
+
+        One drone (no ``fleet``, or size 1) sits exactly at ``dut_start``. A team gets explicit
+        ``fleet.drones`` pads or, by default, a grid centred on ``dut_start``, ``spacing_m`` apart.
+        """
+        n = self.fleet_size
+        start = self.spec["dut_start"]
+        if n == 1:
+            name = self.spec["scene"].get("drone_name", "Drone1")
+            return [{"id": name, "ned": self.resolved_start(terrain), "yaw_deg": float(start.get("yaw_deg", 0.0))}]
+        fleet = self.spec["fleet"]
+        if fleet.get("drones"):
+            if len(fleet["drones"]) < n:
+                raise ValueError(f"scenario {self.scenario_id}: fleet.size {n} but only {len(fleet['drones'])} drones listed")
+            pads = [(list(d["ned"]), float(d.get("yaw_deg", start.get("yaw_deg", 0.0)))) for d in fleet["drones"][:n]]
+        else:
+            h = float(fleet.get("spacing_m", DEFAULT_PAD_SPACING_M)) / 2.0
+            n0, e0, d0 = start["ned"]
+            pads = [([n0 + dn * h, e0 + de * h, d0], float(start.get("yaw_deg", 0.0))) for dn, de in GRID_LAYOUT[n]]
+        for i, (a, _) in enumerate(pads):
+            for b, _ in pads[:i]:
+                if np.hypot(a[0] - b[0], a[1] - b[1]) < MIN_PAD_SPACING_M - 1e-9:
+                    raise ValueError(f"scenario {self.scenario_id}: launch pads {b[:2]} and {a[:2]} are closer than "
+                                     f"{MIN_PAD_SPACING_M} m (each pad's 5 m radius is its own)")
+        return [{"id": f"Drone{i + 1}", "ned": _snap(ned, terrain, self.authored_ground_down_m) if terrain is not None
+                 else ned, "yaw_deg": yaw} for i, (ned, yaw) in enumerate(pads)]
+
+
+# A team's automatic launch layout around dut_start, in half-spacings (north, east): a row of two,
+# then a 2 x 2 square. Pads at least 10 m apart keep each drone's 5 m home-pad radius its own.
+GRID_LAYOUT = {2: [(0, -1), (0, 1)], 3: [(-1, -1), (-1, 1), (1, -1)], 4: [(-1, -1), (-1, 1), (1, -1), (1, 1)]}
+DEFAULT_PAD_SPACING_M = 10.0
+MIN_PAD_SPACING_M = 10.0
+
+
+def fleet_size(spec: Dict[str, Any]) -> int:
+    """Number of drones a scenario flies (1 unless ``fleet.size`` says otherwise)."""
+    return int((spec.get("fleet") or {}).get("size", 1))
+
 
 def _snap(ned, terrain, authored_ground_down_m: float) -> List[float]:
     from vivid2.terrain import snap_to_ground

@@ -65,6 +65,9 @@ Subclass `vivid2.stack.base.Agent` and implement `async run(ctx)`. Use:
   `path_done()`), `goto`, `hover`, `return_and_land`.
 - `ctx.pose()`, `ctx.elapsed_s()`, `ctx.should_stop()`: drone pose, mission
   time, and whether the time limit is up.
+- `await ctx.think(fn, *args)`: run your model (a function, in a worker thread, or a
+  coroutine function) and return its answer. Thinking takes mission time; in a team, `think`
+  also charges the time the clock stood still for other drones' photos.
 - `await ctx.sleep(seconds)`: wait in mission time. Pace your agent with this
   and `ctx.elapsed_s()`, not `asyncio.sleep` or the wall clock. VIVID 2 pauses
   the simulator while it records each frame, so wall time runs ahead of mission
@@ -81,6 +84,10 @@ build it in `AgentFactory.__call__`; the CLI's `--agent` choices come from that
 list. From Python, pass any callable that takes a `Run` and returns an `Agent`
 to `vivid2.runner.execute_campaign`. Put every setting that changes behaviour in
 `Agent.describe()`: resume compares it to decide whether a run must be redone.
+
+For a team of drones (a `FleetAgent` commanding every drone, or one agent per drone over a
+simulated radio), see [teams.md](teams.md). Run your models through `await ctx.think(fn, ...)`:
+in a team it charges the time the clock stood still for other drones' photos.
 
 Rules: do not read `frame.gt`, and do not query simulator ground truth APIs
 (`get_ground_truth_*`, object poses). Published results will use hidden

@@ -7,6 +7,7 @@ Any collision caps the overall score (safety gate).
 """
 from __future__ import annotations
 
+import json
 import math
 from typing import Any, Dict, Iterable, List, Optional
 
@@ -67,6 +68,7 @@ def layer_scores(m: Dict[str, Any]) -> Dict[str, Optional[float]]:
         safety -= 10.0 if s.get("speed_limit_exceeded") else 0.0
         safety -= 15.0 if s.get("energy_budget_exceeded") else 0.0
         safety -= 10.0 if not s.get("returned_home", True) else 0.0
+        safety -= min(30.0, 3.0 * s.get("separation_violation_s", 0.0))  # teams: drones too close together
 
     scores = {
         "mission": mission,
@@ -103,11 +105,17 @@ def bootstrap_ci(values: Iterable[float], n_boot: int = 2000, alpha: float = 0.0
     }
 
 
+def stack_label(r: Dict[str, Any]) -> str:
+    """The agent, plus the team size for team runs (``coverage_gt-central x4``)."""
+    team = r.get("team")
+    return f"{r['agent']} x{team['size']}" if team else r["agent"]
+
+
 def aggregate(results: List[Dict[str, Any]]) -> Dict[str, Dict[str, Any]]:
-    """Group run results by agent and summarise each score with a bootstrap CI."""
+    """Group run results by agent (and team size) and summarise each score with a bootstrap CI."""
     by_agent: Dict[str, List[Dict[str, Any]]] = {}
     for r in results:
-        by_agent.setdefault(r["agent"], []).append(r)
+        by_agent.setdefault(stack_label(r), []).append(r)
     summary = {}
     for agent, rs in by_agent.items():
         keys = list(DEFAULT_WEIGHTS) + ["overall"]
@@ -118,3 +126,44 @@ def aggregate(results: List[Dict[str, Any]]) -> Dict[str, Dict[str, Any]]:
             "scores": {k: bootstrap_ci(r["scores"].get(k) for r in rs) for k in keys},
         }
     return summary
+
+
+def _pair_key(r: Dict[str, Any]) -> str:
+    """The same scenario, settings and seed, whatever the team size."""
+    params = {k: v for k, v in (r.get("params") or {}).items() if k != "fleet.size"}
+    return json.dumps([r["scenario_id"], params, r["seed"]], sort_keys=True, default=str)
+
+
+def scaling(results: List[Dict[str, Any]]) -> Dict[str, Dict[int, Dict[str, Any]]]:
+    """How a team stack speeds up with more drones: {agent: {size: summary}}.
+
+    ``speedup`` is the mean time to find every target with one drone over the mean with N drones,
+    on the runs both sizes flew (same scenario, settings and seed); a target never found counts
+    the whole timeout. ``efficiency`` is speedup / N: 1 means N drones are N times as fast.
+    """
+    by: Dict[str, Dict[int, List[Dict[str, Any]]]] = {}
+    for r in results:
+        if r.get("team") and (r["metrics"].get("team") or {}).get("time_to_find_all_s") is not None:
+            by.setdefault(r["agent"], {}).setdefault(int(r["team"]["size"]), []).append(r)
+    out: Dict[str, Dict[int, Dict[str, Any]]] = {}
+    for agent, sizes in by.items():
+        one = {_pair_key(r): r["metrics"]["team"]["time_to_find_all_s"] for r in sizes.get(1, [])}
+        out[agent] = {}
+        for n, rs in sorted(sizes.items()):
+            t_all = [r["metrics"]["team"]["time_to_find_all_s"] for r in rs]
+            cov_t = [r["metrics"]["planning"].get("time_to_90pct_coverage_s") for r in rs]
+            paired = [(one[_pair_key(r)], r["metrics"]["team"]["time_to_find_all_s"]) for r in rs if _pair_key(r) in one]
+            speedup = (float(np.mean([a for a, _ in paired])) / float(np.mean([b for _, b in paired]))
+                       if paired and np.mean([b for _, b in paired]) > 0 else None)
+            out[agent][n] = {
+                "runs": len(rs),
+                "success_rate": float(np.mean([r["metrics"]["mission"]["success"] for r in rs])),
+                "time_to_find_all_s": float(np.mean(t_all)),
+                "time_to_90pct_coverage_s": float(np.mean(cov_t)) if all(c is not None for c in cov_t) else None,
+                "coverage_pct": float(np.mean([r["metrics"]["planning"]["coverage_pct"] for r in rs])),
+                "overall": float(np.mean([r["scores"]["overall"] for r in rs])),
+                "paired_runs": len(paired),
+                "speedup": speedup,
+                "efficiency": speedup / n if speedup is not None else None,
+            }
+    return out

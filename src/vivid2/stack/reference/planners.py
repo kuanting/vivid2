@@ -34,10 +34,7 @@ class LawnmowerPlanner(Planner):
         # axis, body-right) maps to world east, so the image width sets spacing.
         across, _ =nadir_footprint(mission.altitude_m, image_wh[0], image_wh[1], camera_fov_deg)
         spacing = max(1.0, across * (1.0 - self.sidelap))
-        e_min, e_max = poly[:, 1].min(), poly[:, 1].max()
-        lanes = np.arange(e_min + spacing / 2.0, e_max, spacing)
-        if len(lanes) == 0:
-            lanes = np.array([(e_min + e_max) / 2.0])
+        lanes = self._lanes(poly[:, 1].min(), poly[:, 1].max(), spacing)
 
         waypoints: List[List[float]] = []
         flip = False
@@ -52,3 +49,32 @@ class LawnmowerPlanner(Planner):
             waypoints.extend(seg[::-1] if flip else seg)
             flip = not flip
         return waypoints
+
+    def _lanes(self, e_min: float, e_max: float, spacing: float) -> np.ndarray:
+        """East positions of the north-south lanes between e_min and e_max."""
+        lanes = np.arange(e_min + spacing / 2.0, e_max, spacing)
+        if len(lanes) == 0:
+            lanes = np.array([(e_min + e_max) / 2.0])
+        return lanes
+
+
+class StripPlanner(LawnmowerPlanner):
+    """A lawnmower over one of ``parts`` equal-width east-west strips of the search polygon.
+
+    The reference team gives each drone its own strip. Lanes are planned within the strip, so the
+    strips' lanes together cover the polygon like one drone's would, each strip from its west edge.
+    """
+
+    name = "lawnmower_strips"
+
+    def __init__(self, part: int, parts: int, sidelap: float = 0.2, edge_inset_m: float = 2.0):
+        super().__init__(sidelap, edge_inset_m)
+        if not 0 <= part < parts:
+            raise ValueError(f"strip {part} of {parts}")
+        self.part = part
+        self.parts = parts
+
+    def _lanes(self, e_min: float, e_max: float, spacing: float) -> np.ndarray:
+        width = (e_max - e_min) / self.parts
+        lo = e_min + self.part * width
+        return super()._lanes(lo, lo + width, spacing)

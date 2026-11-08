@@ -73,6 +73,31 @@
   weighted overall score.
 - **Safety gate.** Any collision caps the overall score at 25.
 
+## Teams of drones
+
+A scenario's `fleet.size` (up to 4) puts one drone per launch pad in the scene (`Drone1` to
+`DroneN`, the same robot config). The run then goes through `runner.execute_team_run` and
+`vivid2/team_runtime.py`:
+
+- **One clock, photo batches.** Project AirSim's clock is world-wide: pausing it stops every
+  drone. Drones that ask for a photo at the same moment share one lockstep step: one pause, one
+  GetImages per drone, one capture step, all photos recorded paused, one resume. A photo still
+  costs 0.25 s of mission time.
+  - All of a batch's photos are stamped within its step (probe: 0–6 ms after the request).
+  - One batch of 4 photos took 1.9 s of wall time, against 1.2 s for one photo
+    (`tools/probe_fleet.py`, 2026-11-08).
+- **Navigation photos** (fetched running) wait for a batch to finish and hold the next one off,
+  so a pause never holds one past Project AirSim's 5 s limit.
+- **Fair thinking.** A pause ledger records when the clock stood still; `ctx.think` charges the
+  pause that overlapped a model call back in mission time.
+- **Every record is tagged** with its `drone`. Frame ids stay unique across the team.
+- **Single-drone runs are untouched:** a scenario without `fleet` takes the old path. The
+  golden tests (`tests/golden/`) pin its run ids, config hashes, scene and scores, and a team
+  run's config hash includes `team_runtime.FLEET_VERSION`.
+
+See [teams.md](teams.md) for the agent API (central `FleetAgent` and distributed
+`DistributedTeam` with the radio), scoring and the reference team.
+
 ## Coordinate conventions
 
 - World is NED in metres, with the origin at the Unreal world origin (0, 0, 0),

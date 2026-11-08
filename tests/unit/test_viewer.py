@@ -90,3 +90,17 @@ def test_preview_panel_has_the_scored_layout_and_is_marked():
     assert v._draw_preview(None, "loading the scene", "").shape == (720, 1440, 3)   # camera not known yet
     blank = v._draw_preview(None, "warm-up", "", has_preview=False)
     assert blank.shape == (720, 1440, 3)
+
+
+def test_team_window_tiles_each_drone_s_newest_photo():
+    v = _viewer()
+    v._lock = __import__("threading").Lock()
+    v._team, v._live, v._payload, v._dirty, v._preview_msg = {}, False, None, False, None
+    for i, grey in ((1, 50), (2, 100), (3, 150)):
+        frame = type("F", (), {"rgb": np.full((1440, 1920, 3), grey, np.uint8), "depth": None, "gt": [],
+                               "frame_id": i, "t_ns": 0})()
+        v.show_frame(frame, extra=f"Drone{i}", drone=f"Drone{i}")
+    out = v._draw_team(v._team, "Drone1 60 m  Drone2 66 m  Drone3 72 m  t 12 s")
+    assert out.shape == (2 * 240 + 28, 2 * 320, 3)
+    assert out[120, 160].mean() == 50 and out[120, 480].mean() == 100 and out[360, 160].mean() == 150
+    assert out[360, 480].mean() == 0  # no fourth drone

@@ -41,6 +41,9 @@ DISPLAY_WIDTH = 960  # RGB panel width on screen; larger cameras are scaled down
 GREEN, YELLOW, GREY, MAGENTA, RED, WHITE = (60, 220, 60), (0, 220, 255), (150, 150, 150), (255, 0, 255), (0, 0, 255), (255, 255, 255)
 
 
+TEAM_TILE = (320, 240)  # team window: one thumbnail per drone
+
+
 class RunViewer:
     def __init__(self, chase_size=(420, 236), refresh_hz: float = 20.0):
         import cv2
@@ -58,6 +61,7 @@ class RunViewer:
         self._preview_msg = None
         self._preview: Optional[np.ndarray] = None
         self._has_preview: Optional[bool] = None  # None until the runner has looked for the camera
+        self._team: Dict[str, Dict[str, Any]] = {}  # team runs: each drone's newest photo (thumbnail)
         self._dirty = False
         self._running = True
         self._thread = threading.Thread(target=self._loop, name="vivid2-viewer", daemon=True)
@@ -74,6 +78,7 @@ class RunViewer:
         with self._lock:
             self._status = status
             self._payload = None
+            self._team = {}
             self._live = True
             self._phase = "loading the scene"
             self._progress = ""
@@ -101,6 +106,12 @@ class RunViewer:
                 self._progress = f"height {height_m:.0f} m  t {elapsed_s:.0f} s"
                 self._dirty = True
 
+    def set_team_progress(self, heights: Dict[str, float], elapsed_s: float) -> None:
+        """Every team drone's height and the mission time (preview status line, and the team window)."""
+        with self._lock:
+            self._progress = "  ".join(f"{d} {h:.0f} m" for d, h in heights.items()) + f"  t {elapsed_s:.0f} s"
+            self._dirty = True
+
     @property
     def live(self) -> bool:
         return self._live
@@ -116,9 +127,17 @@ class RunViewer:
                     self._dirty = True
         return cb
 
-    def show_frame(self, frame, seg: Optional[np.ndarray] = None, extra: str = "") -> None:
-        """A frame the agent fetched (``vivid2.stack.base.Frame``), plus its segmentation image."""
+    def show_frame(self, frame, seg: Optional[np.ndarray] = None, extra: str = "", drone: Optional[str] = None) -> None:
+        """A frame the agent fetched (``vivid2.stack.base.Frame``), plus its segmentation image.
+
+        In a team (``drone`` given) the payload window shows the newest photo of any drone, and the
+        team window a thumbnail of each drone's newest photo.
+        """
         try:
+            if drone is not None:
+                thumb = self.cv2.resize(np.ascontiguousarray(frame.rgb), TEAM_TILE, interpolation=self.cv2.INTER_AREA)
+                with self._lock:
+                    self._team[drone] = {"image": thumb, "frame_id": frame.frame_id, "extra": extra}
             with self._lock:
                 self._payload = {"frame_id": frame.frame_id, "image": frame.rgb, "depth": frame.depth, "seg": seg,
                                  "gt": list(frame.gt or []), "dets": [], "decision": None, "extra": extra,
@@ -224,6 +243,23 @@ class RunViewer:
         cv2.putText(img, line2, (8, h - 8), cv2.FONT_HERSHEY_SIMPLEX, 0.5, WHITE, 1, cv2.LINE_AA)
         return img
 
+    def _draw_team(self, team: Dict[str, Dict[str, Any]], progress: str) -> np.ndarray:
+        """Each drone's newest photo, two to a row, with the drones' heights below."""
+        cv2 = self.cv2
+        tiles = []
+        for drone in sorted(team):
+            t = team[drone]["image"].copy()
+            cv2.rectangle(t, (0, 0), (t.shape[1], 24), (0, 0, 0), -1)
+            cv2.putText(t, f"{drone}  frame {team[drone]['frame_id']}", (6, 17), cv2.FONT_HERSHEY_SIMPLEX, 0.5, WHITE, 1,
+                        cv2.LINE_AA)
+            tiles.append(t)
+        if len(tiles) % 2:
+            tiles.append(np.zeros_like(tiles[0]))
+        grid = np.vstack([np.hstack(tiles[i:i + 2]) for i in range(0, len(tiles), 2)])
+        bar = np.zeros((28, grid.shape[1], 3), np.uint8)
+        cv2.putText(bar, progress, (6, 19), cv2.FONT_HERSHEY_SIMPLEX, 0.5, WHITE, 1, cv2.LINE_AA)
+        return np.vstack([grid, bar])
+
     def _draw_preview(self, img: Optional[np.ndarray], phase: str, progress: str,
                       has_preview: Optional[bool] = None) -> np.ndarray:
         """The live preview before the first scored frame, in the same layout as a scored frame."""
@@ -302,6 +338,7 @@ class RunViewer:
                     dirty, p, chase_msg = self._dirty, self._payload, getattr(self, "_chase_msg", None)
                     live, preview_msg, phase, progress = self._live, self._preview_msg, self._phase, self._progress
                     has_preview = self._has_preview
+                    team = dict(self._team)
                     self._chase_msg = None
                     self._preview_msg = None
                     self._dirty = False
@@ -331,6 +368,11 @@ class RunViewer:
                         if "p" not in placed:
                             cv2.moveWindow("VIVID2 Payload", 40, 40)
                             placed.add("p")
+                    if team:
+                        cv2.imshow("VIVID2 Team", self._draw_team(team, progress))
+                        if "t" not in placed:
+                            cv2.moveWindow("VIVID2 Team", 1490, 320)  # below the chase window
+                            placed.add("t")
                     if chase is not None and getattr(chase, "size", 0):
                         cv2.imshow("VIVID2 Chase", cv2.resize(chase, self.chase_size))
                         if "c" not in placed:

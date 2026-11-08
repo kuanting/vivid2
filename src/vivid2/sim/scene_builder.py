@@ -4,7 +4,8 @@ The base scene and robot configs are ordinary Project AirSim JSONC files in
 the campaign's sim_config directory. The builder:
   * points the DUT actor at the scenario's robot config and start pose,
   * adds target actors (hikers, debris...) and distractors as ``spawn-objects``,
-  * turns on bbox annotations for those targets on the payload camera.
+  * turns on bbox annotations for those targets on the payload camera,
+  * for a team, clones the DUT actor into Drone1..DroneN, one per launch pad.
 The result is passed to ``World.load_scene(dict)``, so nothing is written to disk.
 """
 from __future__ import annotations
@@ -21,7 +22,9 @@ def _fmt3(v) -> str:
 
 
 def build_scene(run: Run, sim_config_dir: str, targets: List[Dict[str, Any]],
-                distractors: Optional[List[Dict[str, Any]]] = None, start_ned=None) -> Dict[str, Any]:
+                distractors: Optional[List[Dict[str, Any]]] = None, start_ned=None,
+                fleet: Optional[List[Dict[str, Any]]] = None) -> Dict[str, Any]:
+    """``fleet`` (``Run.resolved_fleet()``): a team's drones; one drone uses ``start_ned``."""
     spec = run.spec
     sc = spec["scene"]
     scene = load_jsonc(os.path.join(sim_config_dir, sc["base"]))
@@ -33,6 +36,19 @@ def build_scene(run: Run, sim_config_dir: str, targets: List[Dict[str, Any]],
         raise ValueError(f"base scene {sc['base']} has no robot actor named {drone_name}")
     actor["origin"] = {"xyz": _fmt3(start_ned if start_ned is not None else spec["dut_start"]["ned"]), "rpy-deg": f"0 0 {spec['dut_start'].get('yaw_deg', 0.0)}"}
     actor["robot-config"] = _annotate(robot, sc.get("camera", "Payload"), [t["id"] for t in targets])
+    if fleet is not None and len(fleet) > 1:
+        if "px4" in str(robot.get("controller", {}).get("type", "")).lower():
+            raise ValueError(f"{sc['robot_config']}: teams fly simple_flight only (PX4 SITL ports are per vehicle)")
+        # Every drone gets the same robot config, as an inline dict: the simulator only expands
+        # file names when it loads a scene from a file.
+        team = []
+        for d in fleet:
+            a = copy.deepcopy(actor)
+            a["name"] = d["id"]
+            a["origin"] = {"xyz": _fmt3(d["ned"]), "rpy-deg": f"0 0 {d.get('yaw_deg', 0.0)}"}
+            team.append(a)
+        i = scene["actors"].index(actor)
+        scene["actors"][i:i + 1] = team
 
     spawn = scene.setdefault("spawn-objects", {}).setdefault("sim-packaged", [])
     for t in list(targets) + list(distractors if distractors is not None else run.spec.get("distractors", [])):
