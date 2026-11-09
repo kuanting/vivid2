@@ -249,7 +249,7 @@ class LowFlightMixin:
 
         def candidates() -> List[Clearing]:
             return [c for c in self._canopy.clearings(self.low.min_radius_m, self._dip_spacing, exclude=visited)
-                    if math.hypot(c.n - home[0], c.e - home[1]) > HOME_SKIP_M]
+                    if math.hypot(c.n - home[0], c.e - home[1]) > HOME_SKIP_M and self._may_descend_at(c.n, c.e)]
 
         planned = candidates()
         self._lf_event(ctx, "dip_plan", spots=[[round(c.n, 1), round(c.e, 1), round(c.radius_m, 1)] for c in planned])
@@ -307,6 +307,10 @@ class LowFlightMixin:
 
     def _lf_describe(self) -> Any:
         return self.low.describe() if self.low is not None else False
+
+    def _may_descend_at(self, n: float, e: float) -> bool:
+        """Whether this drone may leave its survey height over (n, e) for a closer look or a dip."""
+        return True
 
 
 def _scalar_params(obj: Any) -> Optional[Dict[str, Any]]:
@@ -400,14 +404,14 @@ class SearchAgent(LowFlightMixin, Agent):
     async def run(self, ctx: MissionContext) -> None:
         m = ctx.mission
         wh, fov = await camera_geometry(ctx)
-        path = self.planner.plan(m, fov, wh)
         self._survey_down = m.ground_down_m - m.altitude_m
+        path = self._plan(m, fov, wh)
         self._reported: List[np.ndarray] = []
         self._dismissed: List[np.ndarray] = []
         self._verifications = 0
         self._lf_start(m, wh, fov)
 
-        await ctx.controller.takeoff(self._survey_down)
+        await self._depart(ctx, path)
         here, _ = ctx.pose()
         self._path = [[float(v) for v in here]] + [list(w) for w in path]  # where the flight starts counts as the first point
         await ctx.controller.fly_path(path, m.max_speed_mps)
@@ -432,7 +436,19 @@ class SearchAgent(LowFlightMixin, Agent):
 
         if self.low is not None and not finished and not ctx.should_stop():
             await self._lf_tour(ctx, self._dip_look)
-        await ctx.controller.return_and_land(m.start_ned, m.max_speed_mps)
+        await self._go_home(ctx)
+
+    # -- hooks for a drone flying with others (stack/reference/team.py) -------------------
+    def _plan(self, mission, fov: float, wh) -> List[List[float]]:
+        """The survey path."""
+        return self.planner.plan(mission, fov, wh)
+
+    async def _depart(self, ctx: MissionContext, path: List[List[float]]) -> None:
+        """Take off to the survey height; the survey path starts from there."""
+        await ctx.controller.takeoff(self._survey_down)
+
+    async def _go_home(self, ctx: MissionContext) -> None:
+        await ctx.controller.return_and_land(ctx.mission.start_ned, ctx.mission.max_speed_mps)
 
     async def _survey_step(self, ctx: MissionContext, frame: Frame) -> str:
         """Assess one survey frame: "continue", "resumed" (after a closer look) or "stop"."""
@@ -444,6 +460,8 @@ class SearchAgent(LowFlightMixin, Agent):
             ned = geolocate(frame, assessment.pixel[0], assessment.pixel[1], m.ground_down_m, m.terrain)
             if ned is not None and self._is_new(ned, self._reported + self._dismissed):
                 if checking:
+                    if not self._may_descend_at(float(ned[0]), float(ned[1])):
+                        return "continue"  # not this drone's to look at closer (a teammate's area)
                     self._verifications += 1
                     report = await self._verify(ctx, frame, assessment, ned, self._survey_down)
                     if report is not None:

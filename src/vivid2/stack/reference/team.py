@@ -1,20 +1,28 @@
-"""Reference team stack: each drone searches its own strip at its own height and shares its finds.
+"""Reference team stack: each drone searches its own strip and shares its finds.
 
 The simplest team that is safe and does not waste effort, as a floor for team algorithms:
 
 * **Strips.** The search area is cut into equal east-west strips, one per drone
-  (``StripPlanner``); each drone flies the reference lawnmower over its own strip.
-* **Height layers.** Drone *i* flies ``i x (min_separation_m + 1)`` above the survey altitude
-  (60/66/72/78 m for four drones at 60 m), so drones in transit never meet at the same height.
-  Each climbs and lands vertically over its own pad; pads are at least 10 m apart.
+  (``StripPlanner``). Each drone flies the reference lawnmower over its own strip **at the
+  mission's survey height**, so its photos are the same as a lone drone's.
+* **Transit heights.** To reach its strip and to come home, a drone flies one layer
+  (``min_separation_m`` + 2 m) or more above the survey height: the drone whose strip starts
+  farthest from the pads flies highest. So a drone passing over a nearer strip is always above
+  the drone climbing or descending there, and two drones in transit never share a height.
+* **The pads' keep-out circle.** Drones climb and land vertically over their own pads (at least
+  10 m apart). No drone flies across the circle around the pads: each enters and leaves it
+  straight along its own pad's direction from the centre, and survey lanes go around it. So a
+  drone climbing or landing never has another one passing over it.
+* **Closer looks and dips** only in the drone's own strip (a candidate in a teammate's strip is
+  left to that teammate), and only once no teammate heard from recently is within
+  ``clear_radius_m`` horizontally. The same check comes before every climb or descent between
+  survey and transit height.
 * **Sharing.** Over the radio (``ctx.radio``) a drone tells its teammates every candidate it
   goes to look at closer (a claim), every person it reports or dismisses, and where it is, once a
   second. A spot a teammate claimed or reported is left alone; the search ends when the team has
   found everyone.
 * **One beat.** Every drone takes its photos on the same beat of mission time, so the simulator
   takes the team's photos together, in one lockstep batch.
-* **Clear below.** Before descending for a closer look or a dip, a drone waits (up to a minute)
-  until no teammate it has heard from in the last 5 s is within 30 m horizontally.
 
 The same agents run in both team modes. Distributed: one per drone, over the scenario's radio.
 Central (``TeamOf``): one FleetAgent runs them all over an ideal in-memory radio. Dynamic
@@ -24,7 +32,6 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
-import dataclasses
 import math
 from typing import Any, Dict, List, Optional, Sequence
 
@@ -32,29 +39,68 @@ import numpy as np
 
 from vivid2.radio import Radio, RadioProfile
 from vivid2.stack.base import Agent, FleetAgent, FleetContext, MissionContext
-from vivid2.stack.reference.agents import SearchAgent
+from vivid2.stack.reference.agents import VERIFY_DESCENT_MPS, SearchAgent
+from vivid2.stack.reference.planners import StripPlanner
 
-CLEAR_RADIUS_M = 30.0  # no teammate this close (horizontally) before a drone descends
+CLEAR_RADIUS_M = 30.0  # no teammate this close (horizontally) before a drone changes height
 CLEAR_WAIT_MAX_S = 60.0
 POSITION_PERIOD_S = 1.0
 POSITION_FRESH_S = 5.0
 BEAT_TOLERANCE_S = 0.1  # a photo this close to the beat counts as on it
+KEEP_OUT_MARGIN_M = 15.0  # the pads' keep-out circle reaches this far past the outermost pad
+# Layers are this much more than the separation limit apart: real drones hold a height to about
+# half a metre, and a drone circling the pads crosses the others' lines in, a layer above or below.
+LAYER_MARGIN_M = 2.0
+ARC_STEP_DEG = 30.0  # waypoints along the keep-out circle
+WAIT_STEP_S = 0.5
 
 
 def layer_m(mission) -> float:
-    """Height between two drones' layers: the separation limit plus a metre."""
-    return float(mission.min_separation_m if mission.min_separation_m is not None else 5.0) + 1.0
+    """Height between two transit layers: the separation limit plus LAYER_MARGIN_M."""
+    return float(mission.min_separation_m if mission.min_separation_m is not None else 5.0) + LAYER_MARGIN_M
 
 
-class _AtLayer:
-    """A drone's context with the mission's survey altitude raised to this drone's layer."""
+def _angle(c: np.ndarray, p) -> float:
+    return math.atan2(float(p[1]) - c[1], float(p[0]) - c[0])
 
-    def __init__(self, ctx: MissionContext, mission):
-        self._ctx = ctx
-        self.mission = mission
 
-    def __getattr__(self, name):
-        return getattr(self._ctx, name)
+def _on_circle(c: np.ndarray, r: float, a: float, down: float) -> List[float]:
+    return [float(c[0] + r * math.cos(a)), float(c[1] + r * math.sin(a)), float(down)]
+
+
+def arc(c: np.ndarray, r: float, a0: float, a1: float, down: float) -> List[List[float]]:
+    """Waypoints along the circle from angle a0 to a1 (the shorter way, a1 included)."""
+    d = (a1 - a0 + math.pi) % (2 * math.pi) - math.pi
+    n = max(1, math.ceil(abs(d) / math.radians(ARC_STEP_DEG)))
+    return [_on_circle(c, r, a0 + d * k / n, down) for k in range(1, n + 1)]
+
+
+def around(path: List[List[float]], c: np.ndarray, r: float) -> List[List[float]]:
+    """The path with every leg that would cross the circle routed around it, at the leg's height."""
+    out: List[List[float]] = []
+    for w in path:
+        p = np.asarray(w[:2], float)
+        if np.linalg.norm(p - c) < r:  # a waypoint inside: move it out to the circle
+            w = _on_circle(c, r, _angle(c, p), w[2])
+        if out:
+            a, b = np.asarray(out[-1][:2], float), np.asarray(w[:2], float)
+            ab = b - a
+            L2 = float(ab @ ab)
+            if L2 > 1e-9:
+                # where the leg a + t*ab meets the circle
+                f = a - c
+                bq, cq = 2 * float(f @ ab), float(f @ f) - r * r
+                disc = bq * bq - 4 * L2 * cq
+                if disc > 0:
+                    s = math.sqrt(disc)
+                    t0, t1 = (-bq - s) / (2 * L2), (-bq + s) / (2 * L2)
+                    if 0 < t0 < 1 and 0 < t1 < 1:
+                        p0, p1 = a + t0 * ab, a + t1 * ab
+                        z = out[-1][2]
+                        out.append([float(p0[0]), float(p0[1]), z])
+                        out.extend(arc(c, r, _angle(c, p0), _angle(c, p1), z))
+        out.append([float(v) for v in w])
+    return out
 
 
 class TeamSearchAgent(SearchAgent):
@@ -68,18 +114,97 @@ class TeamSearchAgent(SearchAgent):
 
     def describe(self) -> Dict[str, Any]:
         d = super().describe()
-        d["team"] = {"strategy": "strips+layers", "size": self.size, "clear_radius_m": self.clear_radius_m,
-                     "shares": ["claim", "found", "dismissed", "position"]}
+        d["team"] = {"strategy": "strips+transit_layers", "size": self.size, "clear_radius_m": self.clear_radius_m,
+                     "keep_out_margin_m": KEEP_OUT_MARGIN_M, "layer_margin_m": LAYER_MARGIN_M, "shares": ["claim", "found", "dismissed", "position"]}
         return d
 
     async def run(self, ctx: MissionContext) -> None:
-        m = ctx.mission
         self._heard: Dict[str, tuple] = {}  # teammate -> (mission time, NED)
         self._from_team: List[np.ndarray] = []
         self._last_told_s = -1e9
         self._waited_s = 0.0
-        mine = dataclasses.replace(m, altitude_m=m.altitude_m + self.index * layer_m(m))
-        await super().run(_AtLayer(ctx, mine))
+        self._geo: Optional[Dict[str, Any]] = None
+        await super().run(ctx)
+
+    # -- where this drone flies ----------------------------------------------------------------
+    def _plan(self, mission, fov: float, wh) -> List[List[float]]:
+        path = super()._plan(mission, fov, wh)
+        team = mission.team or []
+        if self.size <= 1 or len(team) != self.size:
+            return path  # flying alone: the single-drone flight
+        pads = np.array([t["start_ned"][:2] for t in team], float)
+        c = pads.mean(axis=0)
+        r = float(np.linalg.norm(pads - c, axis=1).max()) + KEEP_OUT_MARGIN_M
+        sidelap = getattr(self.planner, "sidelap", 0.2)
+        inset = getattr(self.planner, "inset", 2.0)
+        starts = []
+        for j in range(self.size):
+            pj = path if j == self.index else StripPlanner(j, self.size, sidelap, inset).plan(mission, fov, wh)
+            pj = around(pj, c, r) if pj else pj
+            starts.append(np.asarray(pj[0][:2], float) if pj else c)
+        order = sorted(range(self.size), key=lambda j: (float(np.linalg.norm(starts[j] - c)), j))
+        rank = order.index(self.index)
+        poly = np.asarray(mission.search_polygon_ne, float)
+        width = (poly[:, 1].max() - poly[:, 1].min()) / self.size
+        lo = poly[:, 1].min() + self.index * width
+        self._geo = {
+            "centre": c, "radius": r, "pad": np.asarray(mission.start_ned, float),
+            "transit_down": self._survey_down - (rank + 1) * layer_m(mission), "rank": rank,
+            "strip_e": (lo, lo + width),
+        }
+        return around(path, c, r)
+
+    def _radial(self) -> List[float]:
+        g = self._geo
+        return _on_circle(g["centre"], g["radius"], _angle(g["centre"], g["pad"]), g["transit_down"])
+
+    async def _fly(self, ctx, waypoints: List[List[float]]) -> None:
+        """Fly a route, keeping in touch with the team, until it is flown."""
+        await ctx.controller.fly_path(waypoints, ctx.mission.max_speed_mps)
+        while not ctx.controller.path_done() and not ctx.should_stop():
+            self._listen(ctx)
+            self._tell_position(ctx)
+            await ctx.sleep(WAIT_STEP_S)
+
+    async def _depart(self, ctx, path: List[List[float]]) -> None:
+        if self._geo is None:
+            return await super()._depart(ctx, path)
+        g = self._geo
+        await ctx.controller.takeoff(g["transit_down"])  # vertically over the pad
+        self._tell_position(ctx)
+        start = path[0]
+        route = [self._radial()]  # out of the keep-out circle along this pad's own direction
+        route += arc(g["centre"], g["radius"], _angle(g["centre"], g["pad"]), _angle(g["centre"], start),
+                     g["transit_down"])
+        route.append([start[0], start[1], g["transit_down"]])
+        await self._fly(ctx, route)
+        await self._clear_below(ctx, start[:2])
+        await ctx.controller.goto(start, VERIFY_DESCENT_MPS)  # down to the survey height
+
+    async def _go_home(self, ctx) -> None:
+        if self._geo is None:
+            return await super()._go_home(ctx)
+        g = self._geo
+        pos, _ = ctx.pose()
+        await self._clear_below(ctx, pos[:2])
+        if pos[2] > g["transit_down"]:
+            await ctx.controller.goto([pos[0], pos[1], g["transit_down"]], VERIFY_DESCENT_MPS)
+        a = _angle(g["centre"], pos)
+        route = []
+        if np.linalg.norm(pos[:2] - g["centre"]) > g["radius"]:
+            route.append(_on_circle(g["centre"], g["radius"], a, g["transit_down"]))
+        route += arc(g["centre"], g["radius"], a, _angle(g["centre"], g["pad"]), g["transit_down"])
+        route.append(self._radial())
+        await self._fly(ctx, route)
+        await super()._go_home(ctx)  # straight in along the pad's own direction, then down
+
+    def _may_descend_at(self, n: float, e: float) -> bool:
+        g = self._geo
+        if g is None:
+            return True
+        lo, hi = g["strip_e"]
+        inside = lo <= e < hi or (self.index == self.size - 1 and e == hi)
+        return inside and math.hypot(n - g["centre"][0], e - g["centre"][1]) > g["radius"]
 
     # -- the radio -------------------------------------------------------------------------
     def _listen(self, ctx) -> None:

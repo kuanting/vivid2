@@ -46,12 +46,16 @@ Any reference stack (`coverage_gt`, `coverage_yolo`, `vlm`, `hybrid`, with `--ve
 
 `forest_team_01` (`campaigns/forest_team_v1.jsonc`) has four hikers scattered over 650 × 550 m
 of ForestSAR at dusk, three times the single-drone area. It is flown with 1, 2 and 4 drones,
-3 seeds each. Its limits are set so that one drone cannot find everyone. Offline, with the
-reference team:
+3 seeds each. Its limits are set so that one drone cannot find everyone. Offline (every hiker
+in view counts as seen), with the reference team:
 - **one drone** surveys 70 % of the area before the 480 s timeout, finds 2 of 4 hikers, and
   runs past its battery;
-- **two drones** find everyone in about 300 s;
-- **four drones** find everyone in about 150 s.
+- **two drones** find everyone in about 310 s;
+- **four drones** find everyone in 150–230 s, depending on where the hikers lie (the strips
+  holding two hikers take longest).
+
+Live, dusk and fog hide some hikers from 60 m whatever the team size: finding them is part of
+the challenge (closer looks, dips, lower flight).
 
 ## Writing a team stack
 
@@ -153,9 +157,17 @@ The six layers and weights are the same as for one drone. A team is scored as a 
 ## The reference team
 
 `vivid2/stack/reference/team.py` is the floor for team algorithms, safe and simple:
-- **Strips:** each drone flies the reference lawnmower over its own equal-width east–west strip.
-- **Height layers:** drone *i* flies `i × (min_separation_m + 1)` above the survey height
-  (60/66/72/78 m), and climbs and lands vertically over its own pad.
+- **Strips at one height:** each drone flies the reference lawnmower over its own equal-width
+  east–west strip at the survey height, so its photos are the same as a lone drone's.
+- **Transit heights:** to reach its strip and to come home, a drone flies a layer
+  (`min_separation_m` + 2 m) or more above the survey height. The drone whose strip starts
+  farthest away flies highest, so a drone passing over a nearer strip is always above the drone
+  climbing or descending there.
+- **The pads' keep-out circle:** drones climb and land vertically over their own pads. Nobody
+  flies across the circle around the pads (15 m beyond the outermost pad): each drone enters
+  and leaves it straight along its own pad's direction, and survey lanes go around it.
+- **Closer looks and dips** only in the drone's own strip; a candidate in a teammate's strip is
+  left to that teammate.
 - **Sharing:** over the radio, a drone tells its teammates:
   - every candidate it goes to look at closer (a claim),
   - every person it reports or dismisses,
@@ -164,8 +176,8 @@ The six layers and weights are the same as for one drone. A team is scored as a 
   A spot a teammate claimed or reported is left alone. The search ends when the team has found
   everyone.
 - **One beat:** photos are taken on the same beat, so they share batches.
-- **Clear below:** before descending for a closer look or a dip, a drone waits until no
-  teammate is within 30 m horizontally.
+- **Clear below:** before changing height (a closer look, a dip, or between survey and transit
+  height), a drone waits until no teammate is within 30 m horizontally.
 
 Dynamic re-allocation, probability maps and comms-aware planning are left to the stacks under
 test.

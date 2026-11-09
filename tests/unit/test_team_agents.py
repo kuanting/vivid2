@@ -1,4 +1,4 @@
-"""The reference team: strips, height layers, shared finds; central and distributed, flown offline."""
+"""The reference team: strips at one survey height, transit layers, the pads' keep-out circle, shared finds."""
 import json
 
 import numpy as np
@@ -9,7 +9,7 @@ from vivid2.registry import AgentFactory
 from vivid2.scenario import Scenario
 from vivid2.stack.base import DistributedTeam
 from vivid2.stack.reference.planners import LawnmowerPlanner, StripPlanner
-from vivid2.stack.reference.team import TeamOf, TeamSearchAgent
+from vivid2.stack.reference.team import KEEP_OUT_MARGIN_M, TeamOf, TeamSearchAgent, around, layer_m
 from vivid2.runner import mission_spec
 
 
@@ -56,8 +56,48 @@ def test_the_factory_builds_teams(root):
         AgentFactory("coverage_gt", {"team": "swarm"})
 
 
+CAMERA = {"width": 320, "height": 240, "fov_deg": 80.0}  # the FakeFleet's camera
+
+
+def _trajectories(run_dir):
+    rows = [json.loads(l) for l in (run_dir / "trajectory.jsonl").read_text().splitlines()]
+    out = {}
+    for r in rows:
+        out.setdefault(r["drone"], []).append(r["pos"])
+    return {d: np.asarray(v, float) for d, v in out.items()}
+
+
+def _check_flight_plan(run, run_dir, size):
+    """Survey at one height in disjoint strips, transit a layer apart, cross the pads' circle radially."""
+    start = run.resolved_start()
+    m = mission_spec(run, start, None, CAMERA, datum_ned=start)
+    survey_down = m.ground_down_m - m.altitude_m
+    paths = _events(run_dir, "path_start")
+    surveys, transits = {}, {}
+    for e in paths:
+        zs = {round(w[2], 6) for w in e["waypoints"]}
+        if zs == {round(survey_down, 6)}:
+            surveys.setdefault(e["drone"], e)
+        elif e["drone"] not in transits and len(zs) == 1:
+            transits[e["drone"]] = zs.pop()
+    assert len(surveys) == size and len(transits) == size  # every drone surveys at the lone drone's height
+    spans = sorted((min(w[1] for w in e["waypoints"]), max(w[1] for w in e["waypoints"])) for e in surveys.values())
+    assert all(a[1] < b[0] for a, b in zip(spans, spans[1:]))  # strips don't overlap
+    heights = sorted(survey_down - z for z in transits.values())  # metres above the survey height
+    assert heights[0] >= layer_m(m) - 1e-6 and all(b - a >= layer_m(m) - 1e-6 for a, b in zip(heights, heights[1:]))
+    # Inside the pads' keep-out circle a drone is only ever on its own pad's line out of it.
+    pads = {d["id"]: np.asarray(d["ned"][:2], float) for d in run.resolved_fleet()}
+    c = np.mean(list(pads.values()), axis=0)
+    r = max(np.linalg.norm(p - c) for p in pads.values()) + KEEP_OUT_MARGIN_M
+    for d, pos in _trajectories(run_dir).items():
+        u = (pads[d] - c) / np.linalg.norm(pads[d] - c)
+        inside = pos[np.linalg.norm(pos[:, :2] - c, axis=1) < 0.9 * r][:, :2] - c
+        off_line = np.abs(inside[:, 0] * u[1] - inside[:, 1] * u[0])  # distance from the pad's ray
+        assert len(inside) and off_line.max() < 0.5 and (inside @ u).min() > -0.5, d
+
+
 @pytest.mark.parametrize("mode,size", [("central", 2), ("dist", 4)])
-def test_a_team_finds_everyone_safely_from_its_own_strips_and_layers(tmp_path, root, mode, size):
+def test_a_team_finds_everyone_safely_from_its_own_strips(tmp_path, root, mode, size):
     run = _run(root, size, comms={"range_m": 1000, "latency_s": 0.2})
     agent = AgentFactory("coverage_gt", {"team": mode})(run)
     r = fly_team(tmp_path, run, agent)
@@ -66,16 +106,22 @@ def test_a_team_finds_everyone_safely_from_its_own_strips_and_layers(tmp_path, r
     assert s["collisions"] == 0 and s["returned_home"] and s["separation_violation_s"] == 0.0
     assert s["min_separation_m"] >= 5.0
     assert t["size"] == size and t["drones_used"] == size and t["all_found"]
-    run_dir = tmp_path / agent.name / run.run_id
-    starts = {e["drone"]: e for e in _events(run_dir, "path_start")}
-    assert len(starts) == size
-    heights = sorted(-e["waypoints"][0][2] for e in starts.values())
-    assert all(b - a >= 6.0 - 1e-6 for a, b in zip(heights, heights[1:]))  # one layer per drone
-    easts = {d: (min(w[1] for w in e["waypoints"]), max(w[1] for w in e["waypoints"])) for d, e in starts.items()}
-    spans = sorted(easts.values())
-    assert all(a[1] < b[0] for a, b in zip(spans, spans[1:]))  # strips don't overlap
+    _check_flight_plan(run, tmp_path / agent.name / run.run_id, size)
     if mode == "dist":
         assert t["comms"]["messages"] > 0 and t["comms"]["lost"] == {}
+
+
+def test_four_drones_on_the_team_scenario_keep_apart_and_scale(tmp_path, root):
+    one = _run(root, 1, scenario="../forest_team/forest_team_01")
+    four = _run(root, 4, scenario="../forest_team/forest_team_01")
+    r1 = fly_team(tmp_path / "one", one, AgentFactory("coverage_gt", {"team": "central"})(one))
+    agent = AgentFactory("coverage_gt", {"team": "dist"})(four)
+    r4 = fly_team(tmp_path / "four", four, agent)
+    s = r4["metrics"]["safety"]
+    assert s["collisions"] == 0 and s["separation_violation_s"] == 0.0 and s["returned_home"]
+    assert r4["metrics"]["team"]["all_found"]
+    assert r4["metrics"]["team"]["time_to_find_all_s"] < r1["metrics"]["team"]["time_to_find_all_s"] / 2
+    _check_flight_plan(four, tmp_path / "four" / agent.name / four.run_id, 4)
 
 
 def test_a_team_is_faster_than_one_drone(tmp_path, root):
@@ -98,8 +144,24 @@ def test_team_photos_fall_on_one_beat_so_they_share_batches(tmp_path, root):
     agent = AgentFactory("coverage_gt", {"team": "central"})(run)
     fly_team(tmp_path, run, agent)
     frames = [json.loads(l) for l in (tmp_path / agent.name / run.run_id / "frames.jsonl").read_text().splitlines()]
+    # A photo is asked for on the beat (whole seconds) and stamped one capture step later. Only each
+    # drone's first photo, as it reaches its strip, may fall between beats.
+    on_beat = [f for f in frames if abs((f["t"] / 1e9 - 0.25) % 1.0) < 1e-6]
+    assert len(frames) - len(on_beat) <= 4
     by_t = {}
     for f in frames:
         by_t.setdefault(f["t"], set()).add(f["drone"])
-    shared = sum(len(d) for d in by_t.values() if len(d) > 1)
-    assert shared >= 0.8 * len(frames)  # most photos are taken together with teammates'
+    assert max(len(d) for d in by_t.values()) == 4  # all four in one batch while all survey
+
+
+def test_legs_across_the_pads_circle_go_around_it():
+    c = np.array([0.0, 0.0])
+    path = [[-50.0, 5.0, -60.0], [50.0, 5.0, -60.0], [50.0, 30.0, -60.0]]
+    out = around(path, c, 20.0)
+    assert out[0] == path[0] and out[-1] == path[-1] and len(out) > len(path)
+    pts = np.asarray(out)[:, :2]
+    for a, b in zip(pts, pts[1:]):  # no leg comes closer than the chord of a 30-degree step
+        t = np.clip(np.dot(c - a, b - a) / np.dot(b - a, b - a), 0, 1)
+        assert np.linalg.norm(a + t * (b - a) - c) > 20.0 * np.cos(np.radians(15)) - 1e-6
+    assert all(p[1] >= 5.0 - 1e-6 for p in out[1:-2])  # around the side the lane passes on
+    assert around([[0.0, 0.0, -1.0]], c, 20.0) == [[20.0, 0.0, -1.0]]  # a waypoint inside moves out
