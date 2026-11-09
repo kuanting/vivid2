@@ -91,6 +91,11 @@ A scenario's `fleet.size` (up to 4) puts one drone per launch pad in the scene (
 - **Fair thinking.** A pause ledger records when the clock stood still; `ctx.think` charges the
   pause that overlapped a model call back in mission time.
 - **Every record is tagged** with its `drone`. Frame ids stay unique across the team.
+- **Weather.** Project AirSim gives each drone its own weather actor, whose particle fog
+  follows the drone. Its plugin must hide each drone's weather from the other drones'
+  cameras (`patches/projectairsim-team-weather.patch`, in VIVID2Env builds from
+  2026-11-09). Without it every camera saw every drone's fog: with four drones a hiker's
+  contrast fell to about half, and the oracle team found fewer people than one drone.
 - **Single-drone runs are untouched:** a scenario without `fleet` takes the old path. The
   golden tests (`tests/golden/`) pin its run ids, config hashes, scene and scores, and a team
   run's config hash includes `team_runtime.FLEET_VERSION`.

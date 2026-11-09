@@ -28,8 +28,9 @@ FRAME_COALESCE_S = 0.05
 # Event-loop turns given to drones woken for a batch to ask for their photo.
 WAKE_TURNS = 20
 # Bumped when the team runtime changes in a way that changes team results (part of a team run's
-# config hash; single-drone runs don't use it).
-FLEET_VERSION = 1
+# config hash; single-drone runs don't use it). 2: simulator builds with the team weather fix
+# (patches/projectairsim-team-weather.patch: before it, every camera saw every drone's fog).
+FLEET_VERSION = 2
 
 
 class ClockState:

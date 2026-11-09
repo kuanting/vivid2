@@ -40,6 +40,9 @@ vivid2 unreal setup --engine 5.8 --airsim-root ..\ProjectAirSim --apply-patch
 #    version macros, so the same source still builds for UE 5.7.
 #    UE compiles the plugin on first open; that needs Visual Studio 2022.
 
+#    --apply-patch also applies patches/projectairsim-team-weather.patch (any engine), which
+#    teams of drones need: without it each drone's camera also sees the other drones' fog.
+
 # C. Use any plugin folder you already built (e.g. another 5.8 project)
 vivid2 unreal setup --engine 5.8 --plugin-dir ..\PASBlocks\Plugins
 
@@ -163,5 +166,12 @@ Settings that keep the images the same:
 
 ## Upstream status
 
-The UE 5.8 change is on branch `ue5.8-support` of the Project AirSim fork.
-Once it's merged upstream, option B won't need `--apply-patch`.
+Upstream Project AirSim `main` supports UE 5.8 itself since `e055190`, so a
+current checkout needs no 5.8 patch; `patches/projectairsim-ue5.8.patch` is for
+older checkouts.
+
+The team weather fix (`patches/projectairsim-team-weather.patch`, one file:
+`WeatherLib.cpp`) is submitted upstream as
+[#243](https://github.com/iamaisim/ProjectAirSim/pull/243); until it is merged,
+`--apply-patch` adds it. Single-drone runs don't need it; their images are the same
+with or without it. See `patches/UPSTREAM_PR.md`.

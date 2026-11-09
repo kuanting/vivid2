@@ -72,6 +72,17 @@ def test_supports_ue58(tmp_path):
     assert us.supports_ue58(tmp_path)
 
 
+def test_team_weather_fix_detected_and_its_patch_matches_the_check(tmp_path, root):
+    src = tmp_path / "unreal/Blocks/Plugins/ProjectAirSim/Source/ProjectAirSim/Private/World/WeatherLib.cpp"
+    src.parent.mkdir(parents=True)
+    src.write_text("void UWeatherLib::initWeather() {}\n")
+    assert not us.has_team_weather_fix(tmp_path)
+    patch = (root / us.TEAM_WEATHER_PATCH).read_text(encoding="utf-8")
+    assert "+static void HideOtherRobotsWeather(" in patch and "World/WeatherLib.cpp" in patch
+    src.write_text(patch)  # whatever the patch adds is what the check looks for
+    assert us.has_team_weather_fix(tmp_path)
+
+
 def test_pack_excludes_intermediate_git_and_pdb(tmp_path):
     plugins = _fake_plugins(tmp_path / "Plugins")
     info = us.pack_plugin(plugins, "5.8", tmp_path / "dist", strip_pdb=True)

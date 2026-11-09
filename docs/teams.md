@@ -14,6 +14,10 @@ vivid2 run --campaign campaigns/forest_team_v1.jsonc --agent coverage_gt --team 
 
 `--team` picks one of two modes. Both are listed in separate tables.
 
+Teams need a simulator build with the team weather fix (VIVID2Env builds from 2026-11-09, or a
+plugin with `patches/projectairsim-team-weather.patch`): without it every drone's camera also
+sees the other drones' fog, so team photos come out hazier than a lone drone's.
+
 | Mode | Who decides | What the drones share |
 |---|---|---|
 | `central` | One `FleetAgent` commands every drone. | Everything: like a ground station that sees every photo. |

@@ -115,6 +115,15 @@ def supports_ue58(airsim_root: Path) -> bool:
     return header.exists() and "UE_IS_5_8" in header.read_text(encoding="utf-8", errors="ignore")
 
 
+# Teams of drones: each drone's cameras must see only its own weather (fog) actor, any engine.
+TEAM_WEATHER_PATCH = "patches/projectairsim-team-weather.patch"
+
+
+def has_team_weather_fix(airsim_root: Path) -> bool:
+    src = airsim_root / "unreal/Blocks/Plugins/ProjectAirSim/Source/ProjectAirSim/Private/World/WeatherLib.cpp"
+    return src.exists() and "HideOtherRobotsWeather" in src.read_text(encoding="utf-8", errors="ignore")
+
+
 # -- linking -------------------------------------------------------------------
 
 def _is_link(p: Path) -> bool:
@@ -288,6 +297,14 @@ def setup(
                                  f"  git -C \"{root}\" apply \"{patch}\"\nor rerun with --apply-patch")
             subprocess.run(["git", "-C", str(root), "apply", str(patch)], check=True)
             log(f"applied {patch.name} to {root}")
+        if not has_team_weather_fix(root):
+            patch = REPO / TEAM_WEATHER_PATCH
+            if apply_patch:
+                subprocess.run(["git", "-C", str(root), "apply", str(patch)], check=True)
+                log(f"applied {patch.name} to {root}")
+            else:  # single-drone runs don't need it
+                log(f"warning: {root} lacks the team weather fix; team runs (fleet.size > 1) would see every "
+                    f"drone's fog. Apply it: git -C \"{root}\" apply \"{patch}\" (or rerun with --apply-patch)")
         if not (plugins / "ProjectAirSim/SimLibs").exists():
             log(f"warning: no SimLibs in {plugins}/ProjectAirSim; run build.cmd in {root} first")
         source = {"kind": "airsim-root", "path": str(root)}
