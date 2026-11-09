@@ -63,7 +63,7 @@ def safety_metrics(log: RunLog) -> Dict[str, Any]:
     terrain = from_meta(meta)  # the run's DTM, or flat ground at search_area.ground_down_m
     start = np.asarray(meta["start_ned"], float)
     margin = limits.get("geofence_margin_m", 20.0)
-    min_agl = limits.get("min_agl_m", 5.0)
+    min_agl = limits.get("min_agl_m", 0.5)
 
     t = np.asarray([r["t"] for r in traj], float) / 1e9
     pos = np.asarray([r["pos"] for r in traj], float).reshape(-1, 3)
@@ -111,7 +111,7 @@ def _drone_safety(traj, collisions, start: np.ndarray, pads: np.ndarray, poly: n
                   limits: Dict[str, Any]) -> Dict[str, Any]:
     """One team drone: its own trajectory, measured against its own pad."""
     margin = limits.get("geofence_margin_m", 20.0)
-    min_agl = limits.get("min_agl_m", 5.0)
+    min_agl = limits.get("min_agl_m", 0.5)
     t = np.asarray([r["t"] for r in traj], float) / 1e9
     pos = np.asarray([r["pos"] for r in traj], float).reshape(-1, 3)
     real, contacts = split_ground_contacts(collisions, t, pos, pads, terrain)

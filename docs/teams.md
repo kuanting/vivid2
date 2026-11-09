@@ -28,7 +28,7 @@ Any reference stack (`coverage_gt`, `coverage_yolo`, `vlm`, `hybrid`, with `--ve
 ```jsonc
 "fleet": {"size": 4, "spacing_m": 10},          // sweepable: "sweep": {"fleet.size": [1, 2, 4]}
 "comms": {"range_m": 400, "latency_s": 0.2, "bandwidth_kbps": 250, "loss": 0.02},
-"limits": {..., "energy_budget_m": 3500, "min_separation_m": 5}
+"limits": {..., "min_agl_m": 0.5, "energy_budget_m": 3500, "min_separation_m": 5}
 ```
 
 - **Launch pads:** a grid around `dut_start`, `spacing_m` apart: a row of two, or a 2 × 2

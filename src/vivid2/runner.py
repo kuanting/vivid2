@@ -84,7 +84,7 @@ def mission_spec(run: Run, start_ned=None, terrain=None, camera: Optional[Dict[s
         max_speed_mps=lim.get("max_speed_mps", 8.0),
         timeout_s=lim["timeout_s"],
         expected_targets=len(s["targets"]),
-        min_agl_m=lim.get("min_agl_m", 5.0),
+        min_agl_m=lim.get("min_agl_m", 0.5),
         geofence_margin_m=lim.get("geofence_margin_m", 20.0),
         energy_budget_m=lim.get("energy_budget_m"),
         camera=dict(camera) if camera else None,

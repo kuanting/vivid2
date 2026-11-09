@@ -41,7 +41,7 @@ DEPTH_MAX_M = 1000.0  # ignore returns beyond this (no data / sky)
 class DipSettings:
     """Tunable settings of the dip behaviour (all recorded in the run's config hash)."""
 
-    dip_agl_m: float = 12.0          # look height above the ground (never below min_agl_m + 5)
+    dip_agl_m: float = 12.0          # look height above the ground (never below agents.LOOK_MIN_AGL_M)
     min_radius_m: float = 6.0        # clearance from the drone to the nearest tree, to descend
     max_dips: int = 30               # in practice the time budget decides
     dip_frames: int = 3              # looks at the bottom; a majority must agree to report

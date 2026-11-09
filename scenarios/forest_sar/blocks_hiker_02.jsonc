@@ -16,7 +16,7 @@
   "target_jitter_m": 10,
   "brief": "Two hikers are overdue. Look for people on the ground (represented here by tall grey boxes about 0.5 m wide and 1.7 m high). Ignore large blocks and buildings.",
   "environment": {"time_of_day": "2026-09-28 12:00:00", "weather": {"fog": 0.0}, "wind_ned": [2, 1, 0]},
-  "limits": {"timeout_s": 600, "max_speed_mps": 6, "min_agl_m": 10, "geofence_margin_m": 20, "energy_budget_m": 4000},
+  "limits": {"timeout_s": 600, "max_speed_mps": 6, "min_agl_m": 0.5, "geofence_margin_m": 20, "energy_budget_m": 4000},
   "success": {"localization_tolerance_m": 8, "require_all_targets": true},
   "sweep": {
     "environment.weather.fog": [0.0, 0.4],

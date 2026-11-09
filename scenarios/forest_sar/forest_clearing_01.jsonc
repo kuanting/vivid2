@@ -24,7 +24,7 @@
   ],
   "brief": "Two hikers, one in a red jacket and one in a green jacket, did not return from a forest walk. Ground fog is rising at dusk. One may be injured and lying down.",
   "environment": {"time_of_day": "2026-09-28 17:30:00", "weather": {"fog": 0.05}, "wind_ned": [3, 1, 0]},
-  "limits": {"timeout_s": 1500, "max_speed_mps": 6, "min_agl_m": 2, "geofence_margin_m": 20, "energy_budget_m": 9000},
+  "limits": {"timeout_s": 1500, "max_speed_mps": 6, "min_agl_m": 0.5, "geofence_margin_m": 20, "energy_budget_m": 9000},
   "success": {"localization_tolerance_m": 10, "require_all_targets": true},
   // fog 0 is the clear-air control.
   "sweep": {"environment.weather.fog": [0, 0.02, 0.05], "seeds": 3}

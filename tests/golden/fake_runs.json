@@ -4,7 +4,7 @@
    "control": {
     "altitude_rmse_m": 0.0,
     "max_speed_mps": 34.52535300326414,
-    "mean_speed_mps": 6.060262919391924,
+    "mean_speed_mps": 6.029035746744668,
     "tracking_p95_m": 7.105427357601002e-15,
     "tracking_rmse_m": 6.060099146047661e-15
    },
@@ -13,16 +13,16 @@
     "false_alarms": 0,
     "found_fraction": 1.0,
     "localization_error_m": {
-     "Hiker1": 0.4158722734904455
+     "Hiker1": 0.5370001201381429
     },
-    "mean_localization_error_m": 0.4158722734904455,
-    "mean_time_to_find_s": 112.138044409,
-    "mission_time_s": 126.804711075,
+    "mean_localization_error_m": 0.5370001201381429,
+    "mean_time_to_find_s": 114.138044409,
+    "mission_time_s": 129.804711075,
     "success": true,
     "targets_found": 1,
     "targets_total": 1,
     "time_to_find_s": {
-     "Hiker1": 112.138044409
+     "Hiker1": 114.138044409
     },
     "timeout_s": 420
    },
@@ -31,23 +31,23 @@
     "false_positives": 0,
     "first_detection": {
      "Hiker1": {
-      "range_m": 14.519240377560783,
-      "t": 110138044409
+      "range_m": 11.615004999628342,
+      "t": 112138044409
      }
     },
     "frames_evaluated": 87,
     "gt_instances": 17,
-    "mean_first_detection_range_m": 14.519240377560783,
+    "mean_first_detection_range_m": 11.615004999628342,
     "precision": 1.0,
     "recall": 0.17647058823529413
    },
    "planning": {
     "area_m2": 14400.0,
     "coverage_pct": 100.0,
-    "coverage_per_km_m2": 19325.009190737437,
+    "coverage_per_km_m2": 19170.645482346306,
     "covered_m2": 14400.0,
-    "path_length_m": 745.1484166383726,
-    "revisit_ratio": 10.90638888888889,
+    "path_length_m": 751.1484166383726,
+    "revisit_ratio": 10.895277777777778,
     "verifications": 0,
     "verifications_confirmed": 0,
     "verify_time_s": 0.0
@@ -87,12 +87,12 @@
     "collisions": 0,
     "end_distance_from_home_m": 0.0,
     "energy_budget_exceeded": false,
-    "energy_used_m": 745.1484166383726,
+    "energy_used_m": 751.1484166383726,
     "geofence_breach_s": 0.0,
     "ground_contacts": 0,
     "low_altitude_s": 0.0,
     "max_geofence_excursion_m": 0.0,
-    "min_agl_m": 15.0,
+    "min_agl_m": 12.0,
     "returned_home": true,
     "speed_limit_exceeded": true,
     "timed_out": false
@@ -100,15 +100,15 @@
   },
   "records": {
    "decisions": 87,
-   "events": 13,
-   "frames": 89,
+   "events": 14,
+   "frames": 90,
    "reports": 1,
-   "trajectory": 104
+   "trajectory": 106
   },
   "scores": {
    "control": 99.9999999999998,
-   "mission": 86.65023280845237,
-   "overall": 74.67464030648773,
+   "mission": 86.41213757035715,
+   "overall": 74.5913069731544,
    "perception": 17.647058823529413,
    "planning": 100.0,
    "reasoning": 58.00000000000001,
@@ -331,27 +331,27 @@
    "control": {
     "altitude_rmse_m": 0.0,
     "max_speed_mps": 34.52535300326414,
-    "mean_speed_mps": 6.080150412203512,
+    "mean_speed_mps": 6.081897516019134,
     "tracking_p95_m": 1.4210854715202004e-14,
-    "tracking_rmse_m": 7.087125725618131e-15
+    "tracking_rmse_m": 6.567893357741959e-15
    },
    "mission": {
     "end_reason": "completed",
     "false_alarms": 0,
     "found_fraction": 1.0,
     "localization_error_m": {
-     "Hiker1": 1.6583791837215556,
-     "Hiker2": 1.222656040303111
+     "Hiker1": 1.6583791837215456,
+     "Hiker2": 1.2039465442967896
     },
-    "mean_localization_error_m": 1.4405176120123333,
-    "mean_time_to_find_s": 79.283739613,
-    "mission_time_s": 124.649088671,
+    "mean_localization_error_m": 1.4311628640091676,
+    "mean_time_to_find_s": 83.7067462145,
+    "mission_time_s": 131.015504234,
     "success": true,
     "targets_found": 2,
     "targets_total": 2,
     "time_to_find_s": {
-     "Hiker1": 44.918390555,
-     "Hiker2": 113.649088671
+     "Hiker1": 47.397988195,
+     "Hiker2": 120.015504234
     },
     "timeout_s": 600
    },
@@ -364,26 +364,26 @@
       "t": 33000000000
      },
      "Hiker2": {
-      "range_m": 41.71102245624204,
-      "t": 102585057221
+      "range_m": 41.501677860813686,
+      "t": 106731321528
      }
     },
     "frames_evaluated": 88,
     "gt_instances": 18,
-    "mean_first_detection_range_m": 44.42179880790346,
+    "mean_first_detection_range_m": 44.317126510189276,
     "precision": 1.0,
     "recall": 1.0
    },
    "planning": {
     "area_m2": 25600.0,
-    "coverage_pct": 71.078125,
-    "coverage_per_km_m2": 25977.05288355563,
-    "covered_m2": 18196.0,
-    "path_length_m": 700.4643706722673,
-    "revisit_ratio": 9.946801494834029,
+    "coverage_pct": 71.390625,
+    "coverage_per_km_m2": 25424.31869365524,
+    "covered_m2": 18276.0,
+    "path_length_m": 718.839321525688,
+    "revisit_ratio": 9.861895381921645,
     "verifications": 2,
     "verifications_confirmed": 2,
-    "verify_time_s": 22.982422005
+    "verify_time_s": 27.682170901
    },
    "reasoning": {
     "accuracy": 1.0,
@@ -420,12 +420,12 @@
     "collisions": 0,
     "end_distance_from_home_m": 0.0,
     "energy_budget_exceeded": false,
-    "energy_used_m": 700.4643706722673,
+    "energy_used_m": 718.839321525688,
     "geofence_breach_s": 0.0,
     "ground_contacts": 0,
     "low_altitude_s": 0.0,
     "max_geofence_excursion_m": 0.0,
-    "min_agl_m": 14.999999999999986,
+    "min_agl_m": 10.000000000000002,
     "returned_home": true,
     "speed_limit_exceeded": true,
     "timed_out": false
@@ -440,10 +440,10 @@
   },
   "scores": {
    "control": 99.99999999999977,
-   "mission": 93.39302169891666,
-   "overall": 92.79537009462081,
+   "mission": 93.02443781545833,
+   "overall": 92.6976157354104,
    "perception": 100.0,
-   "planning": 71.078125,
+   "planning": 71.390625,
    "reasoning": 100.0,
    "safety": 90.0
   }

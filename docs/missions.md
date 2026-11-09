@@ -41,9 +41,12 @@ VIVID 2 is set up to reward stacks that can do that autonomously:
   convex hulls per tree mesh). Below the crowns, about 4–6 m up, and between
   the trunks there is open space. Rocks, stumps and fallen logs collide too;
   grass, ferns and shrubs do not. Crowns reach about 30 m.
-- **Flying low is allowed.** Forest scenarios set `min_agl_m` to 2–3 m, a floor
-  against hitting the ground, not a survey height. `search_area.altitude_m` is
-  only a suggestion: the reference agents fly it and mostly fail in dense fog.
+- **Flying low is allowed.** Every scenario sets `min_agl_m` to 0.5 m: a stack may
+  fly that low, and only hitting something counts against it (each second below
+  0.5 m costs safety points). `search_area.altitude_m` is only a suggestion: the
+  reference agents fly it and mostly fail in dense fog. Their closer looks and dips
+  keep their own floor of 8 m above the ground (`LOOK_MIN_AGL_M`); lower looks
+  would cost them more time than they gain.
 - **Hitting things is expensive.** Every tree, rock or log strike counts as a
   collision in the safety score, which carries 20 % of the overall weight.
 - **The sensors are there.** Besides the nadir payload camera, the drone has a

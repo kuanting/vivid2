@@ -138,7 +138,8 @@
       "properties": {
         "timeout_s": {"type": "number", "exclusiveMinimum": 0},
         "max_speed_mps": {"type": "number", "default": 8},
-        "min_agl_m": {"type": "number", "default": 5},
+        "min_agl_m": {"type": "number", "minimum": 0, "default": 0.5,
+                      "description": "lowest allowed height above ground while flying; each second below it costs safety points. Stacks may fly this low: only hitting something counts against them otherwise"},
         "geofence_margin_m": {"type": "number", "default": 20},
         "energy_budget_m": {"type": "number", "description": "path-length proxy for battery budget (per drone)"},
         "min_separation_m": {"type": "number", "minimum": 0, "default": 5,

@@ -167,8 +167,9 @@ and `hybrid` agents; `vivid2 run --verify on|off` overrides it), the reference
 1. A *candidate* is a find at confidence 0.3 or more. The agent leaves the
    lawnmower path and flies over it.
 2. It descends to 10 m above the highest obstacle around the candidate (from the
-   depth image), never below the scenario's `min_agl_m` + 5 m, and never above
-   the survey altitude.
+   depth image), never below its own floor of 8 m above the ground
+   (`LOOK_MIN_AGL_M`; stacks under test may fly down to the scenario's
+   `min_agl_m`, 0.5 m), and never above the survey altitude.
 3. It takes up to three close-ups. For each one the VLM gets a full-resolution
    960 x 720 crop around the candidate (a digital zoom). It reports only if a
    majority confirm the target at 0.6 or more, located as the mean of those

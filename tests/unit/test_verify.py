@@ -8,7 +8,7 @@ from conftest import FakeWorld, write_meta
 from vivid2.recorder import Recorder
 from vivid2.runner import score_run_dir
 from vivid2.stack.base import Assessment, Reasoner, UsageStats
-from vivid2.stack.reference.agents import SearchAgent, remaining_path
+from vivid2.stack.reference.agents import LOOK_MIN_AGL_M, VERIFY_CLEARANCE_M, SearchAgent, remaining_path
 from vivid2.stack.reference.planners import LawnmowerPlanner
 
 
@@ -66,7 +66,8 @@ def test_unsure_find_is_confirmed_from_closer_and_reported(tmp_path, blocks_run)
     end, = _events(rec, "verify_end")
     assert end["confirmed"] and start["confidence"] == pytest.approx(0.4)
     m = world.mission
-    assert start["height_m"] == pytest.approx(m.min_agl_m + 5.0)  # flat ground, no obstacles: min height + margin
+    # flat ground, no obstacles: clear of the ground, and never below the reference stacks' own floor
+    assert start["height_m"] == pytest.approx(max(VERIFY_CLEARANCE_M, LOOK_MIN_AGL_M))
     assert start["height_m"] < m.altitude_m
     assert result["metrics"]["planning"]["verifications"] == 1
     assert result["metrics"]["planning"]["verifications_confirmed"] == 1

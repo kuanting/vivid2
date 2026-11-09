@@ -123,7 +123,7 @@ class MissionSpec:
     timeout_s: float
     expected_targets: int
     # The limits the stack is scored on, so it can respect them.
-    min_agl_m: float = 5.0
+    min_agl_m: float = 0.5
     geofence_margin_m: float = 20.0
     energy_budget_m: Optional[float] = None  # path-length proxy for the battery
     # The payload camera, so a stack can plan before its first frame: {"width": px, "height": px, "fov_deg": deg}.

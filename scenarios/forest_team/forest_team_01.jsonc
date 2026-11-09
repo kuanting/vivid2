@@ -39,7 +39,7 @@
   // Calibrated with the reference team (coverage_gt, offline team simulator, 2026-11-08): one drone
   // surveys 70 % of the area before the timeout (2 of 4 hikers) and runs past its battery; two drones
   // find everyone in about 300 s, four in about 150 s. The battery (path-length budget) is per drone.
-  "limits": {"timeout_s": 480, "max_speed_mps": 8, "min_agl_m": 3, "geofence_margin_m": 25, "energy_budget_m": 3500,
+  "limits": {"timeout_s": 480, "max_speed_mps": 8, "min_agl_m": 0.5, "geofence_margin_m": 25, "energy_budget_m": 3500,
              "min_separation_m": 5},
   "success": {"localization_tolerance_m": 10, "require_all_targets": true},
   "sweep": {"fleet.size": [1, 2, 4], "seeds": 3}

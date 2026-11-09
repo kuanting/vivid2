@@ -28,7 +28,7 @@
   // visible and from 10 m they are clear (2026-11-03 probes). Finding them means flying low among
   // the trees (crowns up to ~30 m, all with collision).
   "environment": {"time_of_day": "2026-09-28 17:30:00", "weather": {"fog": 0.02}, "wind_ned": [4, 2, 0]},
-  "limits": {"timeout_s": 1500, "max_speed_mps": 8, "min_agl_m": 3, "geofence_margin_m": 25, "energy_budget_m": 12000},
+  "limits": {"timeout_s": 1500, "max_speed_mps": 8, "min_agl_m": 0.5, "geofence_margin_m": 25, "energy_budget_m": 12000},
   "success": {"localization_tolerance_m": 10, "require_all_targets": true},
   "sweep": {"environment.weather.fog": [0.0, 0.02, 0.05], "seeds": 3}
 }

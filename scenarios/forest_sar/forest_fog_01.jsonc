@@ -22,7 +22,7 @@
   "brief": "A hiker in a red jacket and dark trousers is overdue on a forest trail. Dense fog covers the area and visibility from the air is very poor. He may be lying down.",
   // Project AirSim's weather fog saturates around 0.4 (0.8 looks the same).
   "environment": {"time_of_day": "2026-09-28 12:00:00", "weather": {"fog": 0.4}, "wind_ned": [2, 0, 0]},
-  "limits": {"timeout_s": 1500, "max_speed_mps": 6, "min_agl_m": 2, "geofence_margin_m": 20, "energy_budget_m": 9000},
+  "limits": {"timeout_s": 1500, "max_speed_mps": 6, "min_agl_m": 0.5, "geofence_margin_m": 20, "energy_budget_m": 9000},
   "success": {"localization_tolerance_m": 10, "require_all_targets": true},
   "sweep": {"environment.weather.fog": [0.2, 0.4], "seeds": 3}
 }

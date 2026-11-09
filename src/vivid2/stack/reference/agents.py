@@ -17,7 +17,9 @@ NO_FRAME_RETRY_S = 0.1
 
 # Closer look ("verify") before reporting, as search crews do
 VERIFY_CLEARANCE_M = 10.0   # stay this far above the highest obstacle around the candidate
-VERIFY_MIN_EXTRA_M = 5.0    # ... and this far above the mission's minimum height above ground
+# The reference stacks' own floor for closer looks and dips: lower looks cost more time than they
+# gain. A stack under test may fly as low as the scenario allows (limits.min_agl_m, 0.5 m).
+LOOK_MIN_AGL_M = 8.0
 VERIFY_RADIUS_M = 8.0       # ground radius checked for obstacles, and how far a confirmation may be from the candidate
 VERIFY_DESCENT_MPS = 3.0
 
@@ -167,7 +169,7 @@ class LowFlightMixin:
         ctx.log("events", {"t": self._t_ns, "kind": kind, **kw})
 
     def _dip_height(self, mission) -> float:
-        return max(self.low.dip_agl_m, mission.min_agl_m + VERIFY_MIN_EXTRA_M)
+        return max(self.low.dip_agl_m, LOOK_MIN_AGL_M)
 
     def _all_found(self, ctx: MissionContext) -> bool:
         return False
@@ -326,7 +328,7 @@ class SearchAgent(LowFlightMixin, Agent):
        candidate to the camera that saw it (so the view stays as unobstructed);
     2. descends along that line to about VERIFY_CLEARANCE_M above the highest
        obstacle around the candidate and under the look point, read from the
-       depth image, and never below the mission's minimum height + VERIFY_MIN_EXTRA_M;
+       depth image, and never below LOOK_MIN_AGL_M;
     3. takes up to ``verify_frames`` close-ups, the VLM looking at a full-resolution
        crop around the candidate, and reports the target only if a majority confirm
        it at ``min_confidence`` (a single noisy "yes" is not enough), located as the
@@ -383,7 +385,8 @@ class SearchAgent(LowFlightMixin, Agent):
             "dedup_radius_m": self.dedup_radius_m,
             "geolocate": "depth_or_terrain_ray",
             "verify": ({"candidate_confidence": self.candidate_confidence, "frames": self.verify_frames,
-                        "max": self.max_verifications, "approach": "line_of_sight"} if self.verify else False),
+                        "max": self.max_verifications, "approach": "line_of_sight",
+                        "min_height_m": LOOK_MIN_AGL_M} if self.verify else False),
             **({"dip": self._lf_describe()} if self.low is not None else {}),  # old run hashes stay valid
             # Layer settings (sidelap, thresholds, VLM effort...) so a config change forces a re-run.
             "params": {
@@ -533,13 +536,12 @@ class SearchAgent(LowFlightMixin, Agent):
         so the candidate stays where it was in the image, unobstructed as it was, only
         larger. (Straight overhead, a person seen at an angle under a crown's edge is
         hidden by the crown.) Its height keeps VERIFY_CLEARANCE_M above the highest
-        obstacle around the candidate and under the look point, and the mission's
-        minimum height + VERIFY_MIN_EXTRA_M.
+        obstacle around the candidate and under the look point, and LOOK_MIN_AGL_M.
         """
         m = ctx.mission
         ground = float(ned[2])  # the candidate sits on the ground
         top = highest_obstacle_down(frame, assessment.pixel[0], assessment.pixel[1])
-        height = m.min_agl_m + VERIFY_MIN_EXTRA_M
+        height = LOOK_MIN_AGL_M
         if top is not None:
             height = max(height, ground - top + VERIFY_CLEARANCE_M)
         cam = np.asarray(frame.cam_pos, float)

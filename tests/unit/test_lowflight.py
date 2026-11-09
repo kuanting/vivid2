@@ -117,9 +117,9 @@ def test_a_hiker_hidden_by_fog_is_found_by_dipping_into_the_clearing(tmp_path, b
     assert len(low), "never came below the canopy top"
     # every low point is inside the clearing, with room to spare
     assert np.all(np.hypot(low[:, 0] - t[0], low[:, 1] - t[1]) <= CLEARING_R - 4.0)
-    # it went down to the look height: max(dip_agl_m 12, min_agl_m 10 + 5) above the ground
+    # it went down to the look height: max(dip_agl_m 12, the reference stacks' floor 8) above the ground
     agl = -traj[:, 2]
-    assert agl[agl > 1.5].min() == pytest.approx(15.0, abs=1.0)
+    assert agl[agl > 1.5].min() == pytest.approx(12.0, abs=1.0)
     s = score_run_dir(rec.run_dir)
     assert s["metrics"]["mission"]["success"]
 
