@@ -1,0 +1,5 @@
+{
+  "map": "ForestFire",
+  "terrain_of": "ForestSAR",
+  "note": "Same landscape and trees as ForestSAR; the east side has burnt (ground material and burnt trees from unreal/VIVID2Env/SourceData/ForestFire/burn_layout.json, see docs/environments.md)."
+}

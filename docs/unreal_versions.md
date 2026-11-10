@@ -92,9 +92,10 @@ powershell -ExecutionPolicy Bypass -File tools\package_env.ps1 -Engine 5.8 -Zip
 
 - About 6 minutes when the editor has already compiled the shaders. The
   editor may stay open: only the game is compiled.
-- Cooked: `ForestSAR`, `ForestSAR_Open` and `ForestSAR_Dense` (`MapsToCook` in
-  `Config/DefaultGame.ini`). Also the content spawned at runtime: hikers and
-  decoys, the drone, and Project AirSim's weather actor.
+- Cooked: `ForestSAR`, `ForestSAR_Open`, `ForestSAR_Dense` and `ForestFire`
+  (`MapsToCook` in `Config/DefaultGame.ini`). Also the content spawned at
+  runtime: hikers, decoys and fires, the drone, and Project AirSim's weather
+  actor.
 - `vivid2_build.json` next to the exe records the VIVID 2 commit and any
   uncommitted changes to the project's content or config.
 - The build contains third-party content (Fab packs) in cooked form. Share

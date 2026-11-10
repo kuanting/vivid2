@@ -3,8 +3,8 @@
   Package unreal/VIVID2Env as a standalone Windows build (no Unreal install needed to run it).
 
 .DESCRIPTION
-  Cooks the maps listed in Config/DefaultGame.ini (ForestSAR, ForestSAR_Open, ForestSAR_Dense)
-  plus the content spawned at runtime (hikers, decoys, drone, weather), and archives the
+  Cooks the maps listed in Config/DefaultGame.ini (ForestSAR, ForestSAR_Open, ForestSAR_Dense,
+  ForestFire) plus the content spawned at runtime (hikers, decoys, fires, drone, weather), and archives the
   build to build\VIVID2Env-ue<engine>-Win64\Windows. With -Zip it also writes
   dist\VIVID2Env-ue<engine>-Win64-<commit>.zip to copy to other machines.
 

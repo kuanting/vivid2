@@ -1,0 +1,18 @@
+{
+  "map": "ForestFire",
+  "about": "Authoring data for the ForestFire map (a copy of ForestSAR). A fire came up the steep valley to the east and has burnt the forest east of an irregular front 70-130 m east of the start. tools/burn_mask.py turns burn_polygon_ne into burn_mask.png, which the landscape material (burnt ground) and the forest graph (charred trees, no understory) both read. The fires themselves are not part of the map: scenarios list them (fires), and fire_points_ne are suggestions for that.",
+  "frame": "NED metres from the Unreal origin (north, east); the landscape spans -504..504 m on both axes",
+  "burn_polygon_ne": [
+    [-504, 504], [-504, 330], [-300, 300], [-260, 180], [-200, 130], [-140, 115], [-80, 95], [-30, 110],
+    [20, 90], [70, 75], [120, 85], [170, 70], [220, 95], [260, 140], [300, 260], [504, 330], [504, 504]
+  ],
+  "edge": {"noise_m": 12.0, "noise_scale_m": 25.0, "soft_m": 6.0, "seed": 7},
+  "fire_points_ne": {
+    "front": [[-200, 127], [-165, 120], [-130, 111], [-95, 99], [-60, 101], [-25, 107], [10, 94], [45, 82],
+              [80, 77], [115, 84], [150, 76], [185, 75], [215, 92]],
+    "spot_ahead": [[40, 55], [-60, 68]],
+    "smoulder_in_burn": [[0, 180], [-120, 200], [100, 170], [180, 230]]
+  },
+  "mask": {"file": "burn_mask.png", "size_px": 1024, "extent_m": 1008.0,
+           "layout": "pixel [row, col] = [east, north]: row 0 is east -504 m, col 0 is north -504 m; value 128 + 127 b, b = burnt (0..1), never 0 (see tools/burn_mask.py)"}
+}
