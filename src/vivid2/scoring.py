@@ -69,6 +69,7 @@ def layer_scores(m: Dict[str, Any]) -> Dict[str, Optional[float]]:
         safety -= 15.0 if s.get("energy_budget_exceeded") else 0.0
         safety -= 10.0 if not s.get("returned_home", True) else 0.0
         safety -= min(30.0, 3.0 * s.get("separation_violation_s", 0.0))  # teams: drones too close together
+        safety -= min(40.0, 4.0 * s.get("no_fly_s", 0.0))  # below the ceiling of a fire's no-fly area
 
     scores = {
         "mission": mission,

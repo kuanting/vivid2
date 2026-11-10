@@ -1,10 +1,11 @@
-"""Safety metrics: collisions, terrain clearance, geofence, speed, return home."""
+"""Safety metrics: collisions, terrain clearance, geofence, speed, return home, fire no-fly areas."""
 from __future__ import annotations
 
-from typing import Any, Dict, Union
+from typing import Any, Dict, List, Optional, Union
 
 import numpy as np
 
+from vivid2.hazards.fire import in_no_fly
 from vivid2.metrics.control import windowed_speeds
 from vivid2.metrics.planning import path_length, points_in_polygon
 from vivid2.metrics.team import by_drone, contact_events, fleet_of, is_team, separation
@@ -22,6 +23,23 @@ def distance_outside_polygon(p: np.ndarray, poly: np.ndarray) -> float:
         s = float(np.clip((p - a) @ ab / max(float(ab @ ab), 1e-12), 0.0, 1.0))
         best = min(best, float(np.linalg.norm(p - (a + s * ab))))
     return best
+
+
+def fire_metrics(pos: np.ndarray, dt: np.ndarray, agl: np.ndarray, limits: Dict[str, Any],
+                 fires: Optional[List[Dict[str, Any]]]) -> Dict[str, Any]:
+    """Runs with fires or no-fly areas only (otherwise empty, so other runs' metrics are unchanged).
+
+    ``no_fly_s``: time inside a ``limits.no_fly`` polygon below its ceiling (scored);
+    ``min_fire_clearance_m``: closest 3D approach to the base of any fire (information only).
+    """
+    out: Dict[str, Any] = {}
+    zones = limits.get("no_fly")
+    if zones:
+        out["no_fly_s"] = float(dt[in_no_fly(zones, pos[:, :2], agl)].sum())
+    if fires:
+        bases = np.asarray([f["ned"] for f in fires], float)
+        out["min_fire_clearance_m"] = float(np.linalg.norm(pos[:, None, :] - bases[None, :, :], axis=2).min())
+    return out
 
 
 HOME_PAD_RADIUS_M = 5.0  # same radius as "returned home"
@@ -103,12 +121,13 @@ def safety_metrics(log: RunLog) -> Dict[str, Any]:
         "returned_home": end_dist_home <= 5.0,
         "end_distance_from_home_m": end_dist_home,
         "timed_out": meta.get("end_reason") in ("timeout", "hard_timeout"),
+        **fire_metrics(pos, dt, agl, limits, meta.get("fires")),
     })
     return out
 
 
 def _drone_safety(traj, collisions, start: np.ndarray, pads: np.ndarray, poly: np.ndarray, terrain: TerrainModel,
-                  limits: Dict[str, Any]) -> Dict[str, Any]:
+                  limits: Dict[str, Any], fires: Optional[List[Dict[str, Any]]] = None) -> Dict[str, Any]:
     """One team drone: its own trajectory, measured against its own pad."""
     margin = limits.get("geofence_margin_m", 20.0)
     min_agl = limits.get("min_agl_m", 0.5)
@@ -137,6 +156,7 @@ def _drone_safety(traj, collisions, start: np.ndarray, pads: np.ndarray, poly: n
         "energy_budget_exceeded": bool(budget is not None and flown > budget),
         "returned_home": end_dist <= 5.0,
         "end_distance_from_home_m": end_dist,
+        **fire_metrics(pos, dt, agl, limits, fires),
     })
     return out
 
@@ -153,7 +173,7 @@ def _team_safety(log: RunLog) -> Dict[str, Any]:
     pads = np.asarray([d["start_ned"] for d in fleet], float)
     trajs, colls = by_drone(log["trajectory"], ids), by_drone(log["collisions"], ids)
     per = {d["id"]: _drone_safety(trajs.get(d["id"], []), colls.get(d["id"], []), np.asarray(d["start_ned"], float),
-                                  pads, poly, terrain, limits) for d in fleet}
+                                  pads, poly, terrain, limits, meta.get("fires")) for d in fleet}
     real = contact_events([c for p in per.values() for c in p.pop("real")])
     flown = {i: p["energy_used_m"] for i, p in per.items() if "energy_used_m" in p}
     out: Dict[str, Any] = {
@@ -179,6 +199,8 @@ def _team_safety(log: RunLog) -> Dict[str, Any]:
         "end_distance_from_home_m": max(p["end_distance_from_home_m"] for p in flying),
         "timed_out": meta.get("end_reason") in ("timeout", "hard_timeout"),
         **separation(log["trajectory"], ids, float(limits.get("min_separation_m", 5.0))),
+        **({"no_fly_s": sum(p["no_fly_s"] for p in flying)} if limits.get("no_fly") else {}),
+        **({"min_fire_clearance_m": min(p["min_fire_clearance_m"] for p in flying)} if meta.get("fires") else {}),
         "per_drone": per,
     })
     return out

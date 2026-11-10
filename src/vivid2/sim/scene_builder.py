@@ -3,7 +3,7 @@
 The base scene and robot configs are ordinary Project AirSim JSONC files in
 the campaign's sim_config directory. The builder:
   * points the DUT actor at the scenario's robot config and start pose,
-  * adds target actors (hikers, debris...) and distractors as ``spawn-objects``,
+  * adds target actors (hikers, debris...), distractors and fires as ``spawn-objects``,
   * turns on bbox annotations for those targets on the payload camera,
   * for a team, clones the DUT actor into Drone1..DroneN, one per launch pad.
 The result is passed to ``World.load_scene(dict)``, so nothing is written to disk.
@@ -23,8 +23,10 @@ def _fmt3(v) -> str:
 
 def build_scene(run: Run, sim_config_dir: str, targets: List[Dict[str, Any]],
                 distractors: Optional[List[Dict[str, Any]]] = None, start_ned=None,
-                fleet: Optional[List[Dict[str, Any]]] = None) -> Dict[str, Any]:
-    """``fleet`` (``Run.resolved_fleet()``): a team's drones; one drone uses ``start_ned``."""
+                fleet: Optional[List[Dict[str, Any]]] = None,
+                fires: Optional[List[Dict[str, Any]]] = None) -> Dict[str, Any]:
+    """``fleet`` (``Run.resolved_fleet()``): a team's drones; one drone uses ``start_ned``.
+    ``fires`` (``Run.resolved_fires()``) default to the scenario's own, unresolved."""
     spec = run.spec
     sc = spec["scene"]
     scene = load_jsonc(os.path.join(sim_config_dir, sc["base"]))
@@ -51,7 +53,11 @@ def build_scene(run: Run, sim_config_dir: str, targets: List[Dict[str, Any]],
         scene["actors"][i:i + 1] = team
 
     spawn = scene.setdefault("spawn-objects", {}).setdefault("sim-packaged", [])
-    for t in list(targets) + list(distractors if distractors is not None else run.spec.get("distractors", [])):
+    if distractors is None:
+        distractors = run.spec.get("distractors", [])
+    if fires is None:
+        fires = run.spec.get("fires", [])
+    for t in list(targets) + list(distractors) + list(fires):
         spawn.append({
             "name": t["id"],
             "asset-path": t["asset"],

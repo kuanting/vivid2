@@ -16,19 +16,20 @@ jacket among yellow birch crowns) stays well above it.
 Project AirSim assigns segmentation IDs when a scene loads, before VIVID 2's
 targets are spawned, and its default IDs come from a hash of the name that
 ignores digits and capitals (so "Hiker1" and "Hiker2" collide). After spawning,
-the runner therefore sets every object to background, then gives each target
-and distractor its own ID. Only objects present at that moment are drawn as
+the runner therefore sets every object to background, then gives each target,
+distractor and fire its own ID. Only objects present at that moment are drawn as
 occluders, so maps must not stream geometry in later (see docs/map_authoring.md).
 """
 from __future__ import annotations
 
-from typing import Any, Dict, Iterable, List, Optional
+from typing import Any, Dict, Iterable, List, Optional, Tuple
 
 import numpy as np
 
 BACKGROUND_ID = 0
 TARGET_ID_BASE = 1
 DISTRACTOR_ID_BASE = 101
+FIRE_ID_BASE = 201  # fires (vivid2.hazards.fire): recorded per frame, but neither targets nor distractors
 MAX_ID = 255
 MIN_VISIBLE_PX = 20  # at 960x720; below this a target is "partly visible": neither a hit nor a miss
 REFERENCE_PIXELS = 960 * 720  # the threshold scales with image area, so "visible" means the same patch of ground
@@ -48,14 +49,16 @@ def palette() -> np.ndarray:
     return arr if PALETTE_ORDER == "bgr" else arr[:, ::-1]
 
 
-def assign_ids(world, targets: List[Dict[str, Any]], distractors: Iterable[Dict[str, Any]] = ()) -> Dict[str, int]:
-    """Give every target and distractor a unique segmentation ID; everything else becomes background."""
-    distractors = list(distractors)
-    if len(targets) > DISTRACTOR_ID_BASE - TARGET_ID_BASE or len(distractors) > MAX_ID - DISTRACTOR_ID_BASE + 1:
-        raise SegmentationError("too many targets or distractors for 8-bit segmentation IDs")
+def assign_ids(world, targets: List[Dict[str, Any]], distractors: Iterable[Dict[str, Any]] = (),
+               fires: Iterable[Dict[str, Any]] = ()) -> Dict[str, int]:
+    """Give every target, distractor and fire a unique segmentation ID; everything else becomes background."""
+    distractors, fires = list(distractors), list(fires)
+    if (len(targets) > DISTRACTOR_ID_BASE - TARGET_ID_BASE or len(distractors) > FIRE_ID_BASE - DISTRACTOR_ID_BASE
+            or len(fires) > MAX_ID - FIRE_ID_BASE + 1):
+        raise SegmentationError("too many targets, distractors or fires for 8-bit segmentation IDs")
     world.set_segmentation_id_by_name(".*", BACKGROUND_ID, True, True)
     ids: Dict[str, int] = {}
-    for base, objs in ((TARGET_ID_BASE, targets), (DISTRACTOR_ID_BASE, distractors)):
+    for base, objs in ((TARGET_ID_BASE, targets), (DISTRACTOR_ID_BASE, distractors), (FIRE_ID_BASE, fires)):
         for i, obj in enumerate(objs):
             if not world.set_segmentation_id_by_name(obj["id"], base + i, False, True):
                 raise SegmentationError(f"could not set a segmentation ID on {obj['id']!r} (not spawned?)")
@@ -85,6 +88,21 @@ def visibility(seg: np.ndarray, ids: Dict[str, int], colours: np.ndarray,
         if rgb is not None:
             out[oid]["contrast"] = contrast(rgb, mask, box, labelled) if n else None
     return out
+
+
+def split_seen(vis: Dict[str, Dict[str, Any]], target_ids: Iterable[str],
+               fire_ids: Iterable[str] = ()) -> Tuple[Dict[str, int], Dict[str, Dict[str, Any]]]:
+    """Split one frame's visibility into what the frame record keeps besides the targets.
+
+    Returns ``(distractors_visible, fires_visible)``: visible pixels per distractor, and visible
+    pixels and contrast per fire, each only for objects with visible pixels.
+    """
+    targets, fires = set(target_ids), set(fire_ids)
+    distractors = {oid: v["visible_px"] for oid, v in vis.items()
+                   if oid not in targets and oid not in fires and v["visible_px"]}
+    burning = {oid: {"visible_px": v["visible_px"], "contrast": v.get("contrast")} for oid, v in vis.items()
+               if oid in fires and v["visible_px"]}
+    return distractors, burning
 
 
 RING_GAP_PX = 2    # at 1920 px wide: skip the anti-aliased edge between object and ground

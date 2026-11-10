@@ -27,7 +27,7 @@ def reasoning_metrics(log: RunLog, layer: str = "reasoner") -> Optional[Dict[str
         return None
     frames = {f["frame_id"]: f for f in log["frames"]}
     tp = fp = tn = fn = 0
-    errors = dont_care = fp_on_distractor = 0
+    errors = dont_care = fp_on_distractor = fp_on_fire = 0
     grounded = grounding_trials = 0
     for rec in recs:
         # A failed call or unusable reply is an abstention, not a "no target" answer:
@@ -52,6 +52,7 @@ def reasoning_metrics(log: RunLog, layer: str = "reasoner") -> Optional[Dict[str
         elif found:
             fp += 1
             fp_on_distractor += bool(frame.get("distractors_visible"))
+            fp_on_fire += bool(frame.get("fires_visible"))
         elif visible:
             fn += 1
         else:
@@ -79,6 +80,7 @@ def reasoning_metrics(log: RunLog, layer: str = "reasoner") -> Optional[Dict[str
         "f1": f1,
         "hallucination_rate": fp / (fp + tn) if fp + tn else None,
         "fp_on_distractor": fp_on_distractor,
+        **({"fp_on_fire": fp_on_fire} if log.meta.get("fires") else {}),  # runs with fires only
         "grounding_accuracy": grounded / grounding_trials if grounding_trials else None,
         "latency_mean_s": float(lat.mean()),
         "latency_p95_s": float(np.percentile(lat, 95)),

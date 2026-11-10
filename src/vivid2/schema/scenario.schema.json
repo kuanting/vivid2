@@ -114,6 +114,22 @@
         }
       }
     },
+    "fires": {
+      "type": "array",
+      "description": "static fires (blueprints in /Game/VIVID2/Fire), spawned like distractors and recorded as fires_visible; not targets (see vivid2/hazards/fire.py)",
+      "items": {
+        "type": "object",
+        "required": ["id", "asset", "ned"],
+        "additionalProperties": false,
+        "properties": {
+          "id": {"type": "string", "description": "zero-padded, e.g. Fire01: no id may contain another"},
+          "asset": {"type": "string"},
+          "ned": {"$ref": "#/$defs/vec3"},
+          "yaw_deg": {"type": "number", "description": "the smoke drifts along +X; default: downwind (environment.wind_ned)"},
+          "description": {"type": "string"}
+        }
+      }
+    },
     "brief": {"type": "string"},
     "environment": {
       "type": "object",
@@ -143,7 +159,21 @@
         "geofence_margin_m": {"type": "number", "default": 20},
         "energy_budget_m": {"type": "number", "description": "path-length proxy for battery budget (per drone)"},
         "min_separation_m": {"type": "number", "minimum": 0, "default": 5,
-                             "description": "teams: drones closer than this (3D) are penalised in the safety score"}
+                             "description": "teams: drones closer than this (3D) are penalised in the safety score"},
+        "no_fly": {
+          "type": "array",
+          "description": "fire restriction areas the stack is told about: stay above ceiling_agl_m inside each polygon; time below it costs safety points (no_fly_s)",
+          "items": {
+            "type": "object",
+            "required": ["polygon_ne", "ceiling_agl_m"],
+            "additionalProperties": false,
+            "properties": {
+              "polygon_ne": {"type": "array", "minItems": 3, "items": {"$ref": "#/$defs/vec2"}},
+              "ceiling_agl_m": {"type": "number", "exclusiveMinimum": 0},
+              "description": {"type": "string"}
+            }
+          }
+        }
       }
     },
     "success": {

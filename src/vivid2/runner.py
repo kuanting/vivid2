@@ -25,7 +25,7 @@ from vivid2.recorder import Recorder, RunLog
 from vivid2.scenario import Campaign, Run
 from vivid2.scoring import layer_scores, overall_score, reasoning_score
 from vivid2.sim.scene_builder import build_scene, camera_config, camera_settings, captures
-from vivid2.sim.segmentation import SegmentationError, assign_ids, palette, visibility
+from vivid2.sim.segmentation import SegmentationError, assign_ids, palette, split_seen, visibility
 from vivid2.stack.base import (Agent, DistributedTeam, FleetAgent, Frame, GTAnnotation, MissionContext, MissionSpec,
                                TargetReport)
 from vivid2.stack.reference.controllers import AirSimController
@@ -93,6 +93,7 @@ def mission_spec(run: Run, start_ned=None, terrain=None, camera: Optional[Dict[s
         team=team,
         team_mode=team_mode,
         min_separation_m=float(lim.get("min_separation_m", 5.0)) if team else None,
+        no_fly_zones=[dict(z) for z in lim["no_fly"]] if lim.get("no_fly") else None,
     )
 
 
@@ -354,7 +355,8 @@ class SimMissionContext(MissionContext):
                  fov_deg: float, frame_bank: str = "off", seg_ids: Optional[Dict[str, int]] = None,
                  target_ids: Optional[List[str]] = None, start_ned=None, terrain=None, viewer=None,
                  camera: Optional[Dict[str, Any]] = None, drone_id: Optional[str] = None,
-                 team: Optional[TeamRuntime] = None, datum_ned=None, team_info=None, team_mode: Optional[str] = None):
+                 team: Optional[TeamRuntime] = None, datum_ned=None, team_info=None, team_mode: Optional[str] = None,
+                 fire_ids: Optional[List[str]] = None):
         self.viewer = viewer  # optional live camera windows (vivid2.viewer.RunViewer)
         self.preview_topic: Optional[str] = None  # the viewer's live preview, unsubscribed at the first frame
         if frame_bank not in FRAME_BANK_MODES:
@@ -362,6 +364,7 @@ class SimMissionContext(MissionContext):
         self.frame_bank = frame_bank
         self.seg_ids = seg_ids or {}  # segmentation ID per target/distractor; empty = no visibility ground truth
         self.target_ids = set(target_ids or [])
+        self.fire_ids = set(fire_ids or [])  # fires: recorded as fires_visible, never as distractors
         self._seg_colours = palette() if self.seg_ids else None
         self.run = run
         self.world = world
@@ -538,8 +541,7 @@ class SimMissionContext(MissionContext):
         for oid, v in vis.items():  # seen in segmentation but outside the annotation's frustum test
             if oid in self.target_ids and oid not in annotated and v["visible_px"]:
                 gt.append(GTAnnotation(oid, tuple(v["bbox_vis"]), v["visible_px"], tuple(v["bbox_vis"]), v.get("contrast")))
-        distractors_seen = {oid: v["visible_px"] for oid, v in vis.items()
-                            if oid not in self.target_ids and v["visible_px"]}
+        distractors_seen, fires_seen = split_seen(vis, self.target_ids, self.fire_ids)
         if frame_id is None:
             self.clock.frame_id += 1
             frame_id = self.clock.frame_id
@@ -562,6 +564,7 @@ class SimMissionContext(MissionContext):
             "width": frame.width, "height": frame.height, "fov_deg": frame.fov_deg,
             "gt": [_gt_record(g) for g in gt], **bank,
             **({"distractors_visible": distractors_seen} if distractors_seen else {}),
+            **({"fires_visible": fires_seen} if fires_seen else {}),
             # mission time the frame took (one capture step in lockstep), and VIVID 2's work on it (paused)
             "capture_s": round(max(0, t_fetched - t_request) / 1e9, 3),
             "record_wall_s": round(time.monotonic() - wall0, 3),
@@ -832,9 +835,10 @@ async def execute_run(
     terrain, terrain_meta = load_for_run(sim_config_dir, run.spec)
     targets = run.resolved_targets(terrain)
     distractors = run.resolved_distractors(terrain)
+    fires = run.resolved_fires(terrain)
     start_ned = run.resolved_start(terrain)
     sc = run.spec["scene"]
-    scene = build_scene(run, sim_config_dir, targets, distractors, start_ned)
+    scene = build_scene(run, sim_config_dir, targets, distractors, start_ned, fires=fires)
     cam = camera_settings(scene, sc.get("camera", "Payload"), sc.get("drone_name", "Drone1"))
 
     try:
@@ -842,13 +846,13 @@ async def execute_run(
     except Exception as e:
         raise PreflightError(
             f"loading the scene failed ({e!r}). Check that map {sc.get('map', '?')!r} is open and that it has "
-            f"the assets {sorted({t['asset'] for t in targets})}."
+            f"the assets {sorted({t['asset'] for t in targets + fires})}."
         ) from e
-    preflight = run_preflight(world, run.spec, targets + distractors)  # raises PreflightError before anything is recorded
+    preflight = run_preflight(world, run.spec, targets + distractors + fires)  # raises PreflightError before anything is recorded
     seg_ids: Dict[str, int] = {}
     if captures(scene, sc.get("camera", "Payload"), 3, sc.get("drone_name", "Drone1")):
         try:
-            seg_ids = assign_ids(world, targets, distractors)
+            seg_ids = assign_ids(world, targets, distractors, fires)
         except SegmentationError as e:
             raise PreflightError(str(e)) from e
 
@@ -891,7 +895,7 @@ async def execute_run(
     controller = AirSimController(drone, world.get_sim_time, rec.log)
     ctx = SimMissionContext(run, world, drone, sc.get("camera", "Payload"), rec, controller, cam["fov-degrees"], frame_bank,
                             seg_ids=seg_ids, target_ids=[t["id"] for t in targets], start_ned=start_ned,
-                            terrain=terrain, viewer=viewer,
+                            terrain=terrain, viewer=viewer, fire_ids=[f["id"] for f in fires],
                             camera={"width": int(cam["width"]), "height": int(cam["height"]),
                                     "fov_deg": float(cam["fov-degrees"])})
     ctx.preview_topic = preview
@@ -914,7 +918,7 @@ async def execute_run(
         "config_hash": run_config_hash(run, agent.describe()),
         "map": sc.get("map"), "preflight": preflight,
         "mission_spec": ctx.mission.record(),  # what the DUT was told; open-loop evaluation reuses it
-        "distractors": distractors, "segmentation_ids": seg_ids,
+        "distractors": distractors, **({"fires": fires} if fires else {}), "segmentation_ids": seg_ids,
         # 2: ground truth carries per-target visible pixels; 3: and contrast in the colour image (fog)
         "gt_version": 3 if seg_ids else 1,
         "sim_version": SIM_VERSION, "exposure": exposure,
@@ -966,6 +970,7 @@ async def execute_team_run(client, run: Run, agent, sim_config_dir: str, out_dir
     terrain, terrain_meta = load_for_run(sim_config_dir, run.spec)
     targets = run.resolved_targets(terrain)
     distractors = run.resolved_distractors(terrain)
+    fires = run.resolved_fires(terrain)
     centre = run.resolved_start(terrain)  # the pads sit around it; the team's height datum
     fleet = run.resolved_fleet(terrain)
     ids = [d["id"] for d in fleet]
@@ -973,7 +978,7 @@ async def execute_team_run(client, run: Run, agent, sim_config_dir: str, out_dir
         raise ValueError(f"{agent.name}: {len(agent.agents)} agents for a team of {len(fleet)}")
     sc = run.spec["scene"]
     camera_id = sc.get("camera", "Payload")
-    scene = build_scene(run, sim_config_dir, targets, distractors, centre, fleet=fleet)
+    scene = build_scene(run, sim_config_dir, targets, distractors, centre, fleet=fleet, fires=fires)
     cam = camera_settings(scene, camera_id, ids[0])
 
     try:
@@ -981,13 +986,13 @@ async def execute_team_run(client, run: Run, agent, sim_config_dir: str, out_dir
     except Exception as e:
         raise PreflightError(
             f"loading the scene failed ({e!r}). Check that map {sc.get('map', '?')!r} is open and that it has "
-            f"the assets {sorted({t['asset'] for t in targets})}."
+            f"the assets {sorted({t['asset'] for t in targets + fires})}."
         ) from e
-    preflight = run_preflight(world, run.spec, targets + distractors)
+    preflight = run_preflight(world, run.spec, targets + distractors + fires)
     seg_ids: Dict[str, int] = {}
     if captures(scene, camera_id, 3, ids[0]):
         try:
-            seg_ids = assign_ids(world, targets, distractors)
+            seg_ids = assign_ids(world, targets, distractors, fires)
         except SegmentationError as e:
             raise PreflightError(str(e)) from e
 
@@ -1042,7 +1047,8 @@ async def execute_team_run(client, run: Run, agent, sim_config_dir: str, out_dir
         ctx = SimMissionContext(run, world, drones[name], camera_id, rec, controller, cam["fov-degrees"], frame_bank,
                                 seg_ids=seg_ids, target_ids=[t["id"] for t in targets], start_ned=d["ned"],
                                 terrain=terrain, viewer=viewer, camera=camera, drone_id=name,
-                                team=team, datum_ned=centre, team_info=team_info, team_mode=mode)
+                                team=team, datum_ned=centre, team_info=team_info, team_mode=mode,
+                                fire_ids=[f["id"] for f in fires])
         for nav in cameras[1:]:
             ctx._nav_fov[nav] = float(camera_settings(scene, nav, name)["fov-degrees"])
         ctxs[name] = ctx
@@ -1065,7 +1071,7 @@ async def execute_team_run(client, run: Run, agent, sim_config_dir: str, out_dir
         "config_hash": run_config_hash(run, agent.describe()),
         "map": sc.get("map"), "preflight": preflight,
         "mission_spec": team_mission.record(),
-        "distractors": distractors, "segmentation_ids": seg_ids,
+        "distractors": distractors, **({"fires": fires} if fires else {}), "segmentation_ids": seg_ids,
         "gt_version": 3 if seg_ids else 1,
         "sim_version": SIM_VERSION, "fleet_version": FLEET_VERSION, "exposure": exposure,
         "frame_bank": {"mode": frame_bank, "jpeg_quality": JPEG_QUALITY, "jpeg_max_side": FRAME_JPEG_MAX_SIDE,

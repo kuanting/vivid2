@@ -138,11 +138,14 @@ class MissionSpec:
     team: Optional[List[Dict[str, Any]]] = None  # every drone's {"id", "start_ned"}: public knowledge
     team_mode: Optional[str] = None  # "central" or "distributed"
     min_separation_m: Optional[float] = None  # drones closer than this (3D) cost safety score
+    # Fire restriction areas (None when the scenario has none): [{"polygon_ne", "ceiling_agl_m"}].
+    # Inside a polygon the drone must stay above the ceiling (m above ground); see vivid2.hazards.fire.
+    no_fly_zones: Optional[List[Dict[str, Any]]] = None
 
     def record(self) -> Dict[str, Any]:
         """JSON-ready fields for meta.json; the terrain is summarised, not copied."""
         out = {f.name: getattr(self, f.name) for f in fields(self)
-               if f.name != "terrain" and not (f.name in TEAM_FIELDS and getattr(self, f.name) is None)}
+               if f.name != "terrain" and not (f.name in OPTIONAL_FIELDS and getattr(self, f.name) is None)}
         t = self.terrain
         out["terrain_info"] = None if t is None else {"flat": t.is_flat, "cell_m": None if t.is_flat else t.cell_m,
                                                       "source": t.source}
@@ -156,6 +159,8 @@ class MissionSpec:
 
 
 TEAM_FIELDS = ("drone_id", "team", "team_mode", "min_separation_m")
+# Left out of record() when None, so records of runs without them stay as they were.
+OPTIONAL_FIELDS = TEAM_FIELDS + ("no_fly_zones",)
 
 
 class Perception(abc.ABC):

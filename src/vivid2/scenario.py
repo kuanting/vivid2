@@ -87,6 +87,18 @@ class Run:
                 d["ned"] = _snap(d["ned"], terrain, self.authored_ground_down_m)
         return out
 
+    def resolved_fires(self, terrain=None) -> List[Dict]:
+        """Fires set on the ground like the distractors, each turned to face downwind unless it has a yaw."""
+        from vivid2.hazards.fire import fire_yaw_deg
+
+        wind = (self.spec.get("environment") or {}).get("wind_ned")
+        out = copy.deepcopy(self.spec.get("fires", []))
+        for f in out:
+            f["yaw_deg"] = fire_yaw_deg(f, wind)
+            if terrain is not None:
+                f["ned"] = _snap(f["ned"], terrain, self.authored_ground_down_m)
+        return out
+
     def resolved_start(self, terrain=None) -> List[float]:
         ned = list(self.spec["dut_start"]["ned"])
         return _snap(ned, terrain, self.authored_ground_down_m) if terrain is not None else ned
@@ -143,13 +155,19 @@ def _snap(ned, terrain, authored_ground_down_m: float) -> List[float]:
 
 
 def validate_scenario(spec: Dict, where: str = "") -> None:
-    """Raise jsonschema.ValidationError if ``spec`` isn't a valid scenario."""
+    """Raise jsonschema.ValidationError if ``spec`` isn't a valid scenario, or ValueError if its
+    fires or no-fly areas break the rules in ``vivid2.hazards.fire.check_fires``."""
+    from vivid2.hazards.fire import check_fires
+
     try:
         jsonschema.validate(spec, _load_schema("scenario.schema.json"))
     except jsonschema.ValidationError as e:
         if where:
             e.message = f"{where}: {e.message}"
         raise
+    problems = check_fires(spec)
+    if problems:
+        raise ValueError(f"{where or spec.get('id', 'scenario')}: " + "; ".join(problems))
 
 
 def make_run_id(scenario_id: str, params: Dict[str, Any], seed: int) -> str:
