@@ -7,6 +7,7 @@ from typing import Any, Awaitable, Callable, Dict, List, Optional
 import numpy as np
 
 from vivid2.geo import nadir_footprint, pixel_ray_to_ground, pixel_to_world, world_to_pixel
+from vivid2.hazards.fire import no_fly_ceiling_agl
 from vivid2.stack.base import Agent, Assessment, Frame, MissionContext, Perception, Planner, Reasoner, TargetReport, UsageStats
 from vivid2.stack.reference.controllers import DESCENT_MPS
 from vivid2.stack.reference.lowflight import CanopyMap, Clearing, DipSettings
@@ -34,6 +35,19 @@ DIP_KEEP_RADIUS = 0.75      # stop descending if the clearing shrinks below this
 LANDING_OVERHEAD_S = 40.0   # final slow landing and disarm, in the time budget
 MAX_GUARD_CLIMBS = 6
 HOME_SKIP_M = 25.0          # no dips into the launch clearing
+# Fire no-fly areas (MissionSpec.no_fly_zones): the reference stacks stay this far above a ceiling,
+# because they only know the coarse DEM while scoring uses the 1 m terrain.
+NO_FLY_MARGIN_M = 5.0
+
+
+def no_fly_floor_down(mission, n: float, e: float) -> Optional[float]:
+    """The lowest a reference stack flies over (n, e), as NED down: NO_FLY_MARGIN_M above the
+    highest no-fly ceiling there (over the mission's coarse ground). None outside every no-fly area."""
+    ceiling = no_fly_ceiling_agl(getattr(mission, "no_fly_zones", None), n, e)
+    if ceiling is None:
+        return None
+    ground = float(mission.terrain.down_at(n, e)) if mission.terrain is not None else float(mission.ground_down_m)
+    return ground - ceiling - NO_FLY_MARGIN_M
 
 
 GROUND_TOLERANCE_M = 3.0  # a depth point this far above the coarse terrain is not on the ground
@@ -249,7 +263,8 @@ class LowFlightMixin:
 
         def candidates() -> List[Clearing]:
             return [c for c in self._canopy.clearings(self.low.min_radius_m, self._dip_spacing, exclude=visited)
-                    if math.hypot(c.n - home[0], c.e - home[1]) > HOME_SKIP_M and self._may_descend_at(c.n, c.e)]
+                    if math.hypot(c.n - home[0], c.e - home[1]) > HOME_SKIP_M and self._may_descend_at(c.n, c.e)
+                    and self._dip_outside_no_fly(ctx.mission, c)]
 
         planned = candidates()
         self._lf_event(ctx, "dip_plan", spots=[[round(c.n, 1), round(c.e, 1), round(c.radius_m, 1)] for c in planned])
@@ -311,6 +326,14 @@ class LowFlightMixin:
     def _may_descend_at(self, n: float, e: float) -> bool:
         """Whether this drone may leave its survey height over (n, e) for a closer look or a dip."""
         return True
+
+    def _dip_outside_no_fly(self, mission, spot: Clearing) -> bool:
+        """A dip's bottom (dip height over the coarse ground) stays above any no-fly floor there."""
+        floor = no_fly_floor_down(mission, spot.n, spot.e)
+        if floor is None:
+            return True
+        ground = float(mission.terrain.down_at(spot.n, spot.e)) if mission.terrain is not None else mission.ground_down_m
+        return ground - self._dip_height(mission) <= floor
 
 
 def _scalar_params(obj: Any) -> Optional[Dict[str, Any]]:
@@ -574,10 +597,15 @@ class SearchAgent(LowFlightMixin, Agent):
                 frac = float(np.clip((ground - (top_look - VERIFY_CLEARANCE_M)) / seen_from, frac, 1.0))
                 look = ned + frac * (cam - ned)
         look_down = max(float(look[2]), survey_down)  # never climb above the survey altitude to look
+        floor = no_fly_floor_down(m, float(look[0]), float(look[1]))
+        limited = floor is not None and look_down > floor
+        if limited:  # inside a fire's no-fly area: look from above its ceiling
+            look_down = max(floor, survey_down)
         pos, _ = ctx.pose()
         ctx.log("events", {"t": frame.t_ns, "kind": "verify_start", "candidate": [float(v) for v in ned],
                            "confidence": assessment.confidence, "height_m": ground - look_down,
-                           "look_at": [float(look[0]), float(look[1]), look_down], "frame_id": frame.frame_id})
+                           "look_at": [float(look[0]), float(look[1]), look_down], "frame_id": frame.frame_id,
+                           **({"no_fly_limited": True} if limited else {})})
         await ctx.controller.goto([float(look[0]), float(look[1]), float(pos[2])], m.max_speed_mps)
         await ctx.controller.goto([float(look[0]), float(look[1]), look_down], VERIFY_DESCENT_MPS)
         need = self.verify_frames // 2 + 1  # majority of the close-ups

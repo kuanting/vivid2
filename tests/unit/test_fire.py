@@ -224,3 +224,12 @@ def test_a_report_with_only_a_fire_in_view_is_a_false_alarm_on_fire(tmp_path):
     assert r["confusion"]["fp"] == 2 and r["fp_on_fire"] == 1 and r["fp_on_distractor"] == 1
     assert "fp_on_fire" not in reasoning_metrics(RunLog(tmp_path, _meta(), {"frames": frames, "decisions": decisions,
                                                                              "detections": []}))
+
+
+def test_every_mission_with_scenarios_has_a_prompt_that_fills_in(root):
+    from vivid2.stack.reference.reasoners import load_prompt
+
+    missions = {Scenario.load(p).spec["mission"] for p in (root / "scenarios").rglob("*.jsonc")} | {"wildfire_sar"}
+    for mission in sorted(missions):
+        text = load_prompt(mission).format(altitude_m=55.0, brief="A hiker is missing.", detections_block="")
+        assert "{" not in text and "A hiker is missing." in text and "55 m" in text
