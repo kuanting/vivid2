@@ -57,8 +57,8 @@ A, OBJ = "editor_toolset.toolsets.asset.AssetTools", "editor_toolset.toolsets.ob
 MT, MI = "editor_toolset.toolsets.material.MaterialTools", "editor_toolset.toolsets.material_instance.MaterialInstanceTools"
 PCG, SCENE = "PCGToolset.PCGToolset", "editor_toolset.toolsets.scene.SceneTools"
 
-# Leaves: dead brown crowns. Bark, stumps: charred black. Rocks keep their materials.
-LEAVES = {"tint": {"r": 0.20, "g": 0.12, "b": 0.06, "a": 0}, "desat": 0.35}
+# Leaves: dead, blackened crowns. Bark, stumps: charred black. Rocks keep their materials.
+LEAVES = {"tint": {"r": 0.07, "g": 0.05, "b": 0.035, "a": 0}, "desat": 0.6}
 BARK = {"tint": {"r": 0.05, "g": 0.045, "b": 0.04, "a": 0}, "desat": 1.0}
 BURNT_MIS = {"MI_Birch_Large_01": LEAVES, "MI_Birch_Large_02": LEAVES, "MI_Birch_Small_01": LEAVES,
              "MI_Bark_Birch_Large_01": BARK, "MI_Bark_Birch_Large_02": BARK, "MI_Bark_Birch_Small_01": BARK,
@@ -101,9 +101,11 @@ def burnt_mi(src: str) -> str:
 def step_materials(m: Mcp) -> None:
     for src, look in BURNT_MIS.items():
         path = burnt_mi(src)
-        recreate(m, path)
         folder, name = path.rsplit("/", 1)
-        inst = m.tool(MI, "create", {"folder_path": folder, "asset_name": name, "parent": obj(f"{PACK_MI}/{src}")})
+        if m.tool(A, "exists", {"path": path}):  # update in place: the level's burnt trees reference them
+            inst = obj(path)
+        else:
+            inst = m.tool(MI, "create", {"folder_path": folder, "asset_name": name, "parent": obj(f"{PACK_MI}/{src}")})
         m.tool(MI, "set_vector_parameter", {"instance": inst, "name": "Base Tint", "value": look["tint"]})
         m.tool(MI, "set_scalar_parameter", {"instance": inst, "name": "Base Desaturation", "value": look["desat"]})
         m.tool(A, "save_assets", {"asset_paths": [path]})
@@ -159,7 +161,7 @@ def step_ground(m: Mcp) -> None:
     link(buv, "", btex, "UVs")
     bcol = add("MaterialExpressionMultiply")
     link(btex, "RGB", bcol, "A")
-    link(add("MaterialExpressionVectorParameter", ParameterName="BurntTint", DefaultValue={"R": 0.55, "G": 0.5, "B": 0.47, "A": 1.0},
+    link(add("MaterialExpressionVectorParameter", ParameterName="BurntTint", DefaultValue={"R": 0.28, "G": 0.26, "B": 0.25, "A": 1.0},
              Group=group), "", bcol, "B")
     lerp = add("MaterialExpressionLinearInterpolate")
     link(base["expression"], base["output_name"], lerp, "A")
