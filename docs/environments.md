@@ -17,7 +17,7 @@ packaged builds. See [unreal_versions.md](unreal_versions.md).
    `http://127.0.0.1:8000/mcp`. Only one editor can use the port, so close other
    UE projects first. The repo's `.mcp.json` registers it as `unreal-mcp` for
    Claude Code sessions started in the VIVID2 folder.
-3. Create maps under `/Game/VIVID2/Maps/`: `ForestSAR`, `Wildfire`, `Landslide`.
+3. Create maps under `/Game/VIVID2/Maps/`: `ForestSAR` (and its variants), `ForestFire`, `Landslide`.
    In each map, set World Settings → GameMode Override to `ProjectAirSimGameMode`.
 4. Place a marker actor named `BP_VIVID2Map_<map>` (for example
    `BP_VIVID2Map_ForestSAR`, any empty blueprint). The runner's preflight check
@@ -39,7 +39,7 @@ the packs themselves are ignored by git.
 
 | Pack | Folder | Used for | Notes |
 |---|---|---|---|
-| Forest Fire (Fab) | `Content/ForestFire/` | ForestSAR vegetation (birch trees, shrubs, ferns, grass, stumps, logs, rocks); Wildfire fire and smoke | Made for UE4. Checked in UE 5.8 (2026-11-02): all three maps load with 0 errors. The meshes log "recomputing physics on load" until they are resaved. Fire and smoke are Cascade particle systems (`PS_*`), which UE 5.8 still renders. |
+| Forest Fire (Fab) | `Content/ForestFire/` | ForestSAR vegetation (birch trees, shrubs, ferns, grass, stumps, logs, rocks); the flipbook textures and materials of VIVID 2's fire effects; ForestFire's burnt ground texture and the parents of its burnt material instances | Made for UE4; see [the pack in UE 5.8](#the-forest-fire-pack-in-ue-58). |
 
 ## Targets (hikers)
 
@@ -204,12 +204,67 @@ is only good for pipeline bring-up. It is meaningless for evaluating a VLM.
   `terrain_dtm.npz`, and the safety metrics measure height above it. The
   reference planner still flies at a fixed altitude; terrain following is M3.4.
 
-## Wildfire (Phase 2)
+## ForestFire (Phase 2)
 
-Niagara fire and smoke emitters packaged as blueprints (`BP_FireCell`,
-`BP_SmokeColumn`) are spawned and moved by `vivid2.hazards.fire_spread`, a
-cellular-automaton spread model driven by wind and slope. The fire front
-becomes a moving no-fly polygon in the safety metrics.
+ForestSAR after a forest fire: the same landscape, terrain model, trees and
+lighting, with the east side burnt. It is the map of the Wildfire S&R mission
+([missions.md](missions.md#wildfire-sr-mission-wildfire_sar)).
+
+- **The burn.** A fire came up the steep eastern valley and burnt everything
+  east of an irregular front 70-130 m east of the start: 30 % of the map. The
+  burn polygon and suggested fire positions are in
+  `unreal/VIVID2Env/SourceData/ForestFire/burn_layout.json`;
+  `tools/burn_mask.py` turns them into `burn_mask.png` (edges roughened by
+  fixed noise), imported as `/Game/VIVID2/Textures/T_VIVID2_ForestFire_BurnMask`.
+- **Ground:** `M_VIVID2_Landscape_Fire`, a copy of `M_VIVID2_Landscape` that
+  blends to the pack's burnt-grass texture where the mask says so (parameters
+  in group "VIVID2 Burn").
+- **Forest:** `PCG_VIVID2_ForestFire`, a copy of `PCG_VIVID2_Forest` with the
+  same parameters and seed. After all of its sampling it splits each layer by
+  the mask, so every tree stands where it stands in ForestSAR. Inside the burn,
+  the 2,419 trees, the stumps and the rocks keep their meshes and collision but
+  get charred bark and scorched brown crowns (material instances in
+  `/Game/VIVID2/Materials/Burnt`); understory and grass are gone. Outside it,
+  6,174 trees, as in ForestSAR.
+- **Rebuild:** `tools/build_forest_fire.py` (through the editor's MCP server)
+  re-derives all of the above in the committed level; the level itself is a
+  copy of ForestSAR with its own marker `BP_VIVID2Map_ForestFire`. Its terrain is
+  ForestSAR's (`sim_config/maps/ForestFire/terrain.json`). The lighting and base
+  haze are left as in ForestSAR, so the two maps differ only in the burn and the
+  fires; scenarios add smoky haze with `weather.fog`.
+- **Fires** are not part of the map: scenarios list them (`fires`). The
+  blueprints `VIVID2_Fire_{Small,Medium,Large,Smolder}` in `/Game/VIVID2/Fire`
+  wrap Niagara systems `NS_VIVID2_Fire_*` in `/Game/VIVID2/FX`, built by
+  `tools/build_fire_assets.py` from the pack's flipbook materials. Each has
+  flames (none for `Smolder`), a smoke plume that drifts along its +X axis
+  (about 3 m/s sideways, rising to some 40 m), a constant shadowless light, and
+  a ground-truth proxy for segmentation. The rules are in
+  [map_authoring.md](map_authoring.md#fires-and-smoke).
+- **Checked live** (2026-11-10, `wildfire_hiker_01`, oracle, noon and dusk): all three hikers found, no
+  false alarms, no collisions, no time in the no-fly area, 0 landscape holes. Check holes on this map
+  with a survey recorded with `--frame-bank rgbd`: in colour alone, `tools/count_holes.py` takes the pale
+  ash for holes. The same run twice: same frames, camera 0.7 m apart (median), no hiker switched
+  between visible and don't-care, overall 96.61 vs 96.65.
+- **Not done yet:** a spreading fire front (`vivid2.hazards`), Megascans burnt
+  snags and logs (free on Fab: Burnt Tree Trunk, Burnt Log, Burnt Tree Stump,
+  Military Trenches Tree Burnt; Coal Ash for the ground), and fire crackle
+  audio (the pack has none).
+
+### The Forest Fire pack in UE 5.8
+
+The pack was made for UE 4.27 (most assets saved in 4.10). It loads in UE 5.8
+without errors; checked on 2026-11-10:
+
+| What | Effect | VIVID 2 |
+|---|---|---|
+| 16 fire and smoke effects are Cascade (`PS_*`); 9 use GPU particles and vector fields | Rendered, but reduced with distance from the player view, not the drone cameras: gone 450 m from the start. `PS_FireLarge_01` also has an inverted fixed bounding box and both LOD distances at 0 | Not used. VIVID 2 builds its own Niagara effects from the pack's flipbooks |
+| Fire and smoke materials were made for Cascade | Without "used with Niagara sprites" a cooked build draws the default material | `tools/build_fire_assets.py` sets the flag (local change to the pack) |
+| 4 base materials use UE4 tessellation (`M_BurningGround_01`, `M_Basic_01`, `M_3MatVertBlend_01`, `M_Foliage_Trunk_01`) | The displacement is dropped: rocks, stumps and trunks are a little flatter | Accepted |
+| 28 empty 534-byte packages (e.g. `PS_SmokeLarge_Liot`, most `MI_*` in `BaseMaterials*`) | Nothing references them | Never referenced |
+| 13 meshes log "recomputing physics on load" | The cook is not deterministic until they are resaved | Resave them once (local) |
+| `T_Flip_Fire_02_D` is 32 × 32 px | Useless as a flipbook | Not used |
+| No burnt tree meshes, no sound | — | Burnt material instances on the same meshes |
+| The demo maps use the deprecated AtmosphericFog and the UE4 sky | Only the demo maps | Not used |
 
 ## Landslide (Phase 2)
 

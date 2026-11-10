@@ -112,12 +112,44 @@ of the rendered frames, not of the scene. The contrast of every target is kept
 in `frames.jsonl`, so a different threshold can be applied to finished runs
 with `vivid2 rescore`.
 
-## Wildfire S&R (`mission: wildfire_sar`), Phase 2
+## Wildfire S&R (`mission: wildfire_sar`)
 
-Find people trapped ahead of a moving fire front while staying outside the
-fire's temporary flight restriction (TFR) and above the smoke plume.
-Additional metrics: fire-front mapping IoU, minimum clearance to the fire, and
-TFR breach time.
+Find people caught by a forest fire while keeping out of the fire's no-fly
+area. Scenarios run on the **ForestFire** map (ForestSAR with its east side
+burnt; see [environments.md](environments.md#forestfire-phase-2)), for example
+`scenarios/wildfire/wildfire_hiker_01.jsonc` (campaign `wildfire_v1`). The
+hikers are scored exactly as in Forest S&R; the VLM gets its own prompt
+(`vlm/prompts/wildfire_sar.md`: flames, embers and smoke are not people).
+
+- **Fires** (`fires` in a scenario) are blueprints spawned by name like the
+  decoys: `VIVID2_Fire_Small`, `_Medium`, `_Large` (flames and a smoke plume;
+  burning patches about 3, 6 and 12 m across) and `_Smolder` (smoke only). Use
+  zero-padded ids (`Fire01`). A fire without `yaw_deg` faces downwind, so its
+  smoke drifts with `environment.wind_ned`. Fires are static: they burn in
+  place for the whole run (no spread model yet).
+- **Fire ground truth.** Each frame records how much of each fire it shows
+  (`fires_visible`: visible pixels and contrast, from the fire's segmentation
+  proxy), for a fire-spotting task. Fires are not targets: a report with only a
+  fire in view is a false alarm (`fp_on_fire` in the reasoning metrics), and
+  fires never count as distractors.
+- **No-fly areas** (`limits.no_fly: [{polygon_ne, ceiling_agl_m}]`) are the
+  coarse fire restriction areas a crew is given. The stack is told them
+  (`MissionSpec.no_fly_zones`). Each second below a ceiling inside one costs 4
+  safety points (`no_fly_s`, up to 40). `min_fire_clearance_m` (closest 3D
+  approach to a fire) is reported for information. The reference stacks stop
+  closer looks 5 m above a ceiling and don't dip into clearings inside an area.
+- **Placement rules** (checked when the scenario loads; see
+  `vivid2.hazards.fire.check_fires`): fire ids are unique and none contains
+  another; every hiker, with its jitter, is at least 15 m from every fire and
+  outside its downwind smoke (a wedge up to 60 m long); every ceiling is below
+  the survey height; the start is outside every no-fly area. **Why:** flames and
+  smoke move with Unreal's game clock, which follows the wall clock, so the
+  colour image of a fire differs a little between runs and machines (its
+  segmentation does not). Keeping hikers clear of flames and smoke keeps that
+  noise from deciding whether a hiker is visible. Thin smoke over a hiker is
+  handled like fog: below contrast ΔE 6 it is don't-care.
+- **Not yet:** a spreading fire front (the `vivid2.hazards` interface), fire-front
+  mapping IoU, and a fire-spotting mission scored on `fires_visible`.
 
 ## Landslide detection (`mission: landslide`), Phase 2
 

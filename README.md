@@ -23,7 +23,7 @@ Microsoft AirSim, ACM MM Best Open Source Software Award).
 | Mission | Status |
 |---|---|
 | Forest S&R: find missing hikers under canopy | **Phase 0**: runs on Blocks (proxy targets); ForestSAR map in progress |
-| Wildfire S&R: find trapped people near a dynamic fire front, keep out of the fire TFR | Phase 2 |
+| Wildfire S&R: find trapped people near a fire front, keep out of the fire's no-fly area | **Started**: ForestFire map with static fires (`scenarios/wildfire`); fire spread is Phase 2 |
 | Landslide detection: map debris, report blocked roads | Phase 2 |
 
 ## Layout
@@ -134,7 +134,7 @@ search with 1, 2 and 4 drones and reports how each team stack scales. See
    Includes dense-fog searches that can only be solved by flying low among solid trees
    (see [missions.md](docs/missions.md#challenge-fly-low-in-the-woods)): a challenge for
    autonomous low-altitude flight, not just perception.
-2. Wildfire map with fire-spread model; landslide map with before/after change ground truth.
+2. Wildfire: fire-spread model on the ForestFire map (static fires done); landslide map with before/after change ground truth.
 3. Vendor container interface (ROS 2 / gRPC), parallel headless runners, hidden holdout set, leaderboard.
 4. Processor-in-the-loop: PX4 HITL + companion computer running the vendor AI.
 5. Rig-in-the-loop: instrumented 3-DOF gimbal rig, rig-coupled physics, then a screen-based sensor-stimulation (VR) rig.

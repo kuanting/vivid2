@@ -2,7 +2,7 @@
 
 These rules come from how Project AirSim and VIVID 2 actually behave (checked in
 the plugin source and on the Blocks map). A map that breaks them still opens and
-flies, but its scores are wrong. Read this before building ForestSAR, Wildfire or
+flies, but its scores are wrong. Read this before building ForestSAR, ForestFire or
 Landslide.
 
 ## Coordinates and height
@@ -84,6 +84,44 @@ collision, and collision that matches the shape. Check both levels:
 - **Cook everything spawned by name.** Assets referenced only by name are not
   packaged. Add the folder to `DirectoriesToAlwaysCook` in
   `Config/DefaultGame.ini`, for example `+DirectoriesToAlwaysCook=(Path="/Game/VIVID2/Targets")`.
+
+## Fires and smoke
+
+Fires are scenario objects (`fires`), not scenery. They are the blueprints in
+`/Game/VIVID2/Fire`, built by `tools/build_fire_assets.py`
+(see [environments.md](environments.md#forestfire-phase-2)).
+
+- **Every flame and smoke column in a map is a scenario fire.** Don't place
+  fire effects in a level: they would get no segmentation ID and no ground
+  truth, so a fire-spotting score would count a correct report as a false
+  alarm.
+- **Use Niagara, not Cascade.** UE 5.8 still renders Cascade (`PS_*`) effects,
+  but reduces them by distance from the editor's or game's player view, not
+  from the drone cameras. In a 2026-11-10 probe flight, the Forest Fire pack's
+  `PS_FireLarge_01` was clear 50 m from the start, a smudge at 200 m and gone
+  at 450 m, while a Niagara emitter rendered at every distance.
+- **No distance culling.** Leave a Niagara system's effect type empty (no
+  scalability or distance culling) and give it fixed bounds.
+- **Smoke drifts along the blueprint's +X axis**, in local space, so the runner
+  turns each fire to face downwind (`environment.wind_ned`).
+- **Ground truth needs a mesh.** Project AirSim gives segmentation IDs only to
+  meshes and landscapes; particles never get one. Each fire blueprint therefore
+  has a proxy cylinder the size of its flames. It is drawn only into custom
+  depth (`bRenderInMainPass` and `bRenderInDepthPass` off), so segmentation sees
+  the fire and the colour and depth images don't. It is query-only and ignores
+  every channel, so preflight can measure it and drones fly through it. The
+  depth image never shows smoke or flames.
+- **Flame and smoke motion is not repeatable.** Unreal's game clock follows the
+  wall clock, so particles differ a little between runs and machines; the
+  segmentation proxy doesn't. Scenarios keep hikers 15 m from every fire and
+  out of its downwind smoke path (`vivid2.hazards.fire.check_fires`).
+- **Name fires with zero-padded ids** (`Fire01`, not `Fire1`): Project AirSim
+  renames a spawned actor whose id another actor's name contains, and
+  `Fire1` is contained in `Fire10`.
+- **Flag pack materials for Niagara.** Materials made for Cascade lack "used
+  with Niagara sprites", and a cooked build then draws the default material.
+  `tools/build_fire_assets.py` sets the flag on the pack materials it uses (a
+  local change to the pack).
 
 ## Lighting and weather
 

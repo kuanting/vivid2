@@ -1,0 +1,57 @@
+// ForestFire map (ForestSAR with its east side burnt, see docs/environments.md): three hikers caught by a
+// wildfire. The fire came up the eastern valley; its front runs north-south 75-110 m east of the start,
+// with two spot fires ahead of it and smouldering ground behind. The wind blows west (towards the
+// start), so the smoke drifts over the unburnt forest.
+// Fire positions are the suggestions in unreal/VIVID2Env/SourceData/ForestFire/burn_layout.json.
+// The hikers keep clear of every flame and of the downwind smoke (vivid2.hazards.fire.check_fires):
+// smoke motion differs a little between runs, so it must not decide whether a hiker is visible.
+{
+  "id": "wildfire_hiker_01",
+  "mission": "wildfire_sar",
+  "description": "Three hikers near an active forest fire front: one sheltering in the burnt area, one in a clearing ahead of the fire, one under canopy. Fire no-fly area over the front below 30 m.",
+  "scene": {"base": "scene_forest_sar.jsonc", "robot_config": "robot_vivid_quad.jsonc", "camera": "Payload", "map": "ForestFire"},
+  "dut_start": {"ned": [0, 0, -1], "yaw_deg": 0},
+  // 55 m above the start: the ground here is 10 m below to 10 m above the start, birches reach 31 m.
+  "search_area": {"polygon_ne": [[-150, -100], [150, -100], [150, 230], [-150, 230]], "altitude_m": 55, "ground_down_m": 0},
+  "targets": [
+    // in "the black": already burnt ground is the safest place near a fire
+    {"id": "Hiker1", "asset": "VIVID2_Hiker_YellowJacket_Standing", "ned": [-60, 165, 0], "yaw_deg": 80,
+     "description": "adult, yellow jacket, grey trousers, standing in the burnt area"},
+    // in a clearing (radius 9 m, measured in ForestSAR on 2026-11-03) ahead of the fire: a dip reaches it
+    {"id": "Hiker2", "asset": "VIVID2_Hiker_RedJacket_LyingBack", "ned": [74, -66, 0], "yaw_deg": 30,
+     "description": "adult, red jacket, dark trousers, lying on her back"},
+    // under canopy, low contrast
+    {"id": "Hiker3", "asset": "VIVID2_Hiker_GreenJacket_Crouching", "ned": [-110, -40, 0], "yaw_deg": 200,
+     "description": "adult, olive green jacket, crouching"}
+  ],
+  "target_jitter_m": 3,
+  "distractors": [
+    {"id": "Decoy1", "asset": "VIVID2_Decoy_Tarp_Red", "ned": [-30, -80, 0], "yaw_deg": -20, "description": "red tarp"},
+    {"id": "Decoy2", "asset": "VIVID2_Decoy_Tent_Orange", "ned": [40, 150, 0], "yaw_deg": 0, "description": "orange dome tent in the burnt area"},
+    {"id": "Decoy3", "asset": "VIVID2_Decoy_Jacket_Yellow", "ned": [120, -20, 0], "yaw_deg": 45, "description": "yellow jacket on the ground"}
+  ],
+  "fires": [
+    {"id": "Fire01", "asset": "VIVID2_Fire_Medium", "ned": [-130, 111, 0], "description": "front"},
+    {"id": "Fire02", "asset": "VIVID2_Fire_Large", "ned": [-95, 99, 0], "description": "front"},
+    {"id": "Fire03", "asset": "VIVID2_Fire_Medium", "ned": [-60, 101, 0], "description": "front"},
+    {"id": "Fire04", "asset": "VIVID2_Fire_Small", "ned": [-25, 107, 0], "description": "front"},
+    {"id": "Fire05", "asset": "VIVID2_Fire_Large", "ned": [10, 94, 0], "description": "front"},
+    {"id": "Fire06", "asset": "VIVID2_Fire_Medium", "ned": [45, 82, 0], "description": "front"},
+    {"id": "Fire07", "asset": "VIVID2_Fire_Large", "ned": [80, 77, 0], "description": "front"},
+    {"id": "Fire08", "asset": "VIVID2_Fire_Small", "ned": [115, 84, 0], "description": "front"},
+    {"id": "Fire09", "asset": "VIVID2_Fire_Medium", "ned": [150, 76, 0], "description": "front"},
+    {"id": "Fire10", "asset": "VIVID2_Fire_Small", "ned": [40, 55, 0], "description": "spot fire ahead of the front"},
+    {"id": "Fire11", "asset": "VIVID2_Fire_Small", "ned": [-60, 68, 0], "description": "spot fire ahead of the front"},
+    {"id": "Fire12", "asset": "VIVID2_Fire_Smolder", "ned": [0, 180, 0], "description": "smouldering in the burnt area"},
+    {"id": "Fire13", "asset": "VIVID2_Fire_Smolder", "ned": [-120, 200, 0], "description": "smouldering in the burnt area"},
+    {"id": "Fire14", "asset": "VIVID2_Fire_Smolder", "ned": [100, 170, 0], "description": "smouldering in the burnt area"}
+  ],
+  "brief": "A wildfire is burning in the forest east of the trailhead and moving west. Three hikers are missing in the area: one in a yellow jacket, one in a red jacket and one in an olive green jacket. They may have sheltered in already burnt ground or in clearings; one may be injured and lying down. Do not fly below 30 m over the fire front.",
+  "environment": {"time_of_day": "2026-09-28 13:00:00", "weather": {}, "wind_ned": [0, -3, 0]},
+  "limits": {"timeout_s": 1500, "max_speed_mps": 6, "min_agl_m": 0.5, "geofence_margin_m": 20, "energy_budget_m": 9000,
+             // the fire restriction area the incident command gives the crew: the front and its spot fires
+             "no_fly": [{"polygon_ne": [[-160, 40], [160, 40], [160, 130], [-160, 130]], "ceiling_agl_m": 30,
+                         "description": "active fire front"}]},
+  "success": {"localization_tolerance_m": 10, "require_all_targets": true},
+  "sweep": {"environment.time_of_day": ["2026-09-28 13:00:00", "2026-09-28 17:30:00"], "seeds": 3}
+}

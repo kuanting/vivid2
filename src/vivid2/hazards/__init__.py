@@ -1,6 +1,7 @@
-"""Dynamic hazards (Phase 2): wildfire spread and landslide change ground truth.
+"""Hazards: static fires now (``vivid2.hazards.fire``); dynamic ones (Phase 2) later.
 
-Phase 0 defines the interface only; see docs/missions.md.
+``Hazard`` is the interface for time-varying hazards such as a spreading fire front or a landslide's
+change ground truth; nothing implements it yet. See docs/missions.md.
 """
 from __future__ import annotations
 

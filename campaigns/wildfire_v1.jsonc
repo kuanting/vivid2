@@ -1,0 +1,6 @@
+// Wildfire S&R on the ForestFire map (static fires; see docs/missions.md).
+{
+  "name": "wildfire_v1",
+  "sim_config_dir": "../sim_config",
+  "scenarios": ["../scenarios/wildfire/wildfire_*.jsonc"]
+}
