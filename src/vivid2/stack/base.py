@@ -50,11 +50,17 @@ class Frame:
     cam_q: Tuple[float, float, float, float]  # w, x, y, z
     fov_deg: float
     depth: Optional[np.ndarray] = None  # H x W planar depth (m)
-    gt: List[GTAnnotation] = field(default_factory=list)  # evaluation only; stacks must not read it
+    # Ground truth, for scoring: empty in the frames a stack gets, unless it is the reference
+    # oracle (see docs/rules.md). Never use it in a stack under test.
+    gt: List[GTAnnotation] = field(default_factory=list)
     jpeg: Optional[bytes] = None  # the frame as encoded once by the runner, at camera resolution
     # Set by an agent taking a closer look: the pixel of the candidate it came to inspect. A
     # reasoner may then look at a full-resolution crop around it (a digital zoom).
     focus: Optional[Tuple[float, float]] = None
+    camera: str = "Payload"  # the camera that took it: the search camera, or a navigation camera ("Front")
+    # The search camera's gimbal when it took the photo, if not straight down at full field of view:
+    # {"tilt_deg", "pan_deg", "fov_deg"} (see vivid2.cameras). None for navigation cameras.
+    gimbal: Optional[Dict[str, float]] = None
 
     @property
     def width(self) -> int:
@@ -128,6 +134,9 @@ class MissionSpec:
     energy_budget_m: Optional[float] = None  # path-length proxy for the battery
     # The payload camera, so a stack can plan before its first frame: {"width": px, "height": px, "fov_deg": deg}.
     camera: Optional[Dict[str, Any]] = None
+    # Every camera the stack may use, by id (vivid2.cameras.CameraInfo.spec): the search camera
+    # ("role": "search", with its "gimbal" limits) and navigation cameras ("role": "nav").
+    cameras: Optional[Dict[str, Dict[str, Any]]] = None
     # Coarse bare-ground terrain, like the public DEM a real crew carries (20 m cells on maps
     # with relief, flat ground otherwise): ``terrain.down_at(n, e)`` is the NED down of the
     # ground. Never the simulator's 1 m model, and no trees.
@@ -160,7 +169,7 @@ class MissionSpec:
 
 TEAM_FIELDS = ("drone_id", "team", "team_mode", "min_separation_m")
 # Left out of record() when None, so records of runs without them stay as they were.
-OPTIONAL_FIELDS = TEAM_FIELDS + ("no_fly_zones",)
+OPTIONAL_FIELDS = TEAM_FIELDS + ("no_fly_zones", "cameras")
 
 
 class Perception(abc.ABC):
@@ -196,11 +205,20 @@ class Controller(abc.ABC):
     async def takeoff(self, altitude_down_m: float) -> None: ...
 
     @abc.abstractmethod
-    async def fly_path(self, waypoints: List[List[float]], speed_mps: float) -> None:
-        """Start following the path; must return promptly (non-blocking)."""
+    async def fly_path(self, waypoints: List[List[float]], speed_mps: float, heading: Any = "hold") -> None:
+        """Start following the path; must return promptly (non-blocking).
+
+        ``heading``: "hold" (keep the drone's heading), "travel" (face the direction of travel, so a
+        forward camera looks where the drone flies) or a heading in degrees (0 north, 90 east).
+        """
 
     @abc.abstractmethod
-    async def goto(self, ned: Sequence[float], speed_mps: float) -> None: ...
+    async def goto(self, ned: Sequence[float], speed_mps: float, yaw_deg: Optional[float] = None) -> None:
+        """Fly to a point; ``yaw_deg`` turns the drone to that heading on the way (None: keep it)."""
+
+    async def turn_to(self, yaw_deg: float, rate_dps: Optional[float] = None) -> None:
+        """Turn on the spot to a heading in degrees (0 north, 90 east)."""
+        raise NotImplementedError("this controller cannot turn the drone")
 
     @abc.abstractmethod
     def path_done(self) -> bool: ...
@@ -229,7 +247,20 @@ class MissionContext(abc.ABC):
     radio: Optional[Any] = None  # distributed teams: this drone's RadioPort (vivid2.radio); else None
 
     @abc.abstractmethod
-    async def get_frame(self) -> Optional[Frame]: ...
+    async def get_frame(self, camera: Optional[str] = None) -> Optional[Frame]:
+        """The next photo from ``camera`` (default: the search camera); it costs a capture step."""
+
+    async def get_frames(self, cameras: Sequence[str]) -> Dict[str, Optional[Frame]]:
+        """Photos from several cameras at once: one capture step for all of them.
+
+        This default takes them one after another; the runner takes them together.
+        """
+        return {c: await self.get_frame(c) for c in cameras}
+
+    async def point_camera(self, tilt_deg: Optional[float] = None, pan_deg: Optional[float] = None,
+                           fov_deg: Optional[float] = None) -> Dict[str, float]:
+        """Move the search camera's gimbal; returns where it points (see vivid2.cameras)."""
+        raise NotImplementedError("this context has no camera gimbal")
 
     @abc.abstractmethod
     def pose(self) -> Tuple[np.ndarray, Tuple[float, float, float, float]]: ...
@@ -273,17 +304,24 @@ class MissionContext(abc.ABC):
         return await asyncio.to_thread(fn, *args, **kwargs)
 
     async def get_nav_frame(self, camera: str = "Front") -> Optional[Frame]:
-        """RGB + planar depth (m) from a navigation camera, for obstacle avoidance.
+        """A photo from a navigation camera (colour + planar depth in metres), for obstacle avoidance.
 
-        The robot's ``Front`` camera looks forward, pitched 10 degrees down, 640x480,
-        90 degree FOV. These frames are not scored and carry no ground truth. A
-        context without navigation cameras returns None.
+        The same as ``get_frame(camera)``: it costs a capture step of mission time and is recorded,
+        but it has no ground truth and is never scored, and a report may not cite it. The robot's
+        ``Front`` camera looks forward, pitched 10 degrees down, 640x480, 90 degree FOV. None if
+        the drone has no such camera.
         """
-        return None
+        cams = getattr(getattr(self, "mission", None), "cameras", None) or {}
+        if cams.get(camera, {}).get("role") != "nav":
+            return None
+        return await self.get_frame(camera)
 
 
 class Agent(abc.ABC):
     name = "agent"
+    # True only for the reference oracle, which reads ground truth: frames carry it to this stack
+    # alone, and its results are marked not eligible for ranking (docs/rules.md).
+    uses_ground_truth = False
 
     def describe(self) -> Dict[str, Any]:
         return {"agent": self.name}
@@ -325,6 +363,7 @@ class FleetAgent(abc.ABC):
 
     name = "fleet_agent"
     team_mode = "central"
+    uses_ground_truth = False  # see Agent
 
     def describe(self) -> Dict[str, Any]:
         return {"agent": self.name, "team_mode": self.team_mode}
@@ -345,6 +384,10 @@ class DistributedTeam:
     def __init__(self, name: str, agents: Sequence[Agent]):
         self.name = name
         self.agents = list(agents)
+
+    @property
+    def uses_ground_truth(self) -> bool:
+        return any(getattr(a, "uses_ground_truth", False) for a in self.agents)
 
     def describe(self) -> Dict[str, Any]:
         first = self.agents[0].describe()

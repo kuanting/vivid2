@@ -20,7 +20,7 @@ from typing import Any, Dict
 from vivid2.scenario import Run
 from vivid2.stack.base import Agent, DistributedTeam
 from vivid2.stack.reference.agents import SearchAgent, SurveyAgent
-from vivid2.stack.reference.lowflight import DipSettings
+from vivid2.stack.reference.lowflight import DipSettings, LookAround
 from vivid2.stack.reference.planners import LawnmowerPlanner, StripPlanner
 from vivid2.stack.reference.reasoners import DetectionThresholdReasoner, VLMReasoner
 
@@ -92,6 +92,10 @@ class AgentFactory:
             raise ValueError(f"unknown team mode {self.team!r}; choose from {sorted(TEAM_MODES)}")
         if self.team is not None and self.kind == "survey":
             raise ValueError("the survey agent flies alone; teams search with coverage_gt, coverage_yolo, vlm or hybrid")
+        if self.look_around and not self.dip:
+            raise ValueError("--look-around on looks round from the bottom of each dip: add --dip on")
+        if self.look_around and self.kind == "survey":
+            raise ValueError("the survey agent records frames; look-around is for the search agents")
         self._vlm = make_vlm(self.opts, closed_loop=True) if self.kind in ("vlm", "hybrid") else None
         self._detector = None
 
@@ -105,6 +109,8 @@ class AgentFactory:
             name += "-verify" if self.verify else "-noverify"
         if self.dip:
             name += "-dip"
+        if self.look_around:
+            name += "-look"
         if self.team is not None:  # central and distributed runs of a team never share a folder
             name += f"-{self.team}"
         return name
@@ -118,6 +124,11 @@ class AgentFactory:
     def dip(self) -> bool:
         """Low flight: dip into the clearings mapped during the survey (off by default)."""
         return self.opts.get("dip") == "on"
+
+    @property
+    def look_around(self) -> bool:
+        """At the bottom of each dip, tilt the search camera and pan it all round (off by default)."""
+        return self.opts.get("look_around") == "on"
 
     @property
     def default_verify(self) -> bool:
@@ -173,7 +184,8 @@ class AgentFactory:
         dip = DipSettings() if self.dip else None
         if self.kind == "survey":
             return SurveyAgent(self.name, planner, frame_period_s=period, dip=dip)
-        kw = {"frame_period_s": period, "verify": self.verify, "dip": dip, **team}
+        kw = {"frame_period_s": period, "verify": self.verify, "dip": dip, **team,
+              **({"look_around": LookAround()} if self.look_around else {})}
         if self.kind == "coverage_gt":
             from vivid2.stack.reference.perception import GroundTruthPerception
 

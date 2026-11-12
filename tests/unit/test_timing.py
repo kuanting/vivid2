@@ -218,6 +218,31 @@ def test_a_lockstep_frame_costs_one_capture_step(blocks_run, tmp_path):
     assert f["capture_s"] == pytest.approx(0.25) and f["record_wall_s"] >= 0.0
 
 
+def test_a_drone_s_cameras_share_one_capture_step_and_are_all_recorded(blocks_run, tmp_path):
+    pytest.importorskip("projectairsim")
+    from vivid2.cameras import NAV, SEARCH, CameraInfo
+    from vivid2.runner import SimMissionContext
+
+    world = _ClockWorld()
+    rec = Recorder(tmp_path / "ctx")
+    cams = {"Payload": CameraInfo("Payload", SEARCH, 4, 4, 80.0, int(0.25e9), [0, 1]),
+            "Front": CameraInfo("Front", NAV, 4, 4, 90.0, int(0.15e9), [0, 1])}
+    ctx = SimMissionContext(blocks_run, world, _Drone(world), "Payload", rec, controller=None, fov_deg=80.0,
+                            cameras=cams)
+    t_ask = world.t
+    got = asyncio.run(ctx.get_frames(["Front", "Payload"]))
+    assert world.calls == ["pause", "request", "request", "step", "resume"]
+    assert world.t - t_ask == 250_000_000  # one step, the longer camera's
+    assert (got["Payload"].frame_id, got["Front"].frame_id) == (1, 2)
+    nav = asyncio.run(ctx.get_nav_frame("Front"))  # alone: its own shorter step, and recorded
+    assert world.t - t_ask == 250_000_000 + 150_000_000 and nav.frame_id == 3 and nav.camera == "Front"
+    rec.close()
+    frames = RunLog.load(tmp_path / "ctx")["frames"]
+    assert [(f["camera"], "gt" in f, f["fov_deg"]) for f in frames] == [
+        ("Payload", True, 80.0), ("Front", False, 90.0), ("Front", False, 90.0)]
+    assert ctx.mission.cameras["Front"]["role"] == "nav" and ctx.mission.cameras["Payload"]["gimbal"]
+
+
 def test_capture_step_follows_the_capture_interval():
     from vivid2.runner import capture_step_ns
 

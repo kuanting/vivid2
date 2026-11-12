@@ -54,15 +54,33 @@ Subclass `vivid2.stack.base.Agent` and implement `async run(ctx)`. Use:
   and it is never the 1 m model VIVID 2 scores height above ground with.
 - `ctx.mission.camera`: the payload camera's `width`, `height` (pixels) and
   `fov_deg`, for planning the survey before the first frame.
-- `await ctx.get_frame()`: the latest payload-camera frame with its pose and
-  depth, or `None` if no image is ready yet. Every frame you fetch is recorded
-  and scored, so fetch frames where you search, not on the ground. Each costs
-  0.25 s of mission time (one capture step), whatever the machine.
-- `await ctx.get_nav_frame("Front")`: the forward camera (RGB + planar depth in
-  metres, 640 × 480, 90° FOV, pitched 10° down) for obstacle avoidance when
-  flying low among trees. These frames are not scored.
+- `ctx.mission.cameras`: every camera you may use, by id.
+  - **"Payload"** (`"role": "search"`): 1920 × 1440, 80° field of view, on a gimbal, the only
+    camera with ground truth and scored.
+  - **"Front"** (`"role": "nav"`): 640 × 480, 90°, looking forward from the drone's body,
+    pitched 10° down, for steering among trees.
+  - Each entry gives the size, field of view, mount and capture step; the search camera's adds
+    its gimbal limits.
+- `await ctx.get_frame()`: the next search-camera photo with its pose and
+  depth, or `None` if no image is ready yet. Each costs 0.25 s of mission time
+  (one capture step), whatever the machine.
+  - `await ctx.get_frame("Front")` takes a forward photo (0.15 s);
+    `await ctx.get_frames(["Payload", "Front"])` takes both in one step (0.25 s).
+  - Every photo is recorded, so take them where you search, not on the ground.
+    Perception and reasoning are scored only on search-camera photos you log
+    detections or decisions for.
+  - `get_nav_frame("Front")` is the same as `get_frame("Front")`.
+- `await ctx.point_camera(tilt_deg, pan_deg, fov_deg)`: move the search camera's
+  gimbal. Tilt runs from -90 (straight down, the default) to +10, pan to ±180 degrees around the
+  drone, and the field of view (zoom) from 80 down to 8 degrees. A move takes mission time:
+  60 degrees per second, plus 0.5 s per e-fold of zoom, plus 0.2 s. A photo records where the
+  gimbal pointed (`frame.gimbal`).
 - `ctx.controller`: `takeoff`, `fly_path` (returns immediately; poll
-  `path_done()`), `goto`, `hover`, `return_and_land`.
+  `path_done()`), `goto`, `turn_to`, `hover`, `return_and_land`.
+  - `fly_path(..., heading="travel")` faces the direction of travel, so the forward camera looks
+    where you fly; `heading=<degrees>` holds a heading.
+  - `goto(..., yaw_deg=...)` turns on the way, and `turn_to(yaw_deg)` turns on the spot.
+  - Headings are degrees: 0 north, 90 east. The default holds the drone's heading.
 - `ctx.pose()`, `ctx.elapsed_s()`, `ctx.should_stop()`: drone pose, mission
   time, and whether the time limit is up.
 - `await ctx.think(fn, *args)`: run your model (a function, in a worker thread, or a
@@ -89,6 +107,10 @@ For a team of drones (a `FleetAgent` commanding every drone, or one agent per dr
 simulated radio), see [teams.md](teams.md). Run your models through `await ctx.think(fn, ...)`:
 in a team it charges the time the clock stood still for other drones' photos.
 
-Rules: do not read `frame.gt`, and do not query simulator ground truth APIs
-(`get_ground_truth_*`, object poses). Published results will use hidden
-holdout scenarios (Phase 3).
+Rules: see [rules.md](rules.md).
+- **Ground truth:** frames reach your stack without it (`frame.gt` is empty).
+- **Simulator handles:** don't use the context's private (`_`) attributes, or the simulator
+  itself.
+- **Citations:** a report must cite one of your drone's recorded search-camera photos
+  (`frame_id`); otherwise it counts as a false alarm.
+- **Holdout:** published results will use hidden holdout scenarios (Phase 3).

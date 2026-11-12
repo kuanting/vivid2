@@ -37,6 +37,12 @@ def rpy_to_quat(roll: float, pitch: float, yaw: float) -> Tuple[float, float, fl
     )
 
 
+def yaw_deg_of(q_wxyz: Sequence[float]) -> float:
+    """Heading of an attitude quaternion, degrees: 0 north, 90 east."""
+    w, x, y, z = q_wxyz
+    return math.degrees(math.atan2(2.0 * (w * z + x * y), 1.0 - 2.0 * (y * y + z * z)))
+
+
 def focal_px(width: int, fov_deg: float) -> float:
     return (width / 2.0) / math.tan(math.radians(fov_deg) / 2.0)
 

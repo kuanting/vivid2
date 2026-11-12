@@ -1,34 +1,20 @@
 """Team runs on one simulator clock: shared photo batches, the navigation gate, fair thinking time."""
 import asyncio
-import enum
-import sys
 import threading
 import time
-import types
 from types import SimpleNamespace
 
 import numpy as np
 import pytest
 
+from vivid2.cameras import NAV, SEARCH, CameraInfo
 from vivid2.recorder import Recorder, RunLog
 from vivid2.scenario import Scenario
 from vivid2.stack.base import MissionSpec
 from vivid2.team_runtime import PauseLedger, TeamAgentError, TeamRuntime, run_tasks
 
 
-@pytest.fixture(autouse=True)
-def image_types(monkeypatch):
-    """Project AirSim's ImageType, or a stand-in where the client is not installed (CI)."""
-    try:
-        import projectairsim.types  # noqa: F401
-    except ImportError:
-        mod = types.ModuleType("projectairsim.types")
-        mod.ImageType = enum.IntEnum("ImageType", {"SCENE": 0, "DEPTH_PLANAR": 1, "DEPTH_PERSPECTIVE": 2,
-                                                   "SEGMENTATION": 3})
-        pkg = types.ModuleType("projectairsim")
-        pkg.types = mod
-        monkeypatch.setitem(sys.modules, "projectairsim", pkg)
-        monkeypatch.setitem(sys.modules, "projectairsim.types", mod)
+pytestmark = pytest.mark.usefixtures("airsim_types")
 
 
 def _images(t_ns):
@@ -60,6 +46,7 @@ class _World:
     def __init__(self, lockstep=True):
         self.t = 5_000_000_000
         self.calls = []
+        self.step_ns = []
         self.steps_done = 0
         self.stepped = threading.Event()
         client = SimpleNamespace(unsubscribe=lambda topic: None, preprocess_request=lambda r: r,
@@ -79,6 +66,7 @@ class _World:
 
     def continue_for_sim_time(self, ns, wait):
         self.t += ns
+        self.step_ns.append(ns)
         self.calls.append("step")
         self.steps_done += 1
         self.stepped.set()
@@ -95,13 +83,26 @@ class _Drone:
         self.world.calls.append(f"capture {self.name} {camera}")
         return _images(self.world.t)
 
+    def set_camera_pose(self, camera, pose, wait):
+        self.world.calls.append(f"pose {self.name} {camera}")
+        return True
+
+    def set_field_of_view(self, camera, image_type, fov):
+        self.world.calls.append(f"fov {self.name} {camera} {int(image_type)} {fov:g}")
+        return True
+
 
 @pytest.fixture
 def run(root):
     return Scenario.load(root / "scenarios/forest_sar/blocks_hiker_01.jsonc").expand(seeds=[0])[0]
 
 
-def _team(run, tmp_path, n=2, lockstep=True):
+def _cameras():
+    return {"Payload": CameraInfo("Payload", SEARCH, 4, 4, 80.0, 0, []),
+            "Front": CameraInfo("Front", NAV, 4, 4, 90.0, int(0.15e9), [0, 1], (0.7, 0.0, 0.1), (0.0, -10.0, 0.0))}
+
+
+def _team(run, tmp_path, n=2, lockstep=True, cameras=False):
     from vivid2.runner import SimMissionContext
 
     world = _World(lockstep)
@@ -110,7 +111,7 @@ def _team(run, tmp_path, n=2, lockstep=True):
     team = TeamRuntime(world, rec, ids)
     ctxs = [SimMissionContext(run, world, _Drone(world, i), "Payload", rec, controller=None, fov_deg=80.0,
                               drone_id=i, team=team, team_info=[{"id": j, "start_ned": [0, 0, 0]} for j in ids],
-                              team_mode="central") for i in ids]
+                              team_mode="central", cameras=_cameras() if cameras else None) for i in ids]
     return world, rec, team, ctxs
 
 
@@ -165,19 +166,70 @@ def test_a_drone_due_to_wake_joins_the_batch(run, tmp_path):
     assert fa.t_ns == fb.t_ns
 
 
-def test_navigation_photos_wait_for_the_batch_and_hold_the_next_one_off(run, tmp_path):
-    world, rec, team, (a, b) = _team(run, tmp_path)
-
-    async def nav_after_batch_started():
-        await asyncio.to_thread(world.stepped.wait)
-        return await b.get_nav_frame("Front")
+def test_two_cameras_of_a_drone_and_a_teammate_s_photo_share_one_capture_step(run, tmp_path):
+    world, rec, team, (a, b) = _team(run, tmp_path, cameras=True)
 
     async def both():
-        return await asyncio.gather(a.get_frame(), nav_after_batch_started())
+        return await asyncio.gather(a.get_frames(["Front", "Payload"]), b.get_frame())
 
-    asyncio.run(both())
+    fa, fb = asyncio.run(both())
     rec.close()
-    assert world.calls == ["pause", "request", "step", "resume", "capture Drone2 Front"]
+    assert world.calls == ["pause", "request", "request", "request", "step", "resume"]
+    assert world.step_ns == [int(0.25e9)]  # the longest of the cameras' capture steps
+    assert (fa["Payload"].frame_id, fa["Front"].frame_id, fb.frame_id) == (1, 2, 3)  # drone, then camera order
+    assert fa["Front"].camera == "Front" and fa["Front"].gt == [] and fa["Front"].fov_deg == 90.0
+    frames = RunLog.load(tmp_path / "team")["frames"]
+    assert [(f["frame_id"], f["drone"], f["camera"], "gt" in f) for f in frames] == [
+        (1, "Drone1", "Payload", True), (2, "Drone1", "Front", False), (3, "Drone2", "Payload", True)]
+    t = team.timing()
+    assert t["max_batch"] == 3 and t["frames_by_camera"] == {"Payload": 2, "Front": 1}
+
+
+def test_a_navigation_photo_alone_costs_its_own_capture_step(run, tmp_path):
+    world, rec, team, (a, b) = _team(run, tmp_path, cameras=True)
+    f = asyncio.run(a.get_nav_frame("Front"))
+    rec.close()
+    assert f.camera == "Front" and f.frame_id == 1 and world.step_ns == [int(0.15e9)]
+    assert asyncio.run(a.get_nav_frame("Chase")) is None
+    with pytest.raises(ValueError, match="no camera 'Chase'"):
+        asyncio.run(a.get_frame("Chase"))
+
+
+def test_two_requests_for_the_same_camera_share_the_photo(run, tmp_path):
+    world, rec, team, (a, b) = _team(run, tmp_path, cameras=True)
+
+    async def twice():
+        return await asyncio.gather(a.get_frame(), a.get_frames(["Payload", "Front"]))
+
+    one, both = asyncio.run(twice())
+    rec.close()
+    assert world.calls.count("request") == 2 and one.frame_id == both["Payload"].frame_id
+
+
+def test_a_gimbal_move_waits_for_the_batch_and_holds_the_next_one_off(run, tmp_path):
+    world, rec, team, (a, b) = _team(run, tmp_path, cameras=True)
+    slept = []
+
+    async def fake_sleep(s):  # the fake clock only moves in capture steps
+        slept.append(s)
+
+    b.sleep = fake_sleep
+
+    async def point_after_batch_started():
+        await asyncio.to_thread(world.stepped.wait)
+        return await b.point_camera(tilt_deg=-45, fov_deg=40)
+
+    async def both():
+        return await asyncio.gather(a.get_frame(), point_after_batch_started())
+
+    _, g = asyncio.run(both())
+    rec.close()
+    assert world.calls[:4] == ["pause", "request", "step", "resume"]
+    assert world.calls[4:] == ["pose Drone2 Payload", "fov Drone2 Payload 0 40", "fov Drone2 Payload 1 40"]
+    assert g == {"tilt_deg": -45.0, "pan_deg": 0.0, "fov_deg": 40.0}
+    assert slept == [pytest.approx(45 / 60 + 0.5 * 0.6931 + 0.2, abs=1e-3)]
+    events = RunLog.load(tmp_path / "team")["events"]
+    assert [e["kind"] for e in events] == ["gimbal"] and events[0]["drone"] == "Drone2"
 
 
 def test_after_a_failed_batch_photos_are_fetched_running_one_at_a_time(run, tmp_path):

@@ -73,13 +73,26 @@ def _open_loop_section(results: List[Dict[str, Any]]) -> str:
 reasoning score down. Latency of local models was measured with Unreal closed (uncontended GPU).</p>"""
 
 
+def _is_oracle(r: Dict[str, Any]) -> bool:
+    """The reference oracle reads ground truth: shown for reference, never ranked (docs/rules.md)."""
+    return not r.get("eligible", (r.get("agent_config") or {}).get("perception") != "gt_perception")
+
+
 def _stack_rows(results: List[Dict[str, Any]]) -> str:
+    oracle = {stack_label(r) for r in results if _is_oracle(r)}
+    violations: Dict[str, int] = {}
+    for r in results:
+        violations[stack_label(r)] = violations.get(stack_label(r), 0) + len(r.get("rule_violations") or [])
     rows = []
-    for agent, s in sorted(aggregate(results).items(), key=lambda kv: -(kv[1]["scores"]["overall"]["mean"] or 0)):
+    ranked = sorted(aggregate(results).items(),
+                    key=lambda kv: (kv[0] in oracle, -(kv[1]["scores"]["overall"]["mean"] or 0)))
+    for agent, s in ranked:
         cells = "".join(_score_cell(s["scores"][k]) for k in LAYERS)
+        note = " <span class='muted'>(oracle, not eligible)</span>" if agent in oracle else ""
         rows.append(
-            f"<tr><td><b>{html.escape(agent)}</b></td><td class='num'>{s['runs']}</td>"
-            f"<td class='num'>{100 * s['success_rate']:.0f}%</td><td class='num'>{s['collision_runs']}</td>{cells}</tr>"
+            f"<tr><td><b>{html.escape(agent)}</b>{note}</td><td class='num'>{s['runs']}</td>"
+            f"<td class='num'>{100 * s['success_rate']:.0f}%</td><td class='num'>{s['collision_runs']}</td>"
+            f"<td class='num'>{violations.get(agent, 0)}</td>{cells}</tr>"
         )
     return "".join(rows)
 
@@ -98,7 +111,7 @@ def _team_sections(results: List[Dict[str, Any]]) -> str:
         rs = [r for r in results if r["team"].get("mode") == mode]
         if rs:
             out.append(f"""<h2>{html.escape(title)}</h2>
-<div class="wrap"><table><tr><th>Stack x drones</th><th>Runs</th><th>Success</th><th>Collision runs</th>{head}</tr>{_stack_rows(rs)}</table></div>""")
+<div class="wrap"><table><tr><th>Stack x drones</th><th>Runs</th><th>Success</th><th>Collision runs</th><th>Rule violations</th>{head}</tr>{_stack_rows(rs)}</table></div>""")
     rows = []
     for agent, sizes in sorted(scaling(results).items()):
         for n, s in sizes.items():
@@ -125,7 +138,7 @@ def render(results: List[Dict[str, Any]], title: str) -> str:
     singles = [r for r in results if not r.get("team")]
     head = "".join(f"<th>{k}</th>" for k in LAYERS)
     stacks = ('<h2>Stacks</h2>\n<div class="wrap"><table><tr><th>Stack</th><th>Runs</th><th>Success</th>'
-              f'<th>Collision runs</th>{head}</tr>{_stack_rows(singles)}</table></div>') if singles else ""
+              f'<th>Collision runs</th><th>Rule violations</th>{head}</tr>{_stack_rows(singles)}</table></div>') if singles else ""
 
     run_rows = []
     for r in sorted(results, key=lambda r: (r["scenario_id"], r["agent"], r["run_id"])):

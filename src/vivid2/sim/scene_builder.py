@@ -82,11 +82,15 @@ def _annotate(robot: Dict[str, Any], camera_id: str, object_ids: List[str]) -> D
     return robot
 
 
-def _camera(robot_or_scene: Dict[str, Any], camera_id: str, drone_name: str) -> Dict[str, Any]:
-    robot = robot_or_scene
+def robot_config(robot_or_scene: Dict[str, Any], drone_name: str = "Drone1") -> Dict[str, Any]:
+    """A drone's robot config, from a loaded scene (or the robot config itself)."""
     if "actors" in robot_or_scene:
-        robot = next(a for a in robot_or_scene["actors"] if a.get("name") == drone_name)["robot-config"]
-    return next(s for s in robot["sensors"] if s["id"] == camera_id)
+        return next(a for a in robot_or_scene["actors"] if a.get("name") == drone_name)["robot-config"]
+    return robot_or_scene
+
+
+def _camera(robot_or_scene: Dict[str, Any], camera_id: str, drone_name: str) -> Dict[str, Any]:
+    return next(s for s in robot_config(robot_or_scene, drone_name)["sensors"] if s["id"] == camera_id)
 
 
 def camera_config(robot_or_scene: Dict[str, Any], camera_id: str, drone_name: str = "Drone1") -> Dict[str, Any]:

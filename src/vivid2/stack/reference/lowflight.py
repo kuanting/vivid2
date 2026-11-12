@@ -15,9 +15,12 @@ comes down. With dips on, a reference agent:
 
 A guard checks the map ahead of the drone during the survey and climbs when the
 canopy or the ground ahead comes within ``guard_clearance_m`` of the flight
-level. (The reference controller keeps the heading fixed, so the forward camera
+level. (The reference agents keep the heading fixed, so the forward camera
 only looks along the track on northbound legs; the nadir map covers every
-direction.)
+direction. A stack may fly with ``heading="travel"`` instead.)
+
+With ``LookAround`` (``--look-around on``), the agent also tilts the search camera
+towards the horizon at the bottom of each dip and pans it all round.
 
 It deliberately never flies under the canopy or between the trunks: that is the
 headroom the benchmark leaves for capable stacks.
@@ -51,6 +54,24 @@ class DipSettings:
     guard_clearance_m: float = 10.0  # keep the canopy/ground ahead at least this far below
     guard_lookahead_m: float = 30.0
     guard_half_width_m: float = 5.0
+
+    def describe(self) -> Dict[str, Any]:
+        return asdict(self)
+
+
+@dataclass
+class LookAround:
+    """At the bottom of each dip, tilt the search camera towards the horizon and pan it all round.
+
+    From 12 m in a clearing, a nadir photo sees about 20 x 15 m; people at the clearing's edge or
+    under the crowns beyond are seen only obliquely. Each of ``steps`` directions is assessed; a
+    find is reported when ``votes`` looks agree on where the person is (with 80 degree photos 45
+    degrees apart, most directions are seen twice).
+    """
+
+    steps: int = 8
+    tilt_deg: float = -20.0
+    votes: int = 2
 
     def describe(self) -> Dict[str, Any]:
         return asdict(self)

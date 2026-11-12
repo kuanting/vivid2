@@ -62,7 +62,7 @@ class FakeTeamController(Controller):
         self.d.path, self.d.speed = [np.array([self.d.pos[0], self.d.pos[1], altitude_down_m])], CLIMB_MPS
         await self._arrive()
 
-    async def fly_path(self, waypoints, speed_mps) -> None:
+    async def fly_path(self, waypoints, speed_mps, heading="hold") -> None:
         self.ctx.log("events", {"t": self.ctx.fleet.t_ns, "kind": "path_start", "waypoints": waypoints,
                                 "speed": speed_mps, "from": self.d.pos.tolist()})
         self.d.path, self.d.speed = [np.asarray(p, float) for p in waypoints], speed_mps
@@ -70,7 +70,7 @@ class FakeTeamController(Controller):
     def path_done(self) -> bool:
         return not self.d.path
 
-    async def goto(self, ned, speed_mps) -> None:
+    async def goto(self, ned, speed_mps, yaw_deg=None) -> None:
         self.ctx.log("events", {"t": self.ctx.fleet.t_ns, "kind": "goto", "target": list(map(float, ned))})
         self.d.path, self.d.speed = [np.asarray(ned, float)], speed_mps
         await self._arrive()
@@ -96,7 +96,9 @@ class FakeDroneContext(MissionContext):
         self.controller = FakeTeamController(self)
         self.radio = None
 
-    async def get_frame(self) -> Optional[Frame]:
+    async def get_frame(self, camera: Optional[str] = None) -> Optional[Frame]:
+        if camera not in (None, "Payload"):
+            raise ValueError(f"the fake fleet's drones have no camera {camera!r}")
         f = self.fleet
         await f.wait(CAPTURE_S)
         f.frame_id += 1

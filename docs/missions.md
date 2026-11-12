@@ -49,9 +49,14 @@ VIVID 2 is set up to reward stacks that can do that autonomously:
   would cost them more time than they gain.
 - **Hitting things is expensive.** Every tree, rock or log strike counts as a
   collision in the safety score, which carries 20 % of the overall weight.
-- **The sensors are there.** Besides the nadir payload camera, the drone has a
-  forward `Front` camera (RGB + depth, 640 × 480, 90° FOV, pitched 10° down;
-  `await ctx.get_nav_frame()`), an IMU, GPS, a barometer and a magnetometer.
+- **The sensors are there.**
+  - **Payload camera:** the scored search camera, on a gimbal. `ctx.point_camera` tilts it from
+    straight down to just above the horizon, pans it around the drone and zooms it, for example
+    to look across a clearing from low down.
+  - **`Front` camera:** a forward camera (RGB + depth, 640 × 480, 90° FOV, pitched 10° down;
+    `await ctx.get_frame("Front")`), recorded but never scored. Turn the drone, or fly with
+    `heading="travel"`, to point it.
+  - An IMU, GPS, a barometer and a magnetometer.
   The stack gets a coarse terrain model, never the tree positions.
 
 Things a capable stack might do: plan a terrain-following route through

@@ -11,6 +11,7 @@ from typing import Any, Dict, List
 import numpy as np
 
 from vivid2.metrics.cameras import frame_camera, search_cameras
+from vivid2.metrics import rules
 from vivid2.metrics.mission import match_reports
 from vivid2.recorder import RunLog
 
@@ -83,7 +84,7 @@ def team_metrics(log: RunLog) -> Dict[str, Any]:
     ids = [d["id"] for d in fleet_of(meta)]
     tol = meta.get("success", {}).get("localization_tolerance_m", 10.0)
     reports = log["reports"]
-    m = match_reports(reports, meta["targets"], tol)
+    m = match_reports(rules.check(log)[0], meta["targets"], tol)  # cited reports only (docs/rules.md)
     t0 = meta["t0_ns"]
     timeout = float(meta["limits"]["timeout_s"])
     found_t = [(v["t"] - t0) / 1e9 for v in m["matched"].values()]

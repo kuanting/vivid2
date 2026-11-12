@@ -117,7 +117,14 @@ YOLOv8/YOLO11-format ONNX file works via `--yolo-model path.onnx`.
 `--verify on --dip on` gives it the same closer looks and dips as `vlm --dip`, so
 only the eyes differ. See [docs/architecture.md](docs/architecture.md#yolo-baseline).
 
-To plug in your own stack, see [docs/adding_a_dut.md](docs/adding_a_dut.md).
+To plug in your own stack, see [docs/adding_a_dut.md](docs/adding_a_dut.md). Every stack follows
+the search rules in [docs/rules.md](docs/rules.md):
+- no ground truth;
+- every photo costs mission time and is recorded;
+- each report cites the stack's own search-camera photo.
+
+The drone's search camera is on a gimbal (tilt, pan, zoom). A forward camera helps it steer
+among trees.
 
 ### Teams of drones
 

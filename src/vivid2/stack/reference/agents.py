@@ -10,7 +10,8 @@ from vivid2.geo import nadir_footprint, pixel_ray_to_ground, pixel_to_world, wor
 from vivid2.hazards.fire import no_fly_ceiling_agl
 from vivid2.stack.base import Agent, Assessment, Frame, MissionContext, Perception, Planner, Reasoner, TargetReport, UsageStats
 from vivid2.stack.reference.controllers import DESCENT_MPS
-from vivid2.stack.reference.lowflight import CanopyMap, Clearing, DipSettings
+from vivid2.cameras import GIMBAL_SETTLE_S, GIMBAL_SLEW_DPS
+from vivid2.stack.reference.lowflight import CanopyMap, Clearing, DipSettings, LookAround
 from vivid2.terrain import TerrainModel
 
 DEPTH_SATURATION_M = 65.0  # 16-bit millimetre depth saturates at 65.535 m
@@ -112,8 +113,15 @@ def geolocate(frame: Frame, u: float, v: float, ground_down_m: float,
     return ray_to_terrain(frame, u, v, terrain)
 
 
+def is_default_view(frame: Frame) -> bool:
+    """A search photo taken straight down at full field of view (the camera's mount, no gimbal move)."""
+    return getattr(frame, "gimbal", None) is None and getattr(frame, "camera", "Payload") == "Payload"
+
+
 def highest_obstacle_down(frame: Frame, u: float, v: float, radius_m: float = VERIFY_RADIUS_M) -> Optional[float]:
     """NED down of the highest surface within ``radius_m`` of pixel (u, v), from a nadir depth image."""
+    if not is_default_view(frame):  # planar depth is the vertical distance only for a nadir photo
+        return None
     if frame.depth is None:
         return None
     d_center = frame.depth[int(np.clip(round(v), 0, frame.height - 1)), int(np.clip(round(u), 0, frame.width - 1))]
@@ -176,7 +184,7 @@ class LowFlightMixin:
         if self._last_pos is not None:
             self._odo_m += float(np.linalg.norm(p - self._last_pos))
         self._last_pos = p
-        if self._canopy is not None:
+        if self._canopy is not None and is_default_view(frame):  # the canopy map assumes a nadir view
             self._canopy.add(frame)
 
     def _lf_event(self, ctx: MissionContext, kind: str, **kw) -> None:
@@ -237,6 +245,10 @@ class LowFlightMixin:
         travel = math.hypot(spot.n - pos[0], spot.e - pos[1])
         home = math.hypot(spot.n - m.start_ned[0], spot.e - m.start_ned[1])
         look_s = self.low.dip_frames * max(self.frame_period_s, self._assess_s)
+        look = getattr(self, "look", None)
+        if look is not None:  # every step a gimbal move and a look, then back to straight down
+            look_s += look.steps * ((360.0 / look.steps) / GIMBAL_SLEW_DPS + GIMBAL_SETTLE_S
+                                    + max(self.frame_period_s, self._assess_s)) + 2.0 * (90.0 / GIMBAL_SLEW_DPS)
         dip_s = (travel / m.max_speed_mps + drop / DIP_DESCENT_MPS + drop / DIP_CLIMB_MPS
                  + math.ceil(drop / DIP_STEP_M) * DIP_STEP_OVERHEAD_S + look_s)
         home_s = home / m.max_speed_mps + max(0.0, m.start_ned[2] - self._survey_down) / DESCENT_MPS + LANDING_OVERHEAD_S
@@ -384,9 +396,13 @@ class SearchAgent(LowFlightMixin, Agent):
         verify_frames: int = 3,
         max_verifications: int = 8,
         dip: Optional[DipSettings] = None,
+        look_around: Optional[LookAround] = None,
     ):
+        if look_around is not None and dip is None:
+            raise ValueError("look-around happens at the bottom of a dip: it needs dip settings")
         self.name = name
         self.low = dip
+        self.look = look_around
         self.planner = planner
         self.reasoner = reasoner
         self.perception = perception
@@ -398,6 +414,10 @@ class SearchAgent(LowFlightMixin, Agent):
         self.verify_frames = verify_frames
         self.max_verifications = max_verifications
         self._path: List[List[float]] = []
+
+    @property
+    def uses_ground_truth(self) -> bool:
+        return bool(getattr(self.perception, "uses_ground_truth", False))
 
     def describe(self) -> Dict[str, Any]:
         provider = getattr(self.reasoner, "provider", None)
@@ -415,6 +435,7 @@ class SearchAgent(LowFlightMixin, Agent):
                         "max": self.max_verifications, "approach": "line_of_sight",
                         "min_height_m": LOOK_MIN_AGL_M} if self.verify else False),
             **({"dip": self._lf_describe()} if self.low is not None else {}),  # old run hashes stay valid
+            **({"look_around": self.look.describe()} if self.look is not None else {}),
             # Layer settings (sidelap, thresholds, VLM effort...) so a config change forces a re-run.
             "params": {
                 "planner": _scalar_params(self.planner),
@@ -549,6 +570,46 @@ class SearchAgent(LowFlightMixin, Agent):
                                                source=self.reasoner.name, frame_id=last[2].frame_id, t_ns=last[2].t_ns,
                                                note=last[1].description))
         self._lf_event(ctx, "dip_look", at=[spot.n, spot.e], votes=len(best), confirmed=confirmed)
+        if self.look is not None and not ctx.should_stop():
+            await self._look_around(ctx, spot)
+
+    async def _look_around(self, ctx: MissionContext, spot: Clearing) -> None:
+        """Pan the tilted search camera all round from the bottom of a dip; report what enough looks agree on."""
+        m, la = ctx.mission, self.look
+        yes: List[Any] = []
+        try:
+            for k in range(la.steps):
+                if ctx.should_stop():
+                    break
+                await ctx.point_camera(tilt_deg=la.tilt_deg, pan_deg=k * 360.0 / la.steps)
+                t_loop = ctx.elapsed_s()
+                frame = await ctx.get_frame()
+                if frame is None:
+                    continue
+                self._lf_observe(frame)
+                a, _ = await self._assess(ctx, frame, phase="look_around")
+                if a.target_found and a.pixel and a.confidence >= self.min_confidence:
+                    at = geolocate(frame, a.pixel[0], a.pixel[1], m.ground_down_m, m.terrain)
+                    if at is not None:
+                        yes.append((at, a, frame))
+                await self._pace(ctx, t_loop)
+        finally:
+            await ctx.point_camera(tilt_deg=-90.0, pan_deg=0.0)  # back to straight down for the flight on
+        best: List[Any] = []
+        for at, _, _ in yes:
+            group = [y for y in yes if np.linalg.norm(y[0][:2] - at[:2]) <= self.dedup_radius_m]
+            if len(group) > len(best):
+                best = group
+        confirmed = len(best) >= la.votes
+        if confirmed:
+            ned = np.mean([y[0] for y in best], axis=0)
+            if self._is_new(ned, self._reported):
+                last = best[-1]
+                self._reported.append(ned)
+                ctx.report_target(TargetReport(ned=ned, confidence=float(np.mean([y[1].confidence for y in best])),
+                                               source=self.reasoner.name, frame_id=last[2].frame_id, t_ns=last[2].t_ns,
+                                               note=last[1].description))
+        self._lf_event(ctx, "look_around", at=[spot.n, spot.e], looks=la.steps, votes=len(best), confirmed=confirmed)
 
     def _is_new(self, ned: np.ndarray, known: List[np.ndarray]) -> bool:
         return all(np.linalg.norm(ned[:2] - k[:2]) > self.dedup_radius_m for k in known)

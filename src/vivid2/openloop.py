@@ -23,8 +23,9 @@ from typing import Any, Callable, Dict, Iterable, List, Optional
 
 import numpy as np
 
+from vivid2.metrics.cameras import frame_camera, search_cameras
 from vivid2.recorder import STREAMS
-from vivid2.stack.base import Frame, GTAnnotation, MissionSpec, Reasoner
+from vivid2.stack.base import Frame, MissionSpec, Reasoner
 from vivid2.stack.reference.agents import decision_record
 from vivid2.vlm.base import decode_jpeg, sha256_hex
 
@@ -54,8 +55,8 @@ def load_frame(run_dir: Path, rec: Dict[str, Any]) -> Frame:
     return Frame(
         t_ns=rec["t"], frame_id=rec["frame_id"], rgb=decode_jpeg(jpeg),
         cam_pos=np.asarray(rec["cam_pos"], float), cam_q=tuple(rec["cam_q"]), fov_deg=rec["fov_deg"],
-        gt=[GTAnnotation(g["object_id"], tuple(g["bbox"])) for g in rec.get("gt", [])], jpeg=jpeg,
-    )
+        jpeg=jpeg, camera=rec.get("camera", "Payload"), gimbal=rec.get("gimbal"),
+    )  # no ground truth: the reasoner under test must not see it (docs/rules.md)
 
 
 def evaluate_run(
@@ -73,7 +74,8 @@ def evaluate_run(
     if "mission_spec" not in meta:
         raise ValueError(f"{run_dir} has no mission_spec in meta.json (recorded before frame banks existed)")
     mission = MissionSpec.from_record(meta["mission_spec"])
-    frames = [f for f in _read_jsonl(run_dir / "frames.jsonl") if f.get("rgb")]
+    search = search_cameras(meta)  # navigation photos have no ground truth to score a reasoner on
+    frames = [f for f in _read_jsonl(run_dir / "frames.jsonl") if f.get("rgb") and frame_camera(f) in search]
 
     out_dir = Path(out_root) / agent_name / meta["run_id"]
     out_dir.mkdir(parents=True, exist_ok=True)

@@ -26,6 +26,7 @@ from vivid2.stack.base import Detection, Frame, Perception
 
 class GroundTruthPerception(Perception):
     name = "gt_perception"
+    uses_ground_truth = True  # the oracle: reads the frames' ground truth (docs/rules.md)
 
     def __init__(self, targets: Sequence[Dict], label: str = "person", target_height_m: float = 1.7, occlusion_margin_m: float = 1.5):
         self.targets = {t["id"]: np.asarray(t["ned"], float) for t in targets}

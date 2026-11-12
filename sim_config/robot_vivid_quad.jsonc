@@ -451,7 +451,8 @@
     },
     {
       // Forward-looking camera for obstacle avoidance when flying low among trees (RGB + planar depth).
-      // Pitched 10 degrees down so the ground ahead is in view. Not used for scoring.
+      // Pitched 10 degrees down so the ground ahead is in view. A navigation camera: every photo is
+      // recorded (lockstep, like the payload's), but it has no ground truth and is never scored.
       "id": "Front",
       "type": "camera",
       "enabled": true,

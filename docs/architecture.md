@@ -22,10 +22,11 @@
 
 ## Design rules
 
-- **Ground truth never reaches the DUT.** `Frame.gt` exists only so the
-  recorder can log it. Reference stacks read it only in the explicitly named
-  oracle (`GroundTruthPerception`). `MissionSpec` carries only what a real crew
-  would give the drone: the brief, the search polygon, altitude and limits.
+- **Ground truth never reaches the DUT.** The runner records each photo's ground truth, then
+  hands the stack the frame with `gt` empty. Only the explicitly named reference oracle
+  (`GroundTruthPerception`, `Agent.uses_ground_truth`) gets it, and its results are marked not
+  eligible. `MissionSpec` carries only what a real crew would give the drone: the brief, the
+  search polygon, altitude, limits and the cameras. See [rules.md](rules.md).
 - **Every score can be recomputed offline.** A run writes raw JSONL streams.
   `vivid2 rescore` regenerates every `result.json` after a metric changes.
 - **Reproducible runs.** A run is identified by (scenario, swept params, seed).
@@ -72,6 +73,30 @@
   detections, its perception score is `n/a` and the layer is left out of the
   weighted overall score.
 - **Safety gate.** Any collision caps the overall score at 25.
+
+## Cameras
+
+A drone has one search camera on a gimbal and navigation cameras (`vivid2/cameras.py`).
+
+- **Search camera ("Payload", 1920 × 1440, 80°):**
+  - colour, planar depth and segmentation, so it has ground truth;
+  - `ctx.point_camera` tilts it (-90 to +10 degrees), pans it (±180 degrees) and zooms it (80 to
+    8 degrees) through Project AirSim's `set_camera_pose` and `set_field_of_view`;
+  - each move takes mission time (60 degrees per second, plus zoom and settling time);
+  - it is not stabilised: apart from the commanded angles it stays rigid to the drone.
+- **Navigation camera ("Front", 640 × 480, 90°, pitched 10° down):** colour and depth, for
+  steering. Recorded, never scored.
+- **Capture:** every photo is taken in lockstep. Several cameras asked for together share one
+  capture step (the longest of theirs: 0.25 s with Payload, 0.15 s for Front alone).
+  - Live on the packaged build, a Payload photo took 1.74 s of wall time, Front alone 0.22 s,
+    and both together 1.74 s.
+  - Each `frames.jsonl` record names its `camera`, and, when the gimbal moved, its `gimbal`.
+- **Coverage:**
+  - Photos with the gimbal at rest use their four-corner ground footprint, as before.
+  - Tilted or zoomed photos count only the ground where a lying person would show at least the
+    visibility threshold of pixels (`metrics.planning.detectable_hits`).
+- **The controller can turn the drone:** `fly_path(..., heading="travel"|deg)`,
+  `goto(..., yaw_deg)` and `turn_to`. The forward camera turns with it.
 
 ## Teams of drones
 

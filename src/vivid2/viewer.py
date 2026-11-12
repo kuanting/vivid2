@@ -62,6 +62,7 @@ class RunViewer:
         self._preview: Optional[np.ndarray] = None
         self._has_preview: Optional[bool] = None  # None until the runner has looked for the camera
         self._team: Dict[str, Dict[str, Any]] = {}  # team runs: each drone's newest photo (thumbnail)
+        self._nav: Dict[str, Dict[str, Any]] = {}  # navigation cameras ("Front"): the newest photo of each
         self._dirty = False
         self._running = True
         self._thread = threading.Thread(target=self._loop, name="vivid2-viewer", daemon=True)
@@ -79,6 +80,7 @@ class RunViewer:
             self._status = status
             self._payload = None
             self._team = {}
+            self._nav = {}
             self._live = True
             self._phase = "loading the scene"
             self._progress = ""
@@ -127,13 +129,20 @@ class RunViewer:
                     self._dirty = True
         return cb
 
-    def show_frame(self, frame, seg: Optional[np.ndarray] = None, extra: str = "", drone: Optional[str] = None) -> None:
+    def show_frame(self, frame, seg: Optional[np.ndarray] = None, extra: str = "", drone: Optional[str] = None,
+                   camera: Optional[str] = None) -> None:
         """A frame the agent fetched (``vivid2.stack.base.Frame``), plus its segmentation image.
 
         In a team (``drone`` given) the payload window shows the newest photo of any drone, and the
-        team window a thumbnail of each drone's newest photo.
+        team window a thumbnail of each drone's newest photo. A navigation camera's photo
+        (``camera`` given) goes to that camera's own window and leaves the payload window alone.
         """
         try:
+            if camera is not None:
+                with self._lock:
+                    self._nav[camera] = {"image": frame.rgb, "extra": extra}
+                    self._dirty = True
+                return
             if drone is not None:
                 thumb = self.cv2.resize(np.ascontiguousarray(frame.rgb), TEAM_TILE, interpolation=self.cv2.INTER_AREA)
                 with self._lock:
@@ -339,6 +348,7 @@ class RunViewer:
                     live, preview_msg, phase, progress = self._live, self._preview_msg, self._phase, self._progress
                     has_preview = self._has_preview
                     team = dict(self._team)
+                    nav = dict(self._nav)
                     self._chase_msg = None
                     self._preview_msg = None
                     self._dirty = False
@@ -373,6 +383,13 @@ class RunViewer:
                         if "t" not in placed:
                             cv2.moveWindow("VIVID2 Team", 1490, 320)  # below the chase window
                             placed.add("t")
+                    for k, (cam, shot) in enumerate(sorted(nav.items())):
+                        img = cv2.resize(np.ascontiguousarray(shot["image"]), TEAM_TILE, interpolation=cv2.INTER_AREA)
+                        cv2.putText(img, shot["extra"][:60], (6, 18), cv2.FONT_HERSHEY_SIMPLEX, 0.45, (255, 255, 255), 1)
+                        cv2.imshow(f"VIVID2 {cam}", img)
+                        if f"n{cam}" not in placed:
+                            cv2.moveWindow(f"VIVID2 {cam}", 1490 + 340 * (k + 1), 40)
+                            placed.add(f"n{cam}")
                     if chase is not None and getattr(chase, "size", 0):
                         cv2.imshow("VIVID2 Chase", cv2.resize(chase, self.chase_size))
                         if "c" not in placed:

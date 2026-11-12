@@ -233,3 +233,30 @@ def test_a_find_under_a_crown_edge_is_located_on_the_ground_not_on_the_crown():
     slope = TerrainModel(np.add.outer(np.arange(11) * -2.0, np.zeros(11)), n0=-50, e0=-50, cell_m=10.0)
     r = geolocate(Frame(0, 1, f.rgb, cam, NADIR_Q, 80.0), u, v, 0.0, slope)
     assert r[2] == pytest.approx(float(slope.down_at(r[0], r[1])), abs=0.2)
+
+
+def test_looking_around_from_the_bottom_of_a_dip_finds_a_hiker_out_of_the_nadir_view(tmp_path, blocks_run):
+    from vivid2.stack.reference.lowflight import LookAround
+
+    t = blocks_run.resolved_targets()[0]["ned"]
+    a = math.radians(20.0)  # between two look directions, so two looks see the hiker
+    cn, ce = t[0] - 12.0 * math.cos(a), t[1] - 12.0 * math.sin(a)  # 12 m from the clearing's centre
+    surface = forest_with_clearing(cn, ce)
+
+    def agent(look):
+        return SearchAgent("gt-dip", LawnmowerPlanner(), DetectionThresholdReasoner(0.5),
+                           FoggyPerception(blocks_run.resolved_targets()), frame_period_s=0.0, dip=DipSettings(),
+                           look_around=LookAround() if look else None)
+
+    plain, _ = _fly(tmp_path, blocks_run, agent(False), surface, name="plain")
+    assert not plain.reports  # from 12 m straight down the hiker is outside the photo
+    world, rec = _fly(tmp_path, blocks_run, agent(True), surface, name="look")
+    look = _events(rec, "look_around")
+    assert look and look[0]["confirmed"] and look[0]["votes"] >= 2
+    assert world.reports and math.hypot(world.reports[0].ned[0] - t[0], world.reports[0].ned[1] - t[1]) < 5.0
+    frames = {f["frame_id"]: f for f in (json.loads(l) for l in (rec.run_dir / "frames.jsonl").read_text().splitlines())}
+    cited = frames[world.reports[0].frame_id]
+    assert cited["gimbal"]["tilt_deg"] == -20.0  # the find cites the tilted search photo
+    assert _events(rec, "gimbal")[-1]["tilt_deg"] == -90.0  # and the camera is back to straight down
+    s = score_run_dir(rec.run_dir)
+    assert s["metrics"]["mission"]["success"]

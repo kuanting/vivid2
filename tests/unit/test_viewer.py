@@ -104,3 +104,18 @@ def test_team_window_tiles_each_drone_s_newest_photo():
     assert out.shape == (2 * 240 + 28, 2 * 320, 3)
     assert out[120, 160].mean() == 50 and out[120, 480].mean() == 100 and out[360, 160].mean() == 150
     assert out[360, 480].mean() == 0  # no fourth drone
+
+
+def test_a_navigation_photo_gets_its_own_window_and_leaves_the_payload_panel():
+    from vivid2.stack.base import Frame
+
+    v = _live_viewer()
+    v.start_run("run1  agent")
+    rgb = np.zeros((720, 960, 3), np.uint8)
+    v.show_frame(Frame(t_ns=1, frame_id=1, rgb=rgb, depth=None, cam_pos=np.zeros(3), cam_q=(1, 0, 0, 0), fov_deg=80))
+    front = np.full((480, 640, 3), 50, np.uint8)
+    v.show_frame(Frame(t_ns=2, frame_id=2, rgb=front, depth=None, cam_pos=np.zeros(3), cam_q=(1, 0, 0, 0), fov_deg=90,
+                       camera="Front"), extra="Front  t 2 s", camera="Front")
+    assert v._payload["frame_id"] == 1 and v._nav["Front"]["extra"] == "Front  t 2 s"
+    v.start_run("run2  agent")
+    assert v._nav == {}

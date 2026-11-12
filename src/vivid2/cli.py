@@ -44,7 +44,8 @@ def cmd_run(args) -> int:
     if args.seeds is not None:
         campaign.seeds = args.seeds
     opts = {k: v for k, v in vars(args).items()
-            if k.startswith(("vlm", "yolo", "sidelap", "frame_period", "verify", "dip", "team")) and v is not None}
+            if k.startswith(("vlm", "yolo", "sidelap", "frame_period", "verify", "dip", "team", "look_around"))
+            and v is not None}
     try:
         factory = AgentFactory(args.agent, opts)
     except ValueError as e:
@@ -265,6 +266,9 @@ def main(argv=None) -> int:
     s.add_argument("--dip", choices=["on", "off"],
                    help="low flight: after the survey, descend into the clearings mapped from the depth image "
                         "and look from about 12 m above the ground (default: off)")
+    s.add_argument("--look-around", dest="look_around", choices=["on", "off"],
+                   help="with --dip on: at the bottom of each dip, tilt the search camera 20 degrees below the "
+                        "horizon and pan it all round in 8 steps (default: off)")
     s.add_argument("--team", choices=["central", "dist"],
                    help="fly scenarios with fleet.size > 1 as a team: central (one agent commands every drone) or "
                         "dist (one agent per drone; they share only what they send over the scenario's radio)")

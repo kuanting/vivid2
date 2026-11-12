@@ -7,6 +7,7 @@ from typing import Any, Dict, List, Tuple
 
 import numpy as np
 
+from vivid2.cameras import tilt_from_nadir_deg
 from vivid2.stack.base import Assessment, Detection, Frame, MissionSpec, Reasoner, UsageStats
 from vivid2.vlm.base import View, VLMError, VLMProvider, parse_tiles, vlm_views
 
@@ -47,7 +48,7 @@ class VLMReasoner(Reasoner):
         self._templates: Dict[str, str] = {}
 
     def _prompt(self, view: View, n_views: int, index: int, detections: List[Detection], mission: MissionSpec,
-                focused: bool = False) -> str:
+                focused: bool = False, note: str = "") -> str:
         tpl = self._templates.setdefault(mission.mission, load_prompt(mission.mission))
         lines = []
         for d in detections:  # detector boxes are in frame pixels; give them in this view's 0-1000 coordinates
@@ -60,7 +61,7 @@ class VLMReasoner(Reasoner):
                          f"{1000 * u1 / view.width:.0f}, {1000 * v1 / view.height:.0f}]")
         det_block = ("An onboard detector proposed these candidates (may be wrong):\n" + "\n".join(lines) + "\n"
                      if lines else "")
-        prompt = tpl.format(altitude_m=mission.altitude_m, brief=mission.brief, detections_block=det_block)
+        prompt = tpl.format(altitude_m=mission.altitude_m, brief=mission.brief, detections_block=det_block) + note
         if focused:
             prompt += ("\n\nThe drone has descended over a possible sighting for a closer look. This image is a "
                        "full-resolution crop of the camera frame centred on that spot (a digital zoom).")
@@ -70,9 +71,10 @@ class VLMReasoner(Reasoner):
         return prompt
 
     def _ask(self, view: View, n_views: int, index: int, detections, mission,
-             focused: bool = False) -> Tuple[Assessment, UsageStats]:
+             focused: bool = False, note: str = "") -> Tuple[Assessment, UsageStats]:
         try:
-            out, usage = self.provider.query([view.jpeg], self._prompt(view, n_views, index, detections, mission, focused),
+            out, usage = self.provider.query([view.jpeg],
+                                             self._prompt(view, n_views, index, detections, mission, focused, note),
                                              ASSESSMENT_SCHEMA, self.system)
         except VLMError as e:
             return Assessment(False, 0.0, raw={"error": str(e)}), UsageStats(model=self.provider.model)
@@ -89,12 +91,36 @@ class VLMReasoner(Reasoner):
         focus = getattr(frame, "focus", None) if self.zoom else None
         views = vlm_views(frame.jpeg if frame.jpeg is not None else frame.rgb, self.tiles, focus=focus)
         focused = focus is not None and bool(views[0].x0 or views[0].y0 or views[0].width < frame.width)
+        note = camera_note(frame)
         if len(views) == 1:
-            return self._ask(views[0], 1, 0, detections, mission, focused)
+            return self._ask(views[0], 1, 0, detections, mission, focused, note)
         with ThreadPoolExecutor(max_workers=len(views)) as pool:
-            answers = list(pool.map(lambda iv: self._ask(iv[1], len(views), iv[0], detections, mission),
+            answers = list(pool.map(lambda iv: self._ask(iv[1], len(views), iv[0], detections, mission, note=note),
                                     enumerate(views)))
         return merge_tile_assessments(answers)
+
+
+def camera_note(frame: Frame) -> str:
+    """What the prompt adds when a photo is not the usual straight-down view (else nothing).
+
+    Only photos the stack tilted or zoomed, and navigation-camera photos, get a note: prompts for
+    ordinary search photos stay exactly as they were, so cached answers still replay.
+    """
+    gimbal = getattr(frame, "gimbal", None)
+    camera = getattr(frame, "camera", "Payload")
+    if not gimbal and camera == "Payload":
+        return ""
+    below = 90.0 - tilt_from_nadir_deg(frame.cam_q)
+    if below >= 80.0:
+        view = "is looking straight down"
+    elif below > 0.5:
+        view = f"is tilted {below:.0f} degrees below the horizon, so the ground recedes towards the top of the image"
+    else:
+        view = "is looking level with the horizon or above it"
+    source = "the drone's forward-looking camera" if camera != "Payload" else "the search camera"
+    zoom = (f" It is zoomed in to a {frame.fov_deg:.0f} degree field of view." if gimbal and
+            gimbal.get("fov_deg", frame.fov_deg) < 79.5 else "")
+    return f"\n\nThis photo is from {source}, which {view}.{zoom}"
 
 
 def merge_tile_assessments(answers: List[Tuple[Assessment, UsageStats]]) -> Tuple[Assessment, UsageStats]:

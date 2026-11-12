@@ -330,6 +330,10 @@ class TeamOf(FleetAgent):
         self.name = name
         self.agents = list(agents)
 
+    @property
+    def uses_ground_truth(self) -> bool:
+        return any(getattr(a, "uses_ground_truth", False) for a in self.agents)
+
     def describe(self) -> Dict[str, Any]:
         return {**self.agents[0].describe(), "agent": self.name, "team_mode": self.team_mode}
 

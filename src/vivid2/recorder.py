@@ -7,7 +7,8 @@ so every score can be recomputed or audited without the simulator.
 Streams:
     trajectory  {t, pos[3], q[4]}
     collisions  {t, object_name, impact_point[3]}
-    frames      {t, frame_id, cam_pos[3], cam_q[4], width, height, fov_deg, gt[{object_id, bbox}]}
+    frames      {t, frame_id, camera, cam_pos[3], cam_q[4], width, height, fov_deg, [gimbal], gt[{object_id, bbox, ...}]}
+                (navigation-camera photos have no gt; gimbal only when the search camera was moved)
     detections  {t, frame_id, layer, dets[{label, bbox, score}]}
     decisions   {t, frame_id, layer, output{...}, latency_s, input_tokens, output_tokens, cost_usd, model}
     reports     {t, frame_id, ned[3], confidence, source, note}

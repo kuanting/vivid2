@@ -41,7 +41,7 @@ def windowed_speeds(t_s: np.ndarray, pos: np.ndarray, window_s: float = 1.0) -> 
 def _tracking(events, t: np.ndarray, pos: np.ndarray, errs: list, alt_err: list) -> None:
     """Tracking error while following each commanded path (until the next command)."""
     paths = [e for e in events if e.get("kind") == "path_start"]
-    cmd_times = [e["t"] / 1e9 for e in events if e.get("kind", "").startswith(("path_", "goto", "rtl", "hover"))]
+    cmd_times = [e["t"] / 1e9 for e in events if e.get("kind", "").startswith(("path_", "goto", "rtl", "hover", "turn"))]
     for ev in paths:
         wp = np.asarray(([ev["from"]] if ev.get("from") else []) + ev["waypoints"], float)
         if len(wp) < 2:

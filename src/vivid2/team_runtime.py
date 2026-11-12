@@ -5,9 +5,11 @@ takes each photo in lockstep (pause, ask for the images, let the simulator run o
 receive and record them paused, resume), so a photo costs the same mission time on any machine.
 
 A team does the same in batches. Every drone that wants a photo at the same moment joins one
-batch: one pause, one GetImages per drone, one capture step, all photos recorded paused, one
-resume. Live on an RTX 5090 laptop (tools/probe_fleet.py, 2026-11-08), one batch of 4 photos took
-1.9 s of wall time against 1.2 s for one, and every photo was stamped within the 0.25 s step.
+batch: one pause, one GetImages per (drone, camera), one capture step (the longest of their
+cameras'), all photos recorded paused, one resume. Live on an RTX 5090 laptop
+(tools/probe_fleet.py, 2026-11-08), one batch of 4 payload photos took 1.9 s of wall time against
+1.2 s for one, and every photo was stamped within the 0.25 s step. A single drone asking for
+several cameras at once (``get_frames``) takes them the same way, with ``lockstep_fetch``.
 
 While one drone's photo pauses the clock, the other drones' models may still be computing in
 their threads. ``SimMissionContext.think`` charges that paused time back in mission time, from
@@ -40,8 +42,8 @@ class ClockState:
         self.t0_ns = t0_ns
         self.last_t_ns = t0_ns  # last sim time seen, for logging after the connection drops
         self.depth_scale: Optional[float] = None  # metres per raw depth unit, detected in flight
-        self.frame_id = 0  # unique across the team: frame-bank file names and metric joins use it
-        self.nav_frames = 0
+        self.frame_id = 0  # unique across the team and its cameras: frame-bank file names and metric joins use it
+        self.frames_by_camera: Dict[str, int] = {}
         self.lockstep = True  # off if a lockstep frame fails (logged once); frames then cost machine time
         self.pause_to_record = True  # off if the simulator's clock cannot pause (logged once)
         self.capture_step_ns = int(0.25e9)  # set from the camera's capture-interval by the runner
@@ -80,6 +82,39 @@ class LockstepFailed(Exception):
     """A batch failed; the photo is fetched with the simulator running instead."""
 
 
+async def lockstep_fetch(world, requests: List[Tuple[str, List[int]]], step_ns: int, register_s: float,
+                         timeout_s: float) -> Tuple[int, List[Dict[int, Any]]]:
+    """Ask for several cameras' images, run one capture step, receive them all (simulator paused).
+
+    ``requests`` are (camera topic, image types). Each request goes out on its own nng context
+    (as ``request_async`` does, but without its done-callback, which disconnects the client when
+    a request fails). The caller pauses before and resumes after. Returns the sim time after the
+    step and the images of each request, by image type. Raises if any reply is missing.
+    """
+    client = world.client
+    socks, replies = [], []
+    try:
+        for topic, types in requests:
+            req = {"method": f"{topic}/GetImages", "params": {"image_type_ids": [int(t) for t in types]},
+                   "version": 1.0}
+            sock = client.socket_services.new_context()
+            socks.append(sock)
+            await sock.asend(client.preprocess_request(req))
+            replies.append(asyncio.ensure_future(sock.arecv_msg()))
+        await asyncio.sleep(register_s)
+        t_fetched = int(await asyncio.to_thread(world.continue_for_sim_time, step_ns, True))
+        done, pending = await asyncio.wait(replies, timeout=timeout_s)
+        if pending:
+            raise TimeoutError(f"{len(pending)} of {len(replies)} photos not received in {timeout_s} s")
+        return t_fetched, [{int(k): v for k, v in client.postprocess_response(r.result()).items()} for r in replies]
+    finally:
+        for r in replies:
+            if not r.done():
+                r.cancel()
+        for s in socks:
+            s.close()
+
+
 class FetchFailed(Exception):
     """The simulator did not deliver a batch's photos (the cause is chained)."""
 
@@ -87,28 +122,29 @@ class FetchFailed(Exception):
 class TeamRuntime(ClockState):
     """The clock, photo batches and pause ledger of a team run (one per run, shared by all drones).
 
-    Drone contexts call ``get_frame``, ``sleep_until``, ``nav_gate`` and read ``ledger``.
+    Drone contexts call ``get_frames``, ``sleep_until``, ``command_gate`` and read ``ledger``.
     """
 
     def __init__(self, world, recorder, drone_ids: List[str], register_s: float = 0.02,
-                 reply_timeout_s: float = 15.0):
+                 reply_timeout_s: float = 15.0, reply_extra_s: float = 5.0):
         super().__init__(world.get_sim_time())
         self.world = world
         self.recorder = recorder
         self.order = {d: i for i, d in enumerate(drone_ids)}
         self.register_s = register_s
-        self.reply_timeout_s = reply_timeout_s
+        self.reply_timeout_s = reply_timeout_s  # one photo; each more in a batch adds reply_extra_s
+        self.reply_extra_s = reply_extra_s
         self.ledger = PauseLedger()
         self.frame_owner: Dict[int, str] = {}
         self.last_pos: Dict[str, Any] = {}  # each drone's newest position (trajectory poller)
         self.think_stats: Dict[str, Dict[str, float]] = {}
         self.batches = 0
         self.max_batch = 0
-        self._pending: List[Tuple[Any, asyncio.Future]] = []
+        self._pending: List[Tuple[Any, List[str], asyncio.Future]] = []  # (drone context, cameras, future)
         self._runner: Optional[asyncio.Future] = None
         self._sleepers: List[Tuple[float, asyncio.Future]] = []
-        self._nav_active = 0
-        self._nav_idle: Optional[asyncio.Event] = None
+        self._cmd_active = 0
+        self._cmd_idle: Optional[asyncio.Event] = None
         self._batch_idle: Optional[asyncio.Event] = None
         self._fallback = None
 
@@ -135,38 +171,42 @@ class TeamRuntime(ClockState):
 
     # -- photos ------------------------------------------------------------------------------
     def _events(self):
-        if self._nav_idle is None:
-            self._nav_idle, self._batch_idle = asyncio.Event(), asyncio.Event()
-            self._nav_idle.set()
+        if self._cmd_idle is None:
+            self._cmd_idle, self._batch_idle = asyncio.Event(), asyncio.Event()
+            self._cmd_idle.set()
             self._batch_idle.set()
             self._fallback = asyncio.Lock()
 
-    async def get_frame(self, ctx):
-        """A photo for ``ctx``'s drone, in the next batch (or fetched running once lockstep failed)."""
+    async def get_frames(self, ctx, cameras: List[str]) -> Dict[str, Any]:
+        """Photos from ``ctx``'s ``cameras``, in the next batch (or fetched running once lockstep failed)."""
         self._events()
         if self.lockstep:
             fut = asyncio.get_running_loop().create_future()
-            self._pending.append((ctx, fut))
+            self._pending.append((ctx, list(cameras), fut))
             self._kick()
             try:
                 return await fut
             except LockstepFailed:
                 pass
-        return await self._running_frame(ctx)
+        return await self._running_frames(ctx, cameras)
+
+    async def get_frame(self, ctx, camera: Optional[str] = None):
+        cam = camera or ctx.camera_id
+        return (await self.get_frames(ctx, [cam]))[cam]
 
     def _kick(self) -> None:
         if self._runner is None:
-            self._batch_idle.clear()  # now, not when the task starts: a navigation fetch must not slip in
+            self._batch_idle.clear()  # now, not when the task starts: a gimbal command must not slip in
             self._runner = asyncio.ensure_future(self._run_batches())
 
     async def _run_batches(self) -> None:
         paused = False
         results: List[Tuple[asyncio.Future, Any]] = []
         errors: List[Tuple[asyncio.Future, BaseException]] = []
-        failed: List[Tuple[Any, asyncio.Future]] = []
+        failed: List[Tuple[Any, List[str], asyncio.Future]] = []
         try:
-            while self._nav_active:  # a navigation photo is being fetched with the clock running
-                await self._nav_idle.wait()
+            while self._cmd_active:  # a gimbal command needs the clock running
+                await self._cmd_idle.wait()
             while self._pending:
                 if not paused:
                     await asyncio.to_thread(self.world.pause)
@@ -178,22 +218,33 @@ class TeamRuntime(ClockState):
                 if not self.lockstep:
                     failed += batch
                     continue
+                # One photo per (drone, camera), in drone then camera order: two requests for the
+                # same camera of the same drone share it.
+                items: List[Tuple[Any, str]] = []
+                for ctx, cams, _ in batch:
+                    for cam in ctx._ordered(cams):
+                        if not any(c is ctx and k == cam for c, k in items):
+                            items.append((ctx, cam))
                 try:
-                    frames = await self._one_batch([c for c, _ in batch])
-                    for (_, f), frame in zip(batch, frames):
-                        if isinstance(frame, BaseException):
-                            errors.append((f, frame))
+                    shots = await self._one_batch(items)
+                    by_item = {(id(c), k): shot for (c, k), shot in zip(items, shots)}
+                    for ctx, cams, f in batch:
+                        got = {k: by_item[(id(ctx), k)] for k in cams}
+                        err = next((v for v in got.values() if isinstance(v, BaseException)), None)
+                        if err is not None:
+                            errors.append((f, err))
                         else:
-                            results.append((f, frame))
+                            results.append((f, got))
                 except FetchFailed as e:  # the simulator: photos are fetched running from now on
                     self.lockstep = False
                     self.recorder.log("events", {"t": self.last_t_ns, "kind": "lockstep_unavailable",
-                                                 "error": repr(e.__cause__ or e), "batch": [c.drone_id for c, _ in batch]})
+                                                 "error": repr(e.__cause__ or e),
+                                                 "batch": [c.drone_id for c, _, _ in batch]})
                     failed += batch
                 except Exception as e:  # recording the photos: the drones' agents get the error, as alone
-                    errors += [(f, e) for _, f in batch]
+                    errors += [(f, e) for _, _, f in batch]
         except BaseException as e:
-            for _, fut in self._pending + failed:
+            for _, _, fut in self._pending + failed:
                 if not fut.done():
                     fut.set_exception(e if isinstance(e, Exception) else LockstepFailed())
             self._pending, failed = [], []
@@ -205,13 +256,13 @@ class TeamRuntime(ClockState):
                 self.ledger.resumed()
             self._runner = None
             self._batch_idle.set()
-            for fut, frame in results:  # photos are handed over once the clock runs again
+            for fut, frames in results:  # photos are handed over once the clock runs again
                 if not fut.done():
-                    fut.set_result(frame)
+                    fut.set_result(frames)
             for fut, err in errors:
                 if not fut.done():
                     fut.set_exception(err)
-            for _, fut in failed:
+            for _, _, fut in failed:
                 if not fut.done():
                     fut.set_exception(LockstepFailed())
             if self._pending:
@@ -231,40 +282,23 @@ class TeamRuntime(ClockState):
             for _ in range(WAKE_TURNS):
                 await asyncio.sleep(0)
 
-    async def _one_batch(self, ctxs: List[Any]) -> List[Any]:
-        """One capture step for every drone in ``ctxs`` (the simulator is paused); their frames."""
+    async def _one_batch(self, items: List[Tuple[Any, str]]) -> List[Any]:
+        """One capture step for every (drone context, camera) in ``items`` (simulator paused); their frames."""
         from projectairsim.types import ImageType
 
         w = self.world
-        client = w.client
-        socks, replies = [], []
         try:
             t_request = int(await asyncio.to_thread(w.get_sim_time))
-            for ctx in ctxs:
-                req = {"method": f"{ctx.drone.sensors_topic}/{ctx.camera_id}/GetImages",
-                       "params": {"image_type_ids": [int(t) for t in ctx.image_types()]}, "version": 1.0}
-                sock = client.socket_services.new_context()
-                socks.append(sock)
-                await sock.asend(client.preprocess_request(req))
-                replies.append(asyncio.ensure_future(sock.arecv_msg()))
-            await asyncio.sleep(self.register_s)
-            t_fetched = int(await asyncio.to_thread(w.continue_for_sim_time, self.capture_step_ns, True))
-            done, pending = await asyncio.wait(replies, timeout=self.reply_timeout_s)
-            if pending:
-                raise TimeoutError(f"{len(pending)} of {len(replies)} photos not received in {self.reply_timeout_s} s")
-            images = [{int(k): v for k, v in client.postprocess_response(r.result()).items()} for r in replies]
+            step = max(ctx._step_ns(cam) for ctx, cam in items)
+            timeout = self.reply_timeout_s + self.reply_extra_s * (len(items) - 1)
+            t_fetched, images = await lockstep_fetch(
+                w, [(ctx._camera_topic(cam), ctx._types(cam)) for ctx, cam in items], step, self.register_s, timeout)
         except Exception as e:
             raise FetchFailed(str(e)) from e
-        finally:
-            for r in replies:
-                if not r.done():
-                    r.cancel()
-            for s in socks:
-                s.close()
         self.last_t_ns = t_fetched
         wall0 = time.monotonic()
         ids: List[Optional[int]] = []
-        for ctx, imgs in zip(ctxs, images):  # ids in drone order
+        for (ctx, cam), imgs in zip(items, images):  # ids in drone, then camera order
             if imgs.get(ImageType.SCENE):
                 self.frame_id += 1
                 ids.append(self.frame_id)
@@ -273,50 +307,50 @@ class TeamRuntime(ClockState):
                 ids.append(None)
         deferred: List[Tuple[int, Dict[str, Any]]] = []
 
-        async def record(ctx, imgs, fid):
+        async def record(ctx, cam, imgs, fid):
             if fid is None:
                 return None
             return await ctx._record_frame(imgs, imgs[ImageType.SCENE], t_request, t_fetched, wall0, frame_id=fid,
-                                           deferred=deferred, batch=self.batches + 1)
+                                           deferred=deferred, batch=self.batches + 1, camera=cam)
 
-        # one drone's failure to record stays its own: the others get their photos
-        frames = await asyncio.gather(*(record(c, i, fid) for c, i, fid in zip(ctxs, images, ids)),
+        # one photo's failure to record stays its own: the others are delivered
+        frames = await asyncio.gather(*(record(c, k, i, fid) for (c, k), i, fid in zip(items, images, ids)),
                                       return_exceptions=True)
         for _, rec in sorted(deferred, key=lambda x: x[0]):
             self.recorder.log("frames", rec)
         self.batches += 1
-        self.max_batch = max(self.max_batch, len(ctxs))
+        self.max_batch = max(self.max_batch, len(items))
         return list(frames)
 
-    async def _running_frame(self, ctx):
-        """After lockstep failed: one photo at a time, fetched running, recorded paused."""
+    async def _running_frames(self, ctx, cameras: List[str]):
+        """After lockstep failed: one drone at a time, fetched running, recorded paused."""
         self._events()
         async with self._fallback:
-            return await ctx._running_frame()
+            return await ctx._running_frames(cameras)
 
     @contextlib.asynccontextmanager
-    async def nav_gate(self):
-        """Hold photo batches off while a navigation photo is fetched with the clock running.
+    async def command_gate(self):
+        """Hold photo batches off while a command that needs the clock running is sent (a gimbal move).
 
-        A paused clock would hold its capture back, and Project AirSim gives up after 5 s.
+        The camera renders its new pose only while the simulator runs.
         """
         self._events()
         while self._runner is not None:
             await self._batch_idle.wait()
             await asyncio.sleep(0)
-        self._nav_active += 1
-        self._nav_idle.clear()
+        self._cmd_active += 1
+        self._cmd_idle.clear()
         try:
             yield
         finally:
-            self._nav_active -= 1
-            if not self._nav_active:
-                self._nav_idle.set()
+            self._cmd_active -= 1
+            if not self._cmd_active:
+                self._cmd_idle.set()
 
     def timing(self) -> Dict[str, Any]:
         return {"lockstep": self.lockstep, "capture_step_s": self.capture_step_ns / 1e9,
                 "pause_to_record": self.pause_to_record, "batches": self.batches, "max_batch": self.max_batch,
-                "frames": self.frame_id}
+                "frames": self.frame_id, "frames_by_camera": dict(self.frames_by_camera)}
 
 
 class SimFleetContext(FleetContext):
@@ -325,7 +359,7 @@ class SimFleetContext(FleetContext):
     def __init__(self, mission: MissionSpec, drones: Dict[str, MissionContext], runtime: TeamRuntime):
         self.mission = mission
         self.drones = drones
-        self.runtime = runtime
+        self._runtime = runtime
         self._first = next(iter(drones.values()))
 
     def should_stop(self) -> bool:
@@ -341,11 +375,11 @@ class SimFleetContext(FleetContext):
         await self._first.sleep(seconds)
 
     def log(self, stream: str, record: Dict[str, Any]) -> None:
-        self.runtime.recorder.log(stream, record)
+        self._runtime.recorder.log(stream, record)
 
     def report_target(self, report: TargetReport) -> None:
         """Report through the drone whose photo the find was made on."""
-        owner = self.runtime.frame_owner.get(report.frame_id)
+        owner = self._runtime.frame_owner.get(report.frame_id)
         (self.drones[owner] if owner in self.drones else self._first).report_target(report)
 
 

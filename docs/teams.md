@@ -65,7 +65,8 @@ the challenge (closer looks, dips, lower flight).
   [adding_a_dut.md](adding_a_dut.md).
 - `fleet.mission` is the team's mission: `start_ned` is the centre of the pads, and `team`
   lists every drone's id and pad.
-- Report a find through the drone whose photo it was made on
+- Report a find through the drone whose search-camera photo it was made on (the report must cite
+  that drone's own photo, [rules.md](rules.md))
   (`fleet.drones[id].report_target(...)`, or `fleet.report_target(...)`, which works that out).
 
 **Distributed:** build a `vivid2.stack.base.DistributedTeam(name, [agent per drone])`.
@@ -106,7 +107,9 @@ msg = await ctx.radio.recv(timeout_s=5.0)   # waits in mission time
 
 - **One mission clock for the whole team.**
   - A drone's photo costs 0.25 s of mission time, as for one drone.
-  - Photos of drones that ask at the same moment are taken together, in one lockstep batch.
+  - Photos of drones that ask at the same moment are taken together, in one lockstep batch: one
+    capture step for every (drone, camera) pair asked for, a drone's search and forward cameras
+    included.
     Drones whose sleep ends within 0.05 s of a batch are woken to join it, so photos taken on a
     shared beat share a batch.
   - Measured on an RTX 5090 laptop: one batch of 4 photos takes 1.9 s of wall time, against 1.2 s

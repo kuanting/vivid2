@@ -5,6 +5,7 @@ from typing import Any, Dict, List
 
 import numpy as np
 
+from vivid2.metrics import rules
 from vivid2.recorder import RunLog
 
 
@@ -48,7 +49,9 @@ def mission_metrics(log: RunLog) -> Dict[str, Any]:
     t0 = meta["t0_ns"]
     timeout_s = meta["limits"]["timeout_s"]
 
-    m = match_reports(log["reports"], targets, tol)
+    cited, violations = rules.check(log)  # an uncited report is a false alarm, whatever it found
+    m = match_reports(cited, targets, tol)
+    uncited = rules.uncited_reports(violations)
     found = m["matched"]
     ttf = {tid: (v["t"] - t0) / 1e9 for tid, v in found.items()}
     n_found = len(found)
@@ -62,7 +65,8 @@ def mission_metrics(log: RunLog) -> Dict[str, Any]:
         "mean_time_to_find_s": float(np.mean(list(ttf.values()))) if ttf else None,
         "localization_error_m": {tid: v["error_m"] for tid, v in found.items()},
         "mean_localization_error_m": float(np.mean([v["error_m"] for v in found.values()])) if found else None,
-        "false_alarms": len(m["false_alarms"]),
+        "false_alarms": len(m["false_alarms"]) + uncited,
+        **({"uncited_reports": uncited} if uncited else {}),
         "mission_time_s": (meta.get("end_ns", t0) - t0) / 1e9,
         "timeout_s": timeout_s,
         "end_reason": meta.get("end_reason"),

@@ -4166,5 +4166,753 @@
     }
    ]
   }
+ },
+ "wildfire_hiker_01": {
+  "actors": [
+   {
+    "name": "Drone1",
+    "origin": {
+     "rpy-deg": "0 0 0",
+     "xyz": "0.000 0.000 -1.000"
+    },
+    "robot-config": {
+     "actuators": [
+      {
+       "child-link": "Prop_FL",
+       "enabled": true,
+       "name": "Prop_FL_actuator",
+       "origin": {
+        "rpy-deg": "0 0 0",
+        "xyz": "0.253 -0.253 -0.01"
+       },
+       "parent-link": "Frame",
+       "rotor-settings": {
+        "coeff-of-thrust": 0.109919,
+        "coeff-of-torque": 0.040164,
+        "max-rpm": 6396.667,
+        "normal-vector": "0.0 0.0 -1.0",
+        "propeller-diameter": 0.2286,
+        "smoothing-tc": 0.005,
+        "turning-direction": "clock-wise"
+       },
+       "type": "rotor"
+      },
+      {
+       "child-link": "Prop_FR",
+       "enabled": true,
+       "name": "Prop_FR_actuator",
+       "origin": {
+        "rpy-deg": "0 0 0",
+        "xyz": "0.253 0.253 -0.01"
+       },
+       "parent-link": "Frame",
+       "rotor-settings": {
+        "coeff-of-thrust": 0.109919,
+        "coeff-of-torque": 0.040164,
+        "max-rpm": 6396.667,
+        "normal-vector": "0.0 0.0 -1.0",
+        "propeller-diameter": 0.2286,
+        "smoothing-tc": 0.005,
+        "turning-direction": "counter-clock-wise"
+       },
+       "type": "rotor"
+      },
+      {
+       "child-link": "Prop_RL",
+       "enabled": true,
+       "name": "Prop_RL_actuator",
+       "origin": {
+        "rpy-deg": "0 0 0",
+        "xyz": "-0.253 -0.253 -0.01"
+       },
+       "parent-link": "Frame",
+       "rotor-settings": {
+        "coeff-of-thrust": 0.109919,
+        "coeff-of-torque": 0.040164,
+        "max-rpm": 6396.667,
+        "normal-vector": "0.0 0.0 -1.0",
+        "propeller-diameter": 0.2286,
+        "smoothing-tc": 0.005,
+        "turning-direction": "counter-clock-wise"
+       },
+       "type": "rotor"
+      },
+      {
+       "child-link": "Prop_RR",
+       "enabled": true,
+       "name": "Prop_RR_actuator",
+       "origin": {
+        "rpy-deg": "0 0 0",
+        "xyz": "-0.253 0.253 -0.01"
+       },
+       "parent-link": "Frame",
+       "rotor-settings": {
+        "coeff-of-thrust": 0.109919,
+        "coeff-of-torque": 0.040164,
+        "max-rpm": 6396.667,
+        "normal-vector": "0.0 0.0 -1.0",
+        "propeller-diameter": 0.2286,
+        "smoothing-tc": 0.005,
+        "turning-direction": "clock-wise"
+       },
+       "type": "rotor"
+      }
+     ],
+     "controller": {
+      "airframe-setup": "quadrotor-x",
+      "id": "Simple_Flight_Controller",
+      "simple-flight-api-settings": {
+       "actuator-order": [
+        {
+         "id": "Prop_FR_actuator"
+        },
+        {
+         "id": "Prop_RL_actuator"
+        },
+        {
+         "id": "Prop_FL_actuator"
+        },
+        {
+         "id": "Prop_RR_actuator"
+        }
+       ]
+      },
+      "type": "simple-flight-api"
+     },
+     "joints": [
+      {
+       "axis": "0 0 1",
+       "child-link": "Prop_FL",
+       "id": "Frame_Prop_FL",
+       "parent-link": "Frame",
+       "type": "fixed"
+      },
+      {
+       "axis": "0 0 1",
+       "child-link": "Prop_FR",
+       "id": "Frame_Prop_FR",
+       "parent-link": "Frame",
+       "type": "fixed"
+      },
+      {
+       "axis": "0 0 1",
+       "child-link": "Prop_RL",
+       "id": "Frame_Prop_RL",
+       "parent-link": "Frame",
+       "type": "fixed"
+      },
+      {
+       "axis": "0 0 1",
+       "child-link": "Prop_RR",
+       "id": "Frame_Prop_RR",
+       "parent-link": "Frame",
+       "type": "fixed"
+      }
+     ],
+     "links": [
+      {
+       "collision": {
+        "friction": 0.5,
+        "restitution": 0.1
+       },
+       "inertial": {
+        "aerodynamics": {
+         "drag-coefficient": 0.325,
+         "geometry": {
+          "box": {
+           "size": "0.180 0.110 0.040"
+          }
+         },
+         "type": "geometry"
+        },
+        "inertia": {
+         "geometry": {
+          "box": {
+           "size": "0.180 0.110 0.040"
+          }
+         },
+         "type": "geometry"
+        },
+        "mass": 1.0
+       },
+       "name": "Frame",
+       "visual": {
+        "geometry": {
+         "name": "/Drone/Quadrotor1",
+         "type": "unreal_mesh"
+        }
+       }
+      },
+      {
+       "inertial": {
+        "aerodynamics": {
+         "drag-coefficient": 0.325,
+         "geometry": {
+          "cylinder": {
+           "length": 0.01,
+           "radius": 0.1143
+          }
+         },
+         "type": "geometry"
+        },
+        "inertia": {
+         "type": "point-mass"
+        },
+        "mass": 0.055,
+        "origin": {
+         "rpy-deg": "0 0 0",
+         "xyz": "0.253 -0.253 -0.01"
+        }
+       },
+       "name": "Prop_FL",
+       "visual": {
+        "geometry": {
+         "name": "/Drone/PropellerRed",
+         "type": "unreal_mesh"
+        },
+        "origin": {
+         "rpy-deg": "0 0 0",
+         "xyz": "0.253 -0.253 -0.01"
+        }
+       }
+      },
+      {
+       "inertial": {
+        "aerodynamics": {
+         "drag-coefficient": 0.325,
+         "geometry": {
+          "cylinder": {
+           "length": 0.01,
+           "radius": 0.1143
+          }
+         },
+         "type": "geometry"
+        },
+        "inertia": {
+         "type": "point-mass"
+        },
+        "mass": 0.055,
+        "origin": {
+         "rpy-deg": "0 0 0",
+         "xyz": "0.253 0.253 -0.01"
+        }
+       },
+       "name": "Prop_FR",
+       "visual": {
+        "geometry": {
+         "name": "/Drone/PropellerRed",
+         "type": "unreal_mesh"
+        },
+        "origin": {
+         "rpy-deg": "0 0 0",
+         "xyz": "0.253 0.253 -0.01"
+        }
+       }
+      },
+      {
+       "inertial": {
+        "aerodynamics": {
+         "drag-coefficient": 0.325,
+         "geometry": {
+          "cylinder": {
+           "length": 0.01,
+           "radius": 0.1143
+          }
+         },
+         "type": "geometry"
+        },
+        "inertia": {
+         "type": "point-mass"
+        },
+        "mass": 0.055,
+        "origin": {
+         "rpy-deg": "0 0 0",
+         "xyz": "-0.253 -0.253 -0.01"
+        }
+       },
+       "name": "Prop_RL",
+       "visual": {
+        "geometry": {
+         "name": "/Drone/PropellerWhite",
+         "type": "unreal_mesh"
+        },
+        "origin": {
+         "rpy-deg": "0 0 0",
+         "xyz": "-0.253 -0.253 -0.01"
+        }
+       }
+      },
+      {
+       "inertial": {
+        "aerodynamics": {
+         "drag-coefficient": 0.325,
+         "geometry": {
+          "cylinder": {
+           "length": 0.01,
+           "radius": 0.1143
+          }
+         },
+         "type": "geometry"
+        },
+        "inertia": {
+         "type": "point-mass"
+        },
+        "mass": 0.055,
+        "origin": {
+         "rpy-deg": "0 0 0",
+         "xyz": "-0.253 0.253 -0.01"
+        }
+       },
+       "name": "Prop_RR",
+       "visual": {
+        "geometry": {
+         "name": "/Drone/PropellerWhite",
+         "type": "unreal_mesh"
+        },
+        "origin": {
+         "rpy-deg": "0 0 0",
+         "xyz": "-0.253 0.253 -0.01"
+        }
+       }
+      }
+     ],
+     "physics-type": "fast-physics",
+     "sensors": [
+      {
+       "capture-interval": 0.03,
+       "capture-settings": [
+        {
+         "auto-exposure-bias": 0.0,
+         "auto-exposure-histogram-log-max": 6.0,
+         "auto-exposure-histogram-log-min": -14.0,
+         "auto-exposure-max-brightness": 2.0,
+         "auto-exposure-method": 0,
+         "auto-exposure-min-brightness": 0.0005,
+         "auto-exposure-speed": 20.0,
+         "capture-enabled": true,
+         "compress": false,
+         "fov-degrees": 90,
+         "height": 720,
+         "image-type": 0,
+         "pixels-as-float": false,
+         "streaming-enabled": true,
+         "target-gamma": 2.5,
+         "width": 1280
+        }
+       ],
+       "enabled": true,
+       "gimbal": {
+        "lock-pitch": true,
+        "lock-roll": true,
+        "lock-yaw": false
+       },
+       "id": "Chase",
+       "origin": {
+        "rpy-deg": "0 -11.46 0",
+        "xyz": "-10.0 0.0 -1.0"
+       },
+       "parent-link": "Frame",
+       "type": "camera"
+      },
+      {
+       "annotation-settings": {
+        "bbox2D-settings": {
+         "alignment": "axis"
+        },
+        "bbox3D-settings": {
+         "alignment": "axis"
+        },
+        "enabled": true,
+        "object-ids": [
+         "Hiker1",
+         "Hiker2",
+         "Hiker3"
+        ]
+       },
+       "capture-interval": 0.2,
+       "capture-settings": [
+        {
+         "auto-exposure-bias": 0.0,
+         "auto-exposure-histogram-log-max": 6.0,
+         "auto-exposure-histogram-log-min": -14.0,
+         "auto-exposure-max-brightness": 2.0,
+         "auto-exposure-method": 0,
+         "auto-exposure-min-brightness": 0.0005,
+         "auto-exposure-speed": 20.0,
+         "capture-enabled": true,
+         "compress": false,
+         "fov-degrees": 80,
+         "height": 1440,
+         "image-type": 0,
+         "pixels-as-float": false,
+         "streaming-enabled": false,
+         "target-gamma": 2.5,
+         "width": 1920
+        },
+        {
+         "capture-enabled": true,
+         "compress": false,
+         "fov-degrees": 80,
+         "height": 1440,
+         "image-type": 1,
+         "pixels-as-float": false,
+         "streaming-enabled": false,
+         "width": 1920
+        },
+        {
+         "capture-enabled": true,
+         "compress": false,
+         "fov-degrees": 80,
+         "height": 1440,
+         "image-type": 3,
+         "pixels-as-float": false,
+         "streaming-enabled": false,
+         "width": 1920
+        }
+       ],
+       "enabled": true,
+       "id": "Payload",
+       "origin": {
+        "rpy-deg": "0 -90 0",
+        "xyz": "0 0 0.15"
+       },
+       "parent-link": "Frame",
+       "type": "camera"
+      },
+      {
+       "capture-interval": 0.1,
+       "capture-settings": [
+        {
+         "auto-exposure-bias": 0.0,
+         "auto-exposure-histogram-log-max": 6.0,
+         "auto-exposure-histogram-log-min": -14.0,
+         "auto-exposure-max-brightness": 2.0,
+         "auto-exposure-method": 0,
+         "auto-exposure-min-brightness": 0.0005,
+         "auto-exposure-speed": 20.0,
+         "capture-enabled": true,
+         "compress": false,
+         "fov-degrees": 80,
+         "height": 720,
+         "image-type": 0,
+         "pixels-as-float": false,
+         "streaming-enabled": false,
+         "target-gamma": 2.5,
+         "width": 960
+        }
+       ],
+       "enabled": true,
+       "id": "PayloadPreview",
+       "origin": {
+        "rpy-deg": "0 -90 0",
+        "xyz": "0 0 0.15"
+       },
+       "parent-link": "Frame",
+       "type": "camera"
+      },
+      {
+       "capture-interval": 0.1,
+       "capture-settings": [
+        {
+         "auto-exposure-bias": 0.0,
+         "auto-exposure-histogram-log-max": 6.0,
+         "auto-exposure-histogram-log-min": -14.0,
+         "auto-exposure-max-brightness": 2.0,
+         "auto-exposure-method": 0,
+         "auto-exposure-min-brightness": 0.0005,
+         "auto-exposure-speed": 20.0,
+         "capture-enabled": true,
+         "compress": false,
+         "fov-degrees": 90,
+         "height": 480,
+         "image-type": 0,
+         "pixels-as-float": false,
+         "streaming-enabled": false,
+         "target-gamma": 2.5,
+         "width": 640
+        },
+        {
+         "capture-enabled": true,
+         "compress": false,
+         "fov-degrees": 90,
+         "height": 480,
+         "image-type": 1,
+         "pixels-as-float": false,
+         "streaming-enabled": false,
+         "width": 640
+        }
+       ],
+       "enabled": true,
+       "id": "Front",
+       "origin": {
+        "rpy-deg": "0 -10 0",
+        "xyz": "0.7 0 0.1"
+       },
+       "parent-link": "Frame",
+       "type": "camera"
+      },
+      {
+       "accelerometer": {
+        "bias-stability": 0.000353,
+        "tau": 800,
+        "turn-on-bias": "0 0 0",
+        "velocity-random-walk": 0.002353
+       },
+       "enabled": true,
+       "gyroscope": {
+        "angle-random-walk": 8.72644e-05,
+        "bias-stability": 2.23014e-05,
+        "tau": 500,
+        "turn-on-bias": "0 0 0"
+       },
+       "id": "IMU1",
+       "parent-link": "Frame",
+       "type": "imu"
+      },
+      {
+       "enabled": false,
+       "id": "GPS",
+       "parent-link": "Frame",
+       "type": "gps"
+      },
+      {
+       "enabled": false,
+       "id": "Barometer",
+       "parent-link": "Frame",
+       "type": "barometer"
+      },
+      {
+       "enabled": false,
+       "id": "Magnetometer",
+       "parent-link": "Frame",
+       "type": "magnetometer"
+      }
+     ]
+    },
+    "type": "robot"
+   }
+  ],
+  "clock": {
+   "pause-on-start": false,
+   "real-time-update-rate": 3000000,
+   "step-ns": 3000000,
+   "type": "steppable"
+  },
+  "home-geo-point": {
+   "altitude": 1985.0,
+   "latitude": 24.2436,
+   "longitude": 121.2467
+  },
+  "id": "VIVID2ForestSAR",
+  "scene-type": "UnrealNative",
+  "segmentation": {
+   "ignore-existing": false,
+   "initialize-ids": true,
+   "use-owner-name": true
+  },
+  "spawn-objects": {
+   "sim-packaged": [
+    {
+     "asset-path": "VIVID2_Hiker_YellowJacket_Standing",
+     "name": "Hiker1",
+     "origin": {
+      "rpy-deg": "0 0 80",
+      "xyz": "-60.297 167.376 0.000"
+     },
+     "physics-enabled": false,
+     "scale": "1.000 1.000 1.000"
+    },
+    {
+     "asset-path": "VIVID2_Hiker_RedJacket_LyingBack",
+     "name": "Hiker2",
+     "origin": {
+      "rpy-deg": "0 0 30",
+      "xyz": "74.604 -65.937 0.000"
+     },
+     "physics-enabled": false,
+     "scale": "1.000 1.000 1.000"
+    },
+    {
+     "asset-path": "VIVID2_Hiker_GreenJacket_Crouching",
+     "name": "Hiker3",
+     "origin": {
+      "rpy-deg": "0 0 200",
+      "xyz": "-107.691 -41.410 0.000"
+     },
+     "physics-enabled": false,
+     "scale": "1.000 1.000 1.000"
+    },
+    {
+     "asset-path": "VIVID2_Decoy_Tarp_Red",
+     "name": "Decoy1",
+     "origin": {
+      "rpy-deg": "0 0 -20",
+      "xyz": "-30.000 -80.000 0.000"
+     },
+     "physics-enabled": false,
+     "scale": "1.000 1.000 1.000"
+    },
+    {
+     "asset-path": "VIVID2_Decoy_Tent_Orange",
+     "name": "Decoy2",
+     "origin": {
+      "rpy-deg": "0 0 0",
+      "xyz": "40.000 150.000 0.000"
+     },
+     "physics-enabled": false,
+     "scale": "1.000 1.000 1.000"
+    },
+    {
+     "asset-path": "VIVID2_Decoy_Jacket_Yellow",
+     "name": "Decoy3",
+     "origin": {
+      "rpy-deg": "0 0 45",
+      "xyz": "120.000 -20.000 0.000"
+     },
+     "physics-enabled": false,
+     "scale": "1.000 1.000 1.000"
+    },
+    {
+     "asset-path": "VIVID2_Fire_Medium",
+     "name": "Fire01",
+     "origin": {
+      "rpy-deg": "0 0 0.0",
+      "xyz": "-130.000 111.000 0.000"
+     },
+     "physics-enabled": false,
+     "scale": "1.000 1.000 1.000"
+    },
+    {
+     "asset-path": "VIVID2_Fire_Large",
+     "name": "Fire02",
+     "origin": {
+      "rpy-deg": "0 0 0.0",
+      "xyz": "-95.000 99.000 0.000"
+     },
+     "physics-enabled": false,
+     "scale": "1.000 1.000 1.000"
+    },
+    {
+     "asset-path": "VIVID2_Fire_Medium",
+     "name": "Fire03",
+     "origin": {
+      "rpy-deg": "0 0 0.0",
+      "xyz": "-60.000 101.000 0.000"
+     },
+     "physics-enabled": false,
+     "scale": "1.000 1.000 1.000"
+    },
+    {
+     "asset-path": "VIVID2_Fire_Small",
+     "name": "Fire04",
+     "origin": {
+      "rpy-deg": "0 0 0.0",
+      "xyz": "-25.000 107.000 0.000"
+     },
+     "physics-enabled": false,
+     "scale": "1.000 1.000 1.000"
+    },
+    {
+     "asset-path": "VIVID2_Fire_Large",
+     "name": "Fire05",
+     "origin": {
+      "rpy-deg": "0 0 0.0",
+      "xyz": "10.000 94.000 0.000"
+     },
+     "physics-enabled": false,
+     "scale": "1.000 1.000 1.000"
+    },
+    {
+     "asset-path": "VIVID2_Fire_Medium",
+     "name": "Fire06",
+     "origin": {
+      "rpy-deg": "0 0 0.0",
+      "xyz": "45.000 82.000 0.000"
+     },
+     "physics-enabled": false,
+     "scale": "1.000 1.000 1.000"
+    },
+    {
+     "asset-path": "VIVID2_Fire_Large",
+     "name": "Fire07",
+     "origin": {
+      "rpy-deg": "0 0 0.0",
+      "xyz": "80.000 77.000 0.000"
+     },
+     "physics-enabled": false,
+     "scale": "1.000 1.000 1.000"
+    },
+    {
+     "asset-path": "VIVID2_Fire_Small",
+     "name": "Fire08",
+     "origin": {
+      "rpy-deg": "0 0 0.0",
+      "xyz": "115.000 84.000 0.000"
+     },
+     "physics-enabled": false,
+     "scale": "1.000 1.000 1.000"
+    },
+    {
+     "asset-path": "VIVID2_Fire_Medium",
+     "name": "Fire09",
+     "origin": {
+      "rpy-deg": "0 0 0.0",
+      "xyz": "150.000 76.000 0.000"
+     },
+     "physics-enabled": false,
+     "scale": "1.000 1.000 1.000"
+    },
+    {
+     "asset-path": "VIVID2_Fire_Small",
+     "name": "Fire10",
+     "origin": {
+      "rpy-deg": "0 0 0.0",
+      "xyz": "40.000 55.000 0.000"
+     },
+     "physics-enabled": false,
+     "scale": "1.000 1.000 1.000"
+    },
+    {
+     "asset-path": "VIVID2_Fire_Small",
+     "name": "Fire11",
+     "origin": {
+      "rpy-deg": "0 0 0.0",
+      "xyz": "-60.000 68.000 0.000"
+     },
+     "physics-enabled": false,
+     "scale": "1.000 1.000 1.000"
+    },
+    {
+     "asset-path": "VIVID2_Fire_Smolder",
+     "name": "Fire12",
+     "origin": {
+      "rpy-deg": "0 0 0.0",
+      "xyz": "0.000 180.000 0.000"
+     },
+     "physics-enabled": false,
+     "scale": "1.000 1.000 1.000"
+    },
+    {
+     "asset-path": "VIVID2_Fire_Smolder",
+     "name": "Fire13",
+     "origin": {
+      "rpy-deg": "0 0 0.0",
+      "xyz": "-120.000 200.000 0.000"
+     },
+     "physics-enabled": false,
+     "scale": "1.000 1.000 1.000"
+    },
+    {
+     "asset-path": "VIVID2_Fire_Smolder",
+     "name": "Fire14",
+     "origin": {
+      "rpy-deg": "0 0 0.0",
+      "xyz": "100.000 170.000 0.000"
+     },
+     "physics-enabled": false,
+     "scale": "1.000 1.000 1.000"
+    }
+   ]
+  }
  }
 }

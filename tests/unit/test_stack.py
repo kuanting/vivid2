@@ -84,3 +84,26 @@ def test_replay_record_then_replay(tmp_path):
     other.model = "another-model"
     with pytest.raises(VLMError):
         ReplayVLM(str(cache), other, "replay").query([img], "p", ASSESSMENT_SCHEMA)  # so is another model
+
+
+class _PromptVLM(FakeVLM):
+    def query(self, images, prompt, schema, system=None):
+        self.prompt = prompt
+        return super().query(images, prompt, schema, system)
+
+
+def test_the_prompt_for_an_ordinary_search_photo_is_unchanged_so_cached_answers_replay(blocks_run):
+    import math
+
+    from vivid2.geo import rpy_to_quat
+
+    m = mission_spec(blocks_run)
+    vlm = _PromptVLM()
+    nadir = Frame(0, 1, np.zeros((600, 800, 3), np.uint8), np.zeros(3), rpy_to_quat(0, -math.pi / 2, 0), 80.0)
+    VLMReasoner(vlm).assess(nadir, [], m)
+    assert f"The attached image is from a downward-looking camera, {m.altitude_m:.0f} m above the ground." in vlm.prompt
+    assert "This photo is from" not in vlm.prompt
+    tilted = Frame(0, 2, np.zeros((600, 800, 3), np.uint8), np.zeros(3), rpy_to_quat(0, math.radians(-20), 0), 40.0,
+                   gimbal={"tilt_deg": -20.0, "pan_deg": 0.0, "fov_deg": 40.0})
+    VLMReasoner(vlm).assess(tilted, [], m)
+    assert "tilted 20 degrees below the horizon" in vlm.prompt and "40 degree field of view" in vlm.prompt
