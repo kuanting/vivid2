@@ -11,6 +11,7 @@ from typing import Any, Dict, List, Optional, Sequence
 
 import numpy as np
 
+from vivid2.metrics.cameras import search_frames
 from vivid2.recorder import RunLog
 from vivid2.sim.segmentation import visibility_state
 
@@ -48,7 +49,7 @@ def perception_metrics(
     det_recs = [d for d in log["detections"] if d.get("layer") == layer]
     if not det_recs:
         return None
-    frames = {f["frame_id"]: f for f in log["frames"]}
+    frames = {f["frame_id"]: f for f in search_frames(log["frames"], log.meta)}  # navigation photos have no ground truth
     dets_by_frame = defaultdict(list)
     for rec in det_recs:
         dets_by_frame[rec["frame_id"]].extend(rec["dets"])

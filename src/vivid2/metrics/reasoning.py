@@ -13,6 +13,7 @@ from typing import Any, Dict, Optional
 
 import numpy as np
 
+from vivid2.metrics.cameras import search_frames
 from vivid2.recorder import RunLog
 from vivid2.sim.segmentation import visibility_state
 
@@ -25,8 +26,9 @@ def reasoning_metrics(log: RunLog, layer: str = "reasoner") -> Optional[Dict[str
     recs = [d for d in log["decisions"] if d.get("layer") == layer]
     if not recs:
         return None
-    frames = {f["frame_id"]: f for f in log["frames"]}
+    frames = {f["frame_id"]: f for f in search_frames(log["frames"], log.meta)}
     tp = fp = tn = fn = 0
+    unscored = 0  # decisions on photos without ground truth: a navigation camera's, or never recorded
     errors = dont_care = fp_on_distractor = fp_on_fire = 0
     grounded = grounding_trials = 0
     for rec in recs:
@@ -35,7 +37,10 @@ def reasoning_metrics(log: RunLog, layer: str = "reasoner") -> Optional[Dict[str
         if rec["output"].get("error"):
             errors += 1
             continue
-        frame = frames.get(rec["frame_id"], {})
+        frame = frames.get(rec["frame_id"])
+        if frame is None:  # not "no target": there is no ground truth to judge it by
+            unscored += 1
+            continue
         wh = (frame.get("width"), frame.get("height"))
         states = [(g, visibility_state(g, frame_wh=wh)) for g in frame.get("gt", [])]
         visible = [g for g, st in states if st == "visible"]
@@ -73,6 +78,7 @@ def reasoning_metrics(log: RunLog, layer: str = "reasoner") -> Optional[Dict[str
         "errors": errors,
         "error_rate": errors / len(recs),
         "dont_care": dont_care,
+        **({"unscored_decisions": unscored} if unscored else {}),  # on navigation or unrecorded photos
         "confusion": {"tp": tp, "fp": fp, "tn": tn, "fn": fn},
         "accuracy": (tp + tn) / scored if scored else None,
         "precision": precision,

@@ -5,9 +5,13 @@ from typing import Any, Dict, List, Sequence
 
 import numpy as np
 
-from vivid2.geo import pixel_ray_to_ground
+from vivid2.geo import focal_px, pixel_ray_to_ground, quat_to_rot
+from vivid2.metrics.cameras import search_frames
 from vivid2.metrics.team import by_drone, fleet_of, is_team
 from vivid2.recorder import RunLog
+from vivid2.sim.segmentation import min_visible_px
+
+PERSON_AREA_M2 = 0.85  # a person lying down (about 1.7 m x 0.5 m), the patch a photo must resolve
 
 
 def points_in_polygon(pts: np.ndarray, poly: Sequence[Sequence[float]]) -> np.ndarray:
@@ -43,7 +47,15 @@ def _cells(polygon_ne: Sequence[Sequence[float]], cell_m: float) -> np.ndarray:
 
 
 def footprint_hits(frame: Dict[str, Any], cells: np.ndarray, ground_down_m: float):
-    """Which cells a frame's ground footprint covers (None if the horizon is in view)."""
+    """Which cells a photo covers (None if it covers nothing it can be credited for).
+
+    A photo with the gimbal at rest (straight down, full field of view): the cells inside its four
+    ground corners; if the horizon is in view (the drone banking hard), none. A photo the stack
+    tilted or zoomed: the cells in view where a person would show at least the visibility
+    threshold of pixels, so looking at the horizon does not count the far ground.
+    """
+    if frame.get("gimbal"):
+        return detectable_hits(frame, cells, ground_down_m)
     w, h = frame["width"], frame["height"]
     corners = [
         pixel_ray_to_ground(u, v, frame["cam_pos"], frame["cam_q"], w, h, frame["fov_deg"], ground_down_m)
@@ -52,6 +64,27 @@ def footprint_hits(frame: Dict[str, Any], cells: np.ndarray, ground_down_m: floa
     if any(c is None for c in corners):
         return None  # horizon in view; footprint unbounded, skip conservatively
     return points_in_polygon(cells, [c[:2] for c in corners])
+
+
+def detectable_hits(frame: Dict[str, Any], cells: np.ndarray, ground_down_m: float) -> np.ndarray:
+    """Cells in a photo's view where a lying person (PERSON_AREA_M2) covers at least the visibility threshold.
+
+    A ground patch of area A seen at range r, incidence cos_i and planar depth x covers
+    A cos_i f^2 r / x^3 pixels (pinhole camera, focal length f in pixels).
+    """
+    w, h, fov = frame["width"], frame["height"], frame["fov_deg"]
+    cam = np.asarray(frame["cam_pos"], float)
+    rel = np.column_stack([cells, np.full(len(cells), ground_down_m)]) - cam
+    pc = rel @ quat_to_rot(frame["cam_q"])  # camera frame: x along the optical axis, y right, z down
+    x = pc[:, 0]
+    front = x > 1e-6
+    xs = np.where(front, x, 1.0)
+    f = focal_px(w, fov)
+    u, v = w / 2.0 + f * pc[:, 1] / xs, h / 2.0 + f * pc[:, 2] / xs
+    rng = np.linalg.norm(rel, axis=1)
+    cos_i = np.abs(rel[:, 2]) / np.maximum(rng, 1e-9)
+    px = PERSON_AREA_M2 * cos_i * f * f * rng / xs ** 3
+    return front & (u >= 0) & (u < w) & (v >= 0) & (v < h) & (px >= min_visible_px(w, h))
 
 
 def coverage(
@@ -82,7 +115,7 @@ def planning_metrics(log: RunLog) -> Dict[str, Any]:
     ground = (meta.get("mission_spec") or {}).get("ground_down_m", meta["search_area"].get("ground_down_m", 0.0))
     if is_team(meta):
         return _team_planning(log, ground)
-    cov = coverage(log["frames"], meta["search_area"]["polygon_ne"], ground)
+    cov = coverage(search_frames(log["frames"], meta), meta["search_area"]["polygon_ne"], ground)
     length = path_length(log["trajectory"])
     return {
         **cov,
@@ -103,7 +136,7 @@ def _team_planning(log: RunLog, ground: float, cell_m: float = 2.0) -> Dict[str,
     hits = np.zeros(len(cells), int)
     own = {i: np.zeros(len(cells), bool) for i in ids}
     milestone_s = None
-    for f in sorted(log["frames"], key=lambda f: f["t"]):
+    for f in sorted(search_frames(log["frames"], meta), key=lambda f: f["t"]):
         hit = footprint_hits(f, cells, ground)
         if hit is None:
             continue

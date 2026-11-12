@@ -37,8 +37,8 @@ def build_map(run: Path, meta: dict) -> CanopyMap:
     cmap = CanopyMap(ms["search_polygon_ne"], from_meta(meta).downsample(DUT_DEM_CELL_M))
     for line in (run / "frames.jsonl").read_text(encoding="utf-8").splitlines():
         r = json.loads(line) if line.strip() else {}
-        if not r.get("depth"):
-            continue
+        if not r.get("depth") or r.get("camera", "Payload") != "Payload" or r.get("gimbal"):
+            continue  # the canopy map is built from straight-down payload photos only
         # frame bank depth: uint16 mm at half resolution, 0 = no data (the field of view is unchanged)
         d = cv2.imread(str(run / r["depth"]), cv2.IMREAD_UNCHANGED).astype(float) / 1000.0
         cmap.add(SimpleNamespace(depth=d, fov_deg=r["fov_deg"], cam_q=r["cam_q"], cam_pos=r["cam_pos"]))

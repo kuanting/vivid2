@@ -31,7 +31,9 @@ HIGH_M = 40.0
 def load(run_dir: Path):
     log = RunLog.load(run_dir)
     ground = log.meta["mission_spec"]["ground_down_m"]
-    height = {f["frame_id"]: ground - f["cam_pos"][2] for f in log["frames"]}
+    # straight-down payload photos only (navigation and tilted photos are binned by nothing here)
+    height = {f["frame_id"]: ground - f["cam_pos"][2] for f in log["frames"]
+              if f.get("camera", "Payload") == "Payload" and not f.get("gimbal")}
     return log, height
 
 
@@ -54,7 +56,7 @@ def sweep(runs, keep_fn, thresholds):
     for t in thresholds:
         tp = fp = fn = tn = 0
         for log, height in runs:
-            m = reasoning_metrics(at_threshold(log, lambda fid: keep_fn(height.get(fid, 0.0)), t))
+            m = reasoning_metrics(at_threshold(log, lambda fid: fid in height and keep_fn(height[fid]), t))
             if m:
                 c = m["confusion"]
                 tp, fp, fn, tn = tp + c["tp"], fp + c["fp"], fn + c["fn"], tn + c["tn"]

@@ -10,6 +10,7 @@ from typing import Any, Dict, List
 
 import numpy as np
 
+from vivid2.metrics.cameras import frame_camera, search_cameras
 from vivid2.metrics.mission import match_reports
 from vivid2.recorder import RunLog
 
@@ -90,8 +91,13 @@ def team_metrics(log: RunLog) -> Dict[str, Any]:
     per_drone = {i: {"reports": 0, "frames": 0} for i in ids}
     for r in reports:
         per_drone.setdefault(r.get("drone", ids[0]), {"reports": 0, "frames": 0})["reports"] += 1
+    search = search_cameras(meta)
     for f in log["frames"]:
-        per_drone.setdefault(f.get("drone", ids[0]), {"reports": 0, "frames": 0})["frames"] += 1
+        d = per_drone.setdefault(f.get("drone", ids[0]), {"reports": 0, "frames": 0})
+        if frame_camera(f) in search:
+            d["frames"] += 1
+        else:  # navigation photos, counted apart (key only when there are any)
+            d["nav_frames"] = d.get("nav_frames", 0) + 1
     flew = {r.get("drone", ids[0]) for r in log["events"] if r.get("kind") == "takeoff"}
     comms = log["comms"]
     return {

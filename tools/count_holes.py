@@ -76,8 +76,8 @@ def main(argv=None) -> int:
         n_bad = n = 0
         for line in (rd / "frames.jsonl").read_text().splitlines():
             rec = json.loads(line)
-            if not rec.get("rgb"):
-                continue
+            if not rec.get("rgb") or rec.get("camera", "Payload") != "Payload":
+                continue  # payload photos only
             total += 1
             if tilt_deg(rec["cam_q"]) > args.max_tilt:
                 tilted += 1
