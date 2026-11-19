@@ -6,6 +6,8 @@ It flies a drone AI stack, the device under test (DUT), through standardised,
 reproducible emergency-response missions. It then scores each layer of the
 stack separately:
 
+<a href="https://www.youtube.com/watch?v=OH5hdPNvfJY"><img src="http://img.youtube.com/vi/OH5hdPNvfJY/0.jpg"/></a>
+
 | Layer | What is scored |
 |---|---|
 | **Perception** | AP@0.5, precision/recall against simulator ground-truth boxes, first-detection range |
