@@ -26,7 +26,8 @@ for a central team from `fleet` and each drone's context.
 - **Time and thinking:** `ctx.elapsed_s()`, `ctx.sleep()`, `ctx.should_stop()`, and
   `await ctx.think(fn, ...)` for every model call.
 - **Teams:** `ctx.radio` in a distributed team.
-- **`ctx.log(...)`** for your own records, and **`ctx.report_target(...)`** to report a find.
+- **`ctx.log(...)`** for your own records, **`ctx.report_target(...)`** to report a find, and on
+  runs with a damage task **`ctx.report_damage(...)`** ([damage.md](damage.md)).
 
 ## What a stack may not use
 
@@ -73,6 +74,9 @@ this run. Otherwise the report is counted as a false alarm, even if it is right,
 
 A stack may still use navigation photos to steer, or to decide where to look closer. It then
 cites the search-camera photo that confirmed the find.
+
+Damage reports (runs with a damage task) follow the same rule and one more: the cited photo must
+show what the report is about. See [damage.md](damage.md#rules).
 
 ## Scoring with several cameras
 

@@ -26,7 +26,7 @@ Microsoft AirSim, ACM MM Best Open Source Software Award).
 |---|---|
 | Forest S&R: find missing hikers under canopy | **Phase 0**: runs on Blocks (proxy targets); ForestSAR map in progress |
 | Wildfire S&R: find trapped people near a fire front, keep out of the fire's no-fly area | **Started**: ForestFire map with static fires (`scenarios/wildfire`); fire spread is Phase 2 |
-| Landslide detection: map debris, report blocked roads | Phase 2 |
+| Disaster S&R (landslide, avalanche, earthquake, tsunami): find visible people and map the damage (debris, blocked roads, building grades, clues) | **Started**: damage task framework, tested on the TestYard test map; landslide map next ([docs/damage.md](docs/damage.md)) |
 
 ## Layout
 
@@ -38,6 +38,8 @@ src/vivid2/          Python package
   stack/reference/   baseline layers and the reference SearchAgent
   vlm/               VLM providers: Claude API, OpenAI-compatible local servers, record/replay cache
   metrics/           offline per-layer metrics over recorded logs
+  damage/            the damage task: layouts -> ground truth, what a photo observes, placement rules
+  dem.py, terrain_edit.py  real-DEM terrain, and terrain edits for disaster maps (road benches, slides)
   openloop.py        evaluate a VLM on a run's saved frames (vivid2 eval-frames)
   preflight.py       checks the open map and spawned targets before each run
   scoring.py         0-100 layer scores, safety gate, bootstrap CIs
@@ -61,7 +63,7 @@ pip install -e ".[dev,claude]"          # add local-vlm for vLLM/Ollama
 pytest                                   # unit tests, no simulator needed
 
 # 2. Simulator. Either run a packaged VIVID2Env build (any user, no Unreal needed; benchmark results
-#    should come from one, see docs/unreal_versions.md "Packaged builds"):
+#    should come from one; each build holds a group of maps, see docs/unreal_versions.md "Packaged builds"):
 #      VIVID2Env.exe /Game/VIVID2/Maps/ForestSAR -windowed -ResX=1280 -ResY=720
 #    or set up the editor project for your engine (see docs/unreal_versions.md):
 pip install -e ".[setup]"                                   # gdown, for the Google Drive download
@@ -69,6 +71,8 @@ vivid2 unreal setup --engine 5.8 --download                # prebuilt plugin for
 vivid2 unreal setup --engine 5.8 --airsim-root ..\ProjectAirSim --apply-patch   # or: upgrade your own checkout
 vivid2 unreal setup --engine 5.7 --airsim-root ..\ProjectAirSim                 # UE 5.7 (upstream as-is)
 #    then open unreal\VIVID2Env\VIVID2Env.uproject and press Play.
+#    The smoke campaigns below run on the test map: open /Game/VIVID2/Maps/TestYard first
+#    (a packaged build opens it when started without a map).
 
 # 3. Run a campaign and open the scorecard
 vivid2 list-scenarios campaigns\smoke.jsonc

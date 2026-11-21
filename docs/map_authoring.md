@@ -3,7 +3,7 @@
 These rules come from how Project AirSim and VIVID 2 actually behave (checked in
 the plugin source and on the Blocks map). A map that breaks them still opens and
 flies, but its scores are wrong. Read this before building ForestSAR, ForestFire or
-Landslide.
+a disaster map (and [damage.md](damage.md) for the damage task's ground truth).
 
 ## Coordinates and height
 
@@ -94,6 +94,22 @@ collision, and collision that matches the shape. Check both levels:
 - **Cook everything spawned by name.** Assets referenced only by name are not
   packaged. Add the folder to `DirectoriesToAlwaysCook` in
   `Config/DefaultGame.ini`, for example `+DirectoriesToAlwaysCook=(Path="/Game/VIVID2/Targets")`.
+
+## Disaster maps
+
+- **One layout, everything from it.** A disaster map's damage lives in
+  `SourceData/<map>/layout.json`; the region masks, the terrain edits, the placements and the
+  ground truth are all built from it (`vivid2 damage build`, `vivid2 terrain build --layout`).
+  Don't paint damage by hand: the ground truth would not know.
+- **Use the masks' threshold.** The landscape material and the PCG graphs switch at mask
+  value 0.5 (b = saturate(2 R - 1) at 0.5, i.e. 191 in the PNG), as the ground truth does.
+- **Damage must show from the air.** A building graded partial needs visible damage from
+  survey height (a sunk storey, a tilt, a debris skirt); a blocked road needs debris across it.
+- **Water is an opaque, still plane with collision.** No Time node in its material, so it
+  renders the same in every run; opaque, so depth and segmentation see its surface; colliding,
+  so a drone that touches it has crashed. Not the Water plugin.
+- **Clues are spawned, not placed**, like decoys: blueprints in `/Game/VIVID2/Clues`, cooked
+  (`DirectoriesToAlwaysCook`), with query collision.
 
 ## Fires and smoke
 

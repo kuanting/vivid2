@@ -156,11 +156,23 @@ hikers are scored exactly as in Forest S&R; the VLM gets its own prompt
 - **Not yet:** a spreading fire front (the `vivid2.hazards` interface), fire-front
   mapping IoU, and a fire-spotting mission scored on `fires_visible`.
 
-## Landslide detection (`mission: landslide`), Phase 2
+## Disaster S&R (`landslide_sar`, `avalanche_sar`, `earthquake_sar`, `tsunami_sar`)
 
-Survey a mountain road after a slide. Report the debris extent, whether the
-road is blocked, and damaged structures. Additional metrics: change-mask IoU,
-road-blockage recall, and a rubric score for the VLM's situation report.
+Find the people a camera can see (on the surface, on roofs, in water, partly buried with
+something showing) and, with a `damage` block, map what the disaster did: debris and flood
+areas, blocked road segments, building damage grades and surface clues. People buried out of
+sight are not targets; they score how well the damage map would send rescuers to them. The
+damage task, its rules and its score are in [damage.md](damage.md).
+
+| Mission | Map | Damage products | Status |
+|---|---|---|---|
+| `landslide_sar` | Landslide (ForestSAR's slope with a road; LandslideBefore is the map before the slide) | debris areas, blocked roads, buried buildings, clues | Framework done; tested on the test map TestYard (`scenarios/landslide/testyard_damage_01.jsonc`). Map next |
+| `avalanche_sar` | Avalanche (Japanese Northern Alps) | debris extent, clues (skis, poles, a glove, a backpack) | Planned |
+| `earthquake_sar` | CoastQuake (a Hualien coast town) | building grades, blocked roads | Planned |
+| `tsunami_sar` | CoastTsunami (the same town, flooded) | flood extent, blocked roads, building grades | Planned |
+
+Not yet: a VLM damage mapper for the `vlm` and `hybrid` stacks (they score 0 on the damage task
+until then), a pre-event orthophoto as a mission input, and a situation-report rubric.
 
 ## Writing a scenario
 

@@ -85,19 +85,30 @@ simulator and nothing else. Use it on every machine that only runs campaigns.
 
 ```powershell
 vivid2 unreal setup --engine 5.8 --download      # once
-powershell -ExecutionPolicy Bypass -File tools\package_env.ps1 -Engine 5.8 -Zip
-# -> build\VIVID2Env-ue5.8-Win64\Windows\VIVID2Env.exe       (2.2 GB)
-# -> dist\VIVID2Env-ue5.8-Win64-<commit>.zip  + .sha256      (to copy to other machines)
+powershell -ExecutionPolicy Bypass -File tools\package_env.ps1 -Engine 5.8 -Group forest -Zip
+# -> build\VIVID2Env-forest-ue5.8-Win64\Windows\VIVID2Env.exe
+# -> dist\VIVID2Env-forest-ue5.8-Win64-<commit>.zip  + .sha256   (to copy to other machines)
 ```
 
+- **Groups.** Maps that share content ship in one build, so a scene's download
+  doesn't carry the others. `unreal/VIVID2Env/package_groups.json` lists them:
+
+  | Group | Maps |
+  |---|---|
+  | `forest` | ForestSAR, ForestSAR_Open, ForestSAR_Dense, ForestFire (the landslide maps will join it) |
+
+  Every build also has `TestYard`, the test map, and opens it when started
+  without a map. Without `-Group` the script builds one build with every map
+  (`MapsToCook` in `Config/DefaultGame.ini`), named as before.
+- Each build repeats the program files: about 1.3 GB unpacked, 0.5 GB zipped.
+  `-NoDebugInfo` leaves out the 0.5 GB of debug symbols (`VIVID2Env.pdb`), at
+  the cost of crash dumps without function names.
 - About 6 minutes when the editor has already compiled the shaders. The
   editor may stay open: only the game is compiled.
-- Cooked: `ForestSAR`, `ForestSAR_Open`, `ForestSAR_Dense` and `ForestFire`
-  (`MapsToCook` in `Config/DefaultGame.ini`). Also the content spawned at
-  runtime: hikers, decoys and fires, the drone, and Project AirSim's weather
-  actor.
-- `vivid2_build.json` next to the exe records the VIVID 2 commit and any
-  uncommitted changes to the project's content or config.
+- Also cooked, in every build: the content spawned at runtime (hikers, decoys
+  and fires, the drone, and Project AirSim's weather actor).
+- `vivid2_build.json` next to the exe records the VIVID 2 commit, the group and
+  its maps, and any uncommitted changes to the project's content or config.
 - The build contains third-party content (Fab packs) in cooked form. Share
   the zip as a binary download; never commit it.
 
@@ -114,7 +125,8 @@ On any 64-bit Windows 10/11 machine with a DirectX 12 GPU:
    (0 = off). Turn it off in Windows Security → App & browser control →
    Smart App Control settings. Windows may not let you switch it back on
    without a reset. A code-signed build would avoid this; none exists yet.
-3. Start one map. ForestSAR is the default, and it is ready in about 10 s:
+3. Start one map of the build's group; ForestSAR is ready in about 10 s.
+   Without a map the build opens TestYard.
    ```powershell
    VIVID2Env.exe /Game/VIVID2/Maps/ForestSAR_Open -windowed -ResX=1280 -ResY=720
    ```

@@ -31,9 +31,10 @@ The repo never contains third-party source assets. Only VIVID 2's own content
 under `Content/VIVID2/` is committed. Maps there may reference pack assets, but
 the packs themselves are ignored by git.
 
-- **Users** get a packaged `VIVID2Env` build (cooked, in `.pak` files), made with
-  `tools\package_env.ps1` and published as a release download. They need no
-  Unreal or Fab account.
+- **Users** get packaged `VIVID2Env` builds (cooked, in `.pak` files), made with
+  `tools\package_env.ps1` and published as release downloads, one per group of
+  maps that share content ([unreal_versions.md](unreal_versions.md#packaged-builds)).
+  They need no Unreal or Fab account.
 - **Map authors** who want to edit the maps in the editor must get each pack
   below from Fab themselves and install it at the listed folder.
 
@@ -128,6 +129,31 @@ Rules for any target asset:
 
 On Blocks, `1M_Cube` scaled to 0.5 × 0.5 × 1.7 stands in for a person. This
 is only good for pipeline bring-up. It is meaningless for evaluating a VLM.
+The legacy `blocks_*` scenarios run in Project AirSim's own Blocks project
+(BlocksMap's floor is at NED −1.0 m, so their proxies stand 1 m deep in it;
+they stay that way to keep their saved results). VIVID2Env has its own test
+map instead.
+
+## TestYard (test map)
+
+`/Game/VIVID2/Maps/TestYard` is VIVID 2's own test map: a flat yard with its
+ground at height 0, two crossing roads, four box houses and a landslide's
+debris lobe, all made of engine shapes and VIVID 2's materials. The smoke
+campaigns run on it (`campaigns/smoke.jsonc`: one hiker;
+`campaigns/smoke_damage.jsonc`: the damage task). Open it in VIVID2Env and
+press Play, or start any packaged build without a map.
+- The damage is real geometry, so a camera-based damage mapper can be tested
+  here: debris (brown ground, soil mounds, boulders, logs) across road R01;
+  house B02 partly damaged (half its roof sagging in, rubble at its south
+  wall); house B03 collapsed into a rubble pile across road R02; B01 and B04
+  intact.
+- One source, `SourceData/TestYard/layout.json`, gives both the ground truth
+  (`vivid2 damage build --map TestYard`) and the geometry
+  (`python tools/build_testyard.py`, which places every actor from the layout
+  and its ground truth). It is a small rehearsal of how the disaster maps are
+  built.
+- The level is a copy of ForestSAR_Dense without its landscape and forest, so
+  it has the same sun, sky and fog.
 
 ## ForestSAR (Phase 1)
 
@@ -306,8 +332,23 @@ without errors; checked on 2026-11-10:
 | No burnt tree meshes, no sound | — | Burnt material instances on the same meshes |
 | The demo maps use the deprecated AtmosphericFog and the UE4 sky | Only the demo maps | Not used |
 
-## Landslide (Phase 2)
+## Disaster maps (Phase 2)
 
-There are two terrain states, before and after (debris meshes, a displaced
-road section, tilted trees). The landslide hazard swaps them in, and exports
-the change mask as ground truth for change-detection IoU.
+Each disaster map is described by one layout, `SourceData/<map>/layout.json`: its regions (a
+slide scar, a deposit, a flood zone), roads, buildings and terrain edits. Two commands turn it
+into everything else ([damage.md](damage.md)):
+
+- `vivid2 terrain build --like <base map> --layout ... --stage pre|post`: the heightmap to import
+  in Landscape mode, the terrain model, and for `post` the pre-event terrain the stack's DEM is
+  made from. `--like` keeps every vertex the edits leave alone identical to the base map's.
+- `vivid2 damage build --map <map>`: the damage ground truth, the surface model (roofs, water),
+  the region masks the landscape material and PCG graphs read, and the actor placements.
+
+A map before the event (e.g. LandslideBefore: ForestSAR's slope with the road bench) and after
+it (Landslide) are separate levels with separate landscapes, since a landscape can't be swapped
+at run time. The test map, TestYard, is built the same way at small scale
+(`scenarios/landslide/testyard_damage_01.jsonc`).
+
+Each new map goes into a build group in `unreal/VIVID2Env/package_groups.json` (the landslide
+maps join `forest`, whose trees they share) and into `MapsToCook`; `tests/unit/test_packaging.py`
+checks the two agree.
