@@ -1,6 +1,6 @@
-// Quick end-to-end check on the Blocks map (3 runs).
+// Quick end-to-end check on VIVID 2's test map, TestYard (3 runs).
 {
   "name": "smoke",
   "sim_config_dir": "../sim_config",
-  "scenarios": ["../scenarios/forest_sar/blocks_hiker_01.jsonc"]
+  "scenarios": ["../scenarios/forest_sar/testyard_hiker_01.jsonc"]
 }

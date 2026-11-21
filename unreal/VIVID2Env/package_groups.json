@@ -1,0 +1,7 @@
+{
+  "description": "Packaged builds by group (tools/package_env.ps1 -Group <name>). Maps that share content ship in one build. Map names are levels in /Game/VIVID2/Maps. Every build also gets the maps in 'every_build'. The union of all groups must equal MapsToCook in Config/DefaultGame.ini, which is what a build without -Group cooks.",
+  "every_build": ["TestYard"],
+  "groups": {
+    "forest": ["ForestSAR", "ForestSAR_Open", "ForestSAR_Dense", "ForestFire"]
+  }
+}

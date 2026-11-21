@@ -1,0 +1,6 @@
+// Damage-task check on VIVID 2's test map, TestYard (1 run): vivid2 run --campaign campaigns/smoke_damage.jsonc --agent coverage_gt
+{
+  "name": "smoke_damage",
+  "sim_config_dir": "../sim_config",
+  "scenarios": ["../scenarios/landslide/testyard_damage_01.jsonc"]
+}

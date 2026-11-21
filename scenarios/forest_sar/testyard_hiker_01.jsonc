@@ -1,0 +1,23 @@
+// Smoke scenario on VIVID 2's test map, TestYard (tools/build_testyard.py; flat ground at height 0):
+// one real hiker in open ground. Validates the full pipeline (scene build, spawn, segmentation,
+// flight, scoring) in a minute or two of flight; campaigns/smoke.jsonc runs it. The hiker lies under
+// the middle survey lane (east 10 m; the lanes are 46 m apart), so every seed's photos show it whole
+// (tools/check_targets.py); the jitter keeps it off road R02 and away from the houses.
+{
+  "id": "testyard_hiker_01",
+  "mission": "forest_sar",
+  "description": "One hiker lying in open ground, clear midday, no wind.",
+  "scene": {"base": "scene_testyard.jsonc", "robot_config": "robot_vivid_quad.jsonc", "camera": "Payload", "map": "TestYard"},
+  "dut_start": {"ned": [0, -10, -1], "yaw_deg": 0},
+  "search_area": {"polygon_ne": [[-60, -60], [60, -60], [60, 60], [-60, 60]], "altitude_m": 35, "ground_down_m": 0},
+  "targets": [
+    {"id": "Hiker1", "asset": "VIVID2_Hiker_YellowJacket_LyingSide", "ned": [-25, 10, 0], "yaw_deg": 60,
+     "description": "hiker in a yellow jacket lying on his side"}
+  ],
+  "target_jitter_m": 8,
+  "brief": "A hiker has been reported missing in this area. Look for a person on the ground.",
+  "environment": {"time_of_day": "2026-09-28 12:00:00", "weather": {}, "wind_ned": [0, 0, 0]},
+  "limits": {"timeout_s": 420, "max_speed_mps": 6, "min_agl_m": 0.5, "geofence_margin_m": 20, "energy_budget_m": 2500},
+  "success": {"localization_tolerance_m": 8, "require_all_targets": true},
+  "sweep": {"seeds": 3}
+}
