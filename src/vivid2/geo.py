@@ -98,6 +98,21 @@ def world_to_pixel(
     return (width / 2.0 + f * p_cam[1] / p_cam[0], height / 2.0 + f * p_cam[2] / p_cam[0], p_cam[0])
 
 
+def points_in_polygon(pts: np.ndarray, poly: Sequence[Sequence[float]]) -> np.ndarray:
+    """Vectorised even-odd point-in-polygon test. pts: (N, 2)."""
+    poly = np.asarray(poly, float)
+    x, y = pts[:, 0], pts[:, 1]
+    inside = np.zeros(len(pts), bool)
+    j = len(poly) - 1
+    for i in range(len(poly)):
+        xi, yi = poly[i]
+        xj, yj = poly[j]
+        cond = ((yi > y) != (yj > y)) & (x < (xj - xi) * (y - yi) / (yj - yi + 1e-12) + xi)
+        inside ^= cond
+        j = i
+    return inside
+
+
 def nadir_footprint(altitude_m: float, width: int, height: int, fov_deg: float) -> Tuple[float, float]:
     """Ground footprint (across-image-x, across-image-y) of a nadir camera, in metres."""
     f = focal_px(width, fov_deg)

@@ -5,11 +5,9 @@ import html
 import json
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
-from vivid2.scoring import DEFAULT_WEIGHTS, aggregate, bootstrap_ci, scaling, stack_label
-
-LAYERS = list(DEFAULT_WEIGHTS) + ["overall"]
+from vivid2.scoring import aggregate, bootstrap_ci, layer_keys, scaling, stack_label
 
 CSS = """
 :root{--bg:#fbfbfa;--fg:#1d1d1b;--muted:#6b6b66;--line:#e2e1dc;--card:#fff;--bar:#2f6fdf;--bad:#c2410c;--good:#15803d}
@@ -78,7 +76,8 @@ def _is_oracle(r: Dict[str, Any]) -> bool:
     return not r.get("eligible", (r.get("agent_config") or {}).get("perception") != "gt_perception")
 
 
-def _stack_rows(results: List[Dict[str, Any]]) -> str:
+def _stack_rows(results: List[Dict[str, Any]], layers: Optional[List[str]] = None) -> str:
+    layers = layers or layer_keys(results) + ["overall"]
     oracle = {stack_label(r) for r in results if _is_oracle(r)}
     violations: Dict[str, int] = {}
     for r in results:
@@ -87,7 +86,7 @@ def _stack_rows(results: List[Dict[str, Any]]) -> str:
     ranked = sorted(aggregate(results).items(),
                     key=lambda kv: (kv[0] in oracle, -(kv[1]["scores"]["overall"]["mean"] or 0)))
     for agent, s in ranked:
-        cells = "".join(_score_cell(s["scores"][k]) for k in LAYERS)
+        cells = "".join(_score_cell(s["scores"][k]) for k in layers)
         note = " <span class='muted'>(oracle, not eligible)</span>" if agent in oracle else ""
         rows.append(
             f"<tr><td><b>{html.escape(agent)}</b>{note}</td><td class='num'>{s['runs']}</td>"
@@ -101,17 +100,17 @@ TEAM_MODES = {"central": "Teams, central (one agent commands every drone)",
               "distributed": "Teams, distributed (one agent per drone, radio only)"}
 
 
-def _team_sections(results: List[Dict[str, Any]]) -> str:
+def _team_sections(results: List[Dict[str, Any]], layers: List[str]) -> str:
     """One stack table per team mode, then how each team stack scales with the number of drones."""
     if not results:
         return ""
-    head = "".join(f"<th>{k}</th>" for k in LAYERS)
+    head = "".join(f"<th>{k}</th>" for k in layers)
     out = []
     for mode, title in TEAM_MODES.items():
         rs = [r for r in results if r["team"].get("mode") == mode]
         if rs:
             out.append(f"""<h2>{html.escape(title)}</h2>
-<div class="wrap"><table><tr><th>Stack x drones</th><th>Runs</th><th>Success</th><th>Collision runs</th><th>Rule violations</th>{head}</tr>{_stack_rows(rs)}</table></div>""")
+<div class="wrap"><table><tr><th>Stack x drones</th><th>Runs</th><th>Success</th><th>Collision runs</th><th>Rule violations</th>{head}</tr>{_stack_rows(rs, layers)}</table></div>""")
     rows = []
     for agent, sizes in sorted(scaling(results).items()):
         for n, s in sizes.items():
@@ -136,9 +135,10 @@ def render(results: List[Dict[str, Any]], title: str) -> str:
     results = [r for r in results if r.get("mode") != "open_loop"]
     teams = [r for r in results if r.get("team")]
     singles = [r for r in results if not r.get("team")]
-    head = "".join(f"<th>{k}</th>" for k in LAYERS)
+    layers = layer_keys(results) + ["overall"]
+    head = "".join(f"<th>{k}</th>" for k in layers)
     stacks = ('<h2>Stacks</h2>\n<div class="wrap"><table><tr><th>Stack</th><th>Runs</th><th>Success</th>'
-              f'<th>Collision runs</th><th>Rule violations</th>{head}</tr>{_stack_rows(singles)}</table></div>') if singles else ""
+              f'<th>Collision runs</th><th>Rule violations</th>{head}</tr>{_stack_rows(singles, layers)}</table></div>') if singles else ""
 
     run_rows = []
     for r in sorted(results, key=lambda r: (r["scenario_id"], r["agent"], r["run_id"])):
@@ -163,7 +163,7 @@ def render(results: List[Dict[str, Any]], title: str) -> str:
 <h1>{html.escape(title)}</h1>
 <div class="muted">VIVID 2 scorecard · {len(results)} flown runs{f" · {len(open_loop)} open-loop evaluations" if open_loop else ""} · generated {datetime.now():%Y-%m-%d %H:%M}</div>
 {stacks}
-{_team_sections(teams)}
+{_team_sections(teams, layers)}
 <p class="muted">Layer scores are 0–100 means with a 95% bootstrap interval over runs. "n/a" means the stack does not expose that layer.
 Overall is the weighted mean of available layers, capped at 25 for any run with a collision (in a team: any drone's).</p>
 <h2>Runs</h2>

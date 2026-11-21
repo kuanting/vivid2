@@ -20,7 +20,9 @@ DEFAULT_WEIGHTS = {
     "planning": 0.10,
     "control": 0.05,
     "safety": 0.20,
+    "damage": 0.25,  # runs with a damage task only (vivid2.metrics.damage); absent elsewhere, so it weighs nothing
 }
+OPTIONAL_LAYERS = ("damage",)
 COLLISION_CAP = 25.0
 
 
@@ -79,6 +81,8 @@ def layer_scores(m: Dict[str, Any]) -> Dict[str, Optional[float]]:
         "control": control,
         "safety": safety,
     }
+    if m.get("damage") is not None:
+        scores["damage"] = m["damage"]["score"]
     return {k: (None if v is None else _clamp(v)) for k, v in scores.items()}
 
 
@@ -112,14 +116,20 @@ def stack_label(r: Dict[str, Any]) -> str:
     return f"{r['agent']} x{team['size']}" if team else r["agent"]
 
 
+def layer_keys(results: List[Dict[str, Any]]) -> List[str]:
+    """Score layers to show for these results: an optional layer (damage) only if some result has it."""
+    return [k for k in DEFAULT_WEIGHTS
+            if k not in OPTIONAL_LAYERS or any(k in (r.get("scores") or {}) for r in results)]
+
+
 def aggregate(results: List[Dict[str, Any]]) -> Dict[str, Dict[str, Any]]:
     """Group run results by agent (and team size) and summarise each score with a bootstrap CI."""
     by_agent: Dict[str, List[Dict[str, Any]]] = {}
     for r in results:
         by_agent.setdefault(stack_label(r), []).append(r)
     summary = {}
+    keys = layer_keys(results) + ["overall"]
     for agent, rs in by_agent.items():
-        keys = list(DEFAULT_WEIGHTS) + ["overall"]
         summary[agent] = {
             "runs": len(rs),
             "success_rate": float(np.mean([r["metrics"]["mission"]["success"] for r in rs])),

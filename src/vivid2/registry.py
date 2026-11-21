@@ -179,6 +179,17 @@ class AgentFactory:
     def sidelap(self) -> float:
         return float(self.opts.get("sidelap", 0.2))
 
+    def _damage_mapper(self, run: Run):
+        """The damage layer for a run with a damage task (docs/damage.md); None otherwise, or for a
+        stack that has none yet (it then scores 0 on the damage task)."""
+        if not run.spec.get("damage"):
+            return None
+        if self.kind == "coverage_gt":
+            from vivid2.stack.reference.damage import GroundTruthDamageMapper
+
+            return GroundTruthDamageMapper()
+        return None
+
     def _agent(self, run: Run, planner, cls, **team) -> Agent:
         period = float(self.opts.get("frame_period_s", 1.0 if self._vlm is None else 2.0))
         dip = DipSettings() if self.dip else None
@@ -186,6 +197,9 @@ class AgentFactory:
             return SurveyAgent(self.name, planner, frame_period_s=period, dip=dip)
         kw = {"frame_period_s": period, "verify": self.verify, "dip": dip, **team,
               **({"look_around": LookAround()} if self.look_around else {})}
+        mapper = self._damage_mapper(run)
+        if mapper is not None:  # only on runs with a damage task, so other runs' agents (and hashes) stay as they were
+            kw["damage_mapper"] = mapper
         if self.kind == "coverage_gt":
             from vivid2.stack.reference.perception import GroundTruthPerception
 

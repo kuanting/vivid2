@@ -29,7 +29,7 @@ def reasoning_metrics(log: RunLog, layer: str = "reasoner") -> Optional[Dict[str
     frames = {f["frame_id"]: f for f in search_frames(log["frames"], log.meta)}
     tp = fp = tn = fn = 0
     unscored = 0  # decisions on photos without ground truth: a navigation camera's, or never recorded
-    errors = dont_care = fp_on_distractor = fp_on_fire = 0
+    errors = dont_care = fp_on_distractor = fp_on_fire = fp_on_clue = 0
     grounded = grounding_trials = 0
     for rec in recs:
         # A failed call or unusable reply is an abstention, not a "no target" answer:
@@ -58,6 +58,7 @@ def reasoning_metrics(log: RunLog, layer: str = "reasoner") -> Optional[Dict[str
             fp += 1
             fp_on_distractor += bool(frame.get("distractors_visible"))
             fp_on_fire += bool(frame.get("fires_visible"))
+            fp_on_clue += bool(frame.get("clues_visible"))
         elif visible:
             fn += 1
         else:
@@ -87,6 +88,7 @@ def reasoning_metrics(log: RunLog, layer: str = "reasoner") -> Optional[Dict[str
         "hallucination_rate": fp / (fp + tn) if fp + tn else None,
         "fp_on_distractor": fp_on_distractor,
         **({"fp_on_fire": fp_on_fire} if log.meta.get("fires") else {}),  # runs with fires only
+        **({"fp_on_clue": fp_on_clue} if log.meta.get("clues") else {}),  # runs with clues only
         "grounding_accuracy": grounded / grounding_trials if grounding_trials else None,
         "latency_mean_s": float(lat.mean()),
         "latency_p95_s": float(np.percentile(lat, 95)),

@@ -64,19 +64,25 @@ class Run:
     def authored_ground_down_m(self) -> float:
         return float(self.spec["search_area"].get("ground_down_m", 0.0))
 
-    def resolved_targets(self, terrain=None) -> List[Dict]:
-        """Targets with seeded horizontal jitter, then (given a terrain model) set on the ground there."""
+    def resolved_targets(self, terrain=None, surface=None) -> List[Dict]:
+        """Targets with seeded horizontal jitter, then (given a terrain model) set on the ground there.
+
+        A target with ``snap: "surface"`` is set on ``surface`` instead (the map's surface model:
+        roofs and water), when given. ``jitter_m`` on a target overrides ``target_jitter_m``.
+        """
         jitter = float(self.spec.get("target_jitter_m", 0.0))
         rng = self.rng
         out = []
         for tgt in self.spec["targets"]:
             t = copy.deepcopy(tgt)
-            if jitter > 0:
-                r = jitter * np.sqrt(rng.uniform())
+            j = float(t.get("jitter_m", jitter))
+            if j > 0:  # no draw for a target without jitter, so other targets' draws don't move
+                r = j * np.sqrt(rng.uniform())
                 a = rng.uniform(0, 2 * np.pi)
                 t["ned"] = [t["ned"][0] + r * np.cos(a), t["ned"][1] + r * np.sin(a), t["ned"][2]]
-            if terrain is not None:
-                t["ned"] = _snap(t["ned"], terrain, self.authored_ground_down_m)
+            ground = surface if (t.get("snap") == "surface" and surface is not None) else terrain
+            if ground is not None:
+                t["ned"] = _snap(t["ned"], ground, self.authored_ground_down_m)
             out.append(t)
         return out
 
@@ -97,6 +103,22 @@ class Run:
             f["yaw_deg"] = fire_yaw_deg(f, wind)
             if terrain is not None:
                 f["ned"] = _snap(f["ned"], terrain, self.authored_ground_down_m)
+        return out
+
+    def resolved_clues(self, terrain=None) -> List[Dict]:
+        """Clues (damage task) set on the ground like the distractors."""
+        out = copy.deepcopy(self.spec.get("clues", []))
+        if terrain is not None:
+            for c in out:
+                c["ned"] = _snap(c["ned"], terrain, self.authored_ground_down_m)
+        return out
+
+    def resolved_buried(self, terrain=None) -> List[Dict]:
+        """Buried victims (damage.buried): hidden points, set on the ground like the targets (never spawned)."""
+        out = copy.deepcopy((self.spec.get("damage") or {}).get("buried", []))
+        if terrain is not None:
+            for b in out:
+                b["ned"] = _snap(b["ned"], terrain, self.authored_ground_down_m)
         return out
 
     def resolved_start(self, terrain=None) -> List[float]:
@@ -156,7 +178,9 @@ def _snap(ned, terrain, authored_ground_down_m: float) -> List[float]:
 
 def validate_scenario(spec: Dict, where: str = "") -> None:
     """Raise jsonschema.ValidationError if ``spec`` isn't a valid scenario, or ValueError if its
-    fires or no-fly areas break the rules in ``vivid2.hazards.fire.check_fires``."""
+    fires or no-fly areas break the rules in ``vivid2.hazards.fire.check_fires``, or its clues or
+    damage task break those in ``vivid2.damage.check.check_damage_spec``."""
+    from vivid2.damage.check import check_damage_spec
     from vivid2.hazards.fire import check_fires
 
     try:
@@ -165,7 +189,7 @@ def validate_scenario(spec: Dict, where: str = "") -> None:
         if where:
             e.message = f"{where}: {e.message}"
         raise
-    problems = check_fires(spec)
+    problems = check_fires(spec) + check_damage_spec(spec)
     if problems:
         raise ValueError(f"{where or spec.get('id', 'scenario')}: " + "; ".join(problems))
 

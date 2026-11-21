@@ -1,0 +1,25 @@
+// VIVID 2 base scene for the TestYard map in unreal/VIVID2Env (tools/build_testyard.py): a flat yard
+// with its ground at Unreal Z = 0. The home point is ForestSAR's site near Lishan, Taiwan, so the sun
+// stands as it does there; the altitude is nominal (the yard has no real terrain).
+// The scene builder overrides the robot actor's origin and robot-config and
+// adds the scenario's targets under "spawn-objects".
+{
+  "id": "VIVID2TestYard",
+  "actors": [
+    {
+      "type": "robot",
+      "name": "Drone1",
+      "origin": {"xyz": "0.0 -10.0 -1.0", "rpy-deg": "0 0 0"},
+      "robot-config": "robot_vivid_quad.jsonc"
+    }
+  ],
+  "clock": {
+    "type": "steppable",
+    "step-ns": 3000000,
+    "real-time-update-rate": 3000000,
+    "pause-on-start": false
+  },
+  "home-geo-point": {"latitude": 24.2436, "longitude": 121.2467, "altitude": 2000.0},
+  "segmentation": {"initialize-ids": true, "ignore-existing": false, "use-owner-name": true},
+  "scene-type": "UnrealNative"
+}

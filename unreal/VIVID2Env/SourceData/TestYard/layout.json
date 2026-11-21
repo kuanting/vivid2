@@ -1,0 +1,28 @@
+{
+  "map": "TestYard",
+  "about": "VIVID 2's own test map (/Game/VIVID2/Maps/TestYard): a flat yard at height 0 with two roads, four box houses and a debris lobe, built from engine shapes by tools/build_testyard.py from this layout and its ground truth. The damage is real geometry: the debris lobe is brown ground with boulders, logs and mounds across road R01; house B02 has a sagging roof and rubble against one wall; house B03 is a rubble pile spilling across road R02. Smoke tests (campaigns/smoke.jsonc, campaigns/smoke_damage.jsonc) and damage-mapper tests run here.",
+  "frame": "NED metres from the Unreal origin (north = Unreal X, east = Unreal Y); the ground is at 0 (Unreal Z = 0).",
+  "grid": {"n0": -100, "e0": -100, "size": [201, 201], "cell_m": 1.0, "ground_down_m": 0.0},
+  "mask": {"size_px": 512, "extent_m": 256.0},
+  "regions": {
+    "slide": {"polygon_ne": [[16, -58], [44, -54], [50, -30], [46, -10], [28, -6], [18, -18], [12, -36]],
+              "edge": {"noise_m": 2.5, "noise_scale_m": 5.0, "soft_m": 1.0, "seed": 11}}
+  },
+  "area_classes": {
+    "debris": {"regions": ["slide"], "about": "ground a landslide covered with soil, boulders and broken trees"}
+  },
+  "roads": [
+    {"id": "R01", "polyline_ne": [[-100, -30], [100, -30]], "width_m": 6, "kind": "two-lane road", "segment_m": 50},
+    {"id": "R02", "polyline_ne": [[-40, -100], [-40, 100]], "width_m": 6, "kind": "two-lane road", "segment_m": 50}
+  ],
+  "buildings": [
+    {"id": "B01", "footprint_ne": [[8, 6], [18, 6], [18, 20], [8, 20]], "height_m": 6, "roof": "flat", "use": "house", "ems98": 0},
+    {"id": "B02", "footprint_ne": [[42, 12], [50, 12], [50, 24], [42, 24]], "height_m": 6, "roof": "flat", "use": "house",
+     "ems98": 3, "cause": "earth movement: roof sagging, rubble against the south wall"},
+    {"id": "B03", "footprint_ne": [[-56, 14], [-47, 14], [-47, 26], [-56, 26]], "height_m": 6, "roof": "flat", "use": "house",
+     "ems98": 5, "cause": "collapsed onto the road",
+     "debris_ne": [[-58, 12], [-58, 28], [-46, 30], [-35.5, 26], [-35, 16], [-45, 11]], "rubble_m": 2.5},
+    {"id": "B04", "footprint_ne": [[-22, 40], [-14, 40], [-14, 50], [-22, 50]], "height_m": 5, "roof": "flat", "use": "shed", "ems98": 0}
+  ],
+  "expect": {"blocked": ["R01-03", "R02-03"], "grades": {"B01": "none", "B02": "partial", "B03": "collapsed", "B04": "none"}}
+}

@@ -61,6 +61,9 @@ class Frame:
     # The search camera's gimbal when it took the photo, if not straight down at full field of view:
     # {"tilt_deg", "pan_deg", "fov_deg"} (see vivid2.cameras). None for navigation cameras.
     gimbal: Optional[Dict[str, float]] = None
+    # Damage ground truth this photo shows (vivid2.damage.run.DamageTask.observe), like ``gt``: only
+    # in the reference oracle's frames, and only on runs with a damage task.
+    damage_gt: Optional[Dict[str, Any]] = None
 
     @property
     def width(self) -> int:
@@ -115,6 +118,80 @@ class TargetReport:
     note: str = ""
 
 
+# -- the damage task (docs/damage.md) ---------------------------------------------------------
+# Every damage report cites one of the drone's own recorded search photos (frame_id, t_ns).
+
+@dataclass
+class AreaReport:
+    """Ground of one area class (``MissionSpec.damage["area_classes"]``) inside a polygon.
+
+    Reports apply in order: ``op`` "add" marks the cells inside, "remove" clears them (a hole).
+    """
+
+    area_class: str
+    polygon_ne: List[Sequence[float]]
+    frame_id: int
+    t_ns: int
+    op: str = "add"
+    confidence: float = 1.0
+    note: str = ""
+
+
+@dataclass
+class RoadReport:
+    """Whether a known road segment (``MissionSpec.damage["roads"]``) is blocked; the last report counts."""
+
+    segment: str
+    blocked: bool
+    frame_id: int
+    t_ns: int
+    confidence: float = 1.0
+    note: str = ""
+
+
+@dataclass
+class BuildingReport:
+    """A known building's damage grade (none, partial, collapsed); the last report counts."""
+
+    building: str
+    grade: str
+    frame_id: int
+    t_ns: int
+    confidence: float = 1.0
+    note: str = ""
+
+
+@dataclass
+class ClueReport:
+    """A surface clue (a ski, a backpack...) of a kind in ``MissionSpec.damage["clue_kinds"]``."""
+
+    ned: Sequence[float]
+    kind: str
+    frame_id: int
+    t_ns: int
+    confidence: float = 1.0
+    note: str = ""
+
+
+DamageReport = Any  # one of AreaReport, RoadReport, BuildingReport, ClueReport
+
+
+def damage_record(report: DamageReport) -> Dict[str, Any]:
+    """The ``damage`` stream fields of a report (without the times and the drone)."""
+    if isinstance(report, AreaReport):
+        body = {"kind": "area", "area_class": report.area_class, "op": report.op,
+                "polygon_ne": [[float(v) for v in p[:2]] for p in report.polygon_ne]}
+    elif isinstance(report, RoadReport):
+        body = {"kind": "road", "segment": report.segment, "blocked": bool(report.blocked)}
+    elif isinstance(report, BuildingReport):
+        body = {"kind": "building", "building": report.building, "grade": report.grade}
+    elif isinstance(report, ClueReport):
+        body = {"kind": "clue", "ned": [float(v) for v in report.ned], "clue_kind": report.kind}
+    else:
+        raise TypeError(f"not a damage report: {type(report).__name__}")
+    return {**body, "frame_id": int(report.frame_id), "confidence": float(report.confidence), "note": report.note}
+
+
 @dataclass
 class MissionSpec:
     """What the DUT is allowed to know about the mission (no ground truth)."""
@@ -150,6 +227,11 @@ class MissionSpec:
     # Fire restriction areas (None when the scenario has none): [{"polygon_ne", "ceiling_agl_m"}].
     # Inside a polygon the drone must stay above the ceiling (m above ground); see vivid2.hazards.fire.
     no_fly_zones: Optional[List[Dict[str, Any]]] = None
+    # The damage task (None without one): {"products", "aoi_ne", and what responders know before the
+    # event: "area_classes" {name: about}, "roads" [{id, polyline_ne, width_m, kind}], "buildings"
+    # [{id, footprint_ne, height_m, roof, use}], "building_grades", "clue_kinds", "terrain"
+    # ("pre_event": ``terrain`` is the DEM from before the event)}. Report with ctx.report_damage.
+    damage: Optional[Dict[str, Any]] = None
 
     def record(self) -> Dict[str, Any]:
         """JSON-ready fields for meta.json; the terrain is summarised, not copied."""
@@ -169,7 +251,7 @@ class MissionSpec:
 
 TEAM_FIELDS = ("drone_id", "team", "team_mode", "min_separation_m")
 # Left out of record() when None, so records of runs without them stay as they were.
-OPTIONAL_FIELDS = TEAM_FIELDS + ("no_fly_zones", "cameras")
+OPTIONAL_FIELDS = TEAM_FIELDS + ("no_fly_zones", "cameras", "damage")
 
 
 class Perception(abc.ABC):
@@ -268,6 +350,11 @@ class MissionContext(abc.ABC):
     @abc.abstractmethod
     def report_target(self, report: TargetReport) -> None: ...
 
+    def report_damage(self, report: DamageReport) -> None:
+        """Report damage (an AreaReport, RoadReport, BuildingReport or ClueReport) on a run with a
+        damage task (``mission.damage``); it must cite one of this drone's recorded search photos."""
+        raise NotImplementedError("this context has no damage task")
+
     @abc.abstractmethod
     def log(self, stream: str, record: Dict[str, Any]) -> None: ...
 
@@ -315,6 +402,31 @@ class MissionContext(abc.ABC):
         if cams.get(camera, {}).get("role") != "nav":
             return None
         return await self.get_frame(camera)
+
+
+class DamageMapper(abc.ABC):
+    """A stack's damage layer: looks at search photos and turns them into damage reports.
+
+    ``observe`` runs on the photos ``wants`` accepts (through ``ctx.think``: it takes mission
+    time) and returns reports to send now; ``finish`` returns the last ones (e.g. area outlines)
+    before the drone flies home.
+    """
+
+    name = "damage_mapper"
+    uses_ground_truth = False
+
+    def wants(self, frame: Frame, mission: MissionSpec) -> bool:
+        return True
+
+    @abc.abstractmethod
+    def observe(self, frame: Frame, mission: MissionSpec) -> Tuple[List[DamageReport], UsageStats, Dict[str, Any]]:
+        """Reports to send now, the model usage, and a record for the ``decisions`` stream."""
+
+    def finish(self, mission: MissionSpec) -> List[DamageReport]:
+        return []
+
+    def describe(self) -> Dict[str, Any]:
+        return {"name": self.name}
 
 
 class Agent(abc.ABC):

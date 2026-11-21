@@ -1,0 +1,346 @@
+{
+ "version": 1,
+ "map": "TestYard",
+ "area_classes": {
+  "debris": {
+   "bit": 0,
+   "about": "ground a landslide covered with soil, boulders and broken trees",
+   "blocks_roads": true
+  }
+ },
+ "roads": [
+  {
+   "id": "R01-01",
+   "road": "R01",
+   "polyline_ne": [
+    [
+     -100.0,
+     -30.0
+    ],
+    [
+     -50.0,
+     -30.0
+    ]
+   ],
+   "width_m": 6.0,
+   "kind": "two-lane road",
+   "blocked": false,
+   "cause": []
+  },
+  {
+   "id": "R01-02",
+   "road": "R01",
+   "polyline_ne": [
+    [
+     -50.0,
+     -30.0
+    ],
+    [
+     0.0,
+     -30.0
+    ]
+   ],
+   "width_m": 6.0,
+   "kind": "two-lane road",
+   "blocked": false,
+   "cause": []
+  },
+  {
+   "id": "R01-03",
+   "road": "R01",
+   "polyline_ne": [
+    [
+     0.0,
+     -30.0
+    ],
+    [
+     50.0,
+     -30.0
+    ]
+   ],
+   "width_m": 6.0,
+   "kind": "two-lane road",
+   "blocked": true,
+   "cause": [
+    "debris"
+   ],
+   "blocked_at_ne": [
+    [
+     11.0,
+     -30.0
+    ],
+    [
+     48.0,
+     -30.0
+    ]
+   ]
+  },
+  {
+   "id": "R01-04",
+   "road": "R01",
+   "polyline_ne": [
+    [
+     50.0,
+     -30.0
+    ],
+    [
+     100.0,
+     -30.0
+    ]
+   ],
+   "width_m": 6.0,
+   "kind": "two-lane road",
+   "blocked": false,
+   "cause": []
+  },
+  {
+   "id": "R02-01",
+   "road": "R02",
+   "polyline_ne": [
+    [
+     -40.0,
+     -100.0
+    ],
+    [
+     -40.0,
+     -50.0
+    ]
+   ],
+   "width_m": 6.0,
+   "kind": "two-lane road",
+   "blocked": false,
+   "cause": []
+  },
+  {
+   "id": "R02-02",
+   "road": "R02",
+   "polyline_ne": [
+    [
+     -40.0,
+     -50.0
+    ],
+    [
+     -40.0,
+     0.0
+    ]
+   ],
+   "width_m": 6.0,
+   "kind": "two-lane road",
+   "blocked": false,
+   "cause": []
+  },
+  {
+   "id": "R02-03",
+   "road": "R02",
+   "polyline_ne": [
+    [
+     -40.0,
+     0.0
+    ],
+    [
+     -40.0,
+     50.0
+    ]
+   ],
+   "width_m": 6.0,
+   "kind": "two-lane road",
+   "blocked": true,
+   "cause": [
+    "building:B03"
+   ],
+   "blocked_at_ne": [
+    [
+     -40.0,
+     14.5
+    ],
+    [
+     -40.0,
+     27.0
+    ]
+   ]
+  },
+  {
+   "id": "R02-04",
+   "road": "R02",
+   "polyline_ne": [
+    [
+     -40.0,
+     50.0
+    ],
+    [
+     -40.0,
+     100.0
+    ]
+   ],
+   "width_m": 6.0,
+   "kind": "two-lane road",
+   "blocked": false,
+   "cause": []
+  }
+ ],
+ "buildings": [
+  {
+   "id": "B01",
+   "footprint_ne": [
+    [
+     8.0,
+     6.0
+    ],
+    [
+     18.0,
+     6.0
+    ],
+    [
+     18.0,
+     20.0
+    ],
+    [
+     8.0,
+     20.0
+    ]
+   ],
+   "height_m": 6.0,
+   "base_down_m": 0.0,
+   "roof": "flat",
+   "use": "house",
+   "ems98": 0,
+   "grade": "none",
+   "cause": "",
+   "post_height_m": 6.0
+  },
+  {
+   "id": "B02",
+   "footprint_ne": [
+    [
+     42.0,
+     12.0
+    ],
+    [
+     50.0,
+     12.0
+    ],
+    [
+     50.0,
+     24.0
+    ],
+    [
+     42.0,
+     24.0
+    ]
+   ],
+   "height_m": 6.0,
+   "base_down_m": 0.0,
+   "roof": "flat",
+   "use": "house",
+   "ems98": 3,
+   "grade": "partial",
+   "cause": "earth movement: roof sagging, rubble against the south wall",
+   "post_height_m": 6.0
+  },
+  {
+   "id": "B03",
+   "footprint_ne": [
+    [
+     -56.0,
+     14.0
+    ],
+    [
+     -47.0,
+     14.0
+    ],
+    [
+     -47.0,
+     26.0
+    ],
+    [
+     -56.0,
+     26.0
+    ]
+   ],
+   "height_m": 6.0,
+   "base_down_m": 0.0,
+   "roof": "flat",
+   "use": "house",
+   "ems98": 5,
+   "grade": "collapsed",
+   "cause": "collapsed onto the road",
+   "spill_m": 1.8,
+   "debris_ne": [
+    [
+     -58,
+     12
+    ],
+    [
+     -58,
+     28
+    ],
+    [
+     -46,
+     30
+    ],
+    [
+     -35.5,
+     26
+    ],
+    [
+     -35,
+     16
+    ],
+    [
+     -45,
+     11
+    ]
+   ],
+   "post_height_m": 2.5
+  },
+  {
+   "id": "B04",
+   "footprint_ne": [
+    [
+     -22.0,
+     40.0
+    ],
+    [
+     -14.0,
+     40.0
+    ],
+    [
+     -14.0,
+     50.0
+    ],
+    [
+     -22.0,
+     50.0
+    ]
+   ],
+   "height_m": 5.0,
+   "base_down_m": 0.0,
+   "roof": "flat",
+   "use": "shed",
+   "ems98": 0,
+   "grade": "none",
+   "cause": "",
+   "post_height_m": 5.0
+  }
+ ],
+ "blockers": [],
+ "water": null,
+ "grades": [
+  "none",
+  "partial",
+  "collapsed"
+ ],
+ "layout": {
+  "file": "unreal/VIVID2Env/SourceData/TestYard/layout.json",
+  "sha256": "8680a3e032df3113bce3d867da2b0e6edc40fc96fe3c56aaa8f8bb678573776d"
+ },
+ "terrain": {},
+ "raster": {
+  "file": "damage_gt.npz",
+  "sha256": "4acbbeed410c65db5fb9ad7516266eeafc249ff99d815e344a100fed519b7691"
+ },
+ "surface": {
+  "file": "surface_dsm.npz",
+  "sha256": "e8adc6a677989ef00d2c16dfeca6c7a09e33c8cd243f79310c378c59be9f2dcb"
+ }
+}

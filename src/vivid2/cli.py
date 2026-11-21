@@ -12,6 +12,7 @@
     vivid2 unreal setup --engine 5.8 --download
     vivid2 unreal setup --engine 5.7 --airsim-root ../ProjectAirSim
     vivid2 terrain build --map ForestSAR --lat 24.2436 --lon 121.2467
+    vivid2 damage build --map Landslide
     vivid2 fly --map ForestSAR --drone fpv5
     vivid2 fly --scenario scenarios/forest_sar/forest_clearing_01.jsonc --drone quad --launch
 """
@@ -281,33 +282,163 @@ def cmd_terrain_build(args) -> int:
     from vivid2 import dem as dm
 
     repo = Path(__file__).resolve().parents[2]
+    sim_cfg = Path(args.sim_config_dir or repo / "sim_config")
+    unreal_dir = Path(args.unreal_dir or repo / "unreal" / "VIVID2Env" / "SourceData")
+    layout = json.loads(Path(args.layout).read_text(encoding="utf-8")) if args.layout else None
+    like = args.like or ((layout or {}).get("terrain") or {}).get("like")
+    pin = None
+    if like:
+        pin = dm.pin_of(json.loads((sim_cfg / "maps" / like / "terrain.json").read_text(encoding="utf-8")))
+        if args.lat is None and args.lon is None:
+            args.lat, args.lon = pin["lat"], pin["lon"]
+        if (args.lat, args.lon) != (pin["lat"], pin["lon"]) or [args.vertices] * 2 != pin["resolution"] \
+                or args.cell_m != pin["cell_m"]:
+            print(f"error: --like {like} needs its home point {pin['lat']}, {pin['lon']} and grid "
+                  f"{pin['resolution'][0]} x {pin['cell_m']:g} m", file=sys.stderr)
+            return 1
+    if args.lat is None or args.lon is None:
+        print("error: give --lat and --lon (or --like MAP)", file=sys.stderr)
+        return 1
+    if args.stage and layout is None:
+        print("error: --stage needs --layout", file=sys.stderr)
+        return 1
+    half_m = (args.vertices - 1) / 2 * args.cell_m
     if args.dem == "copernicus":
-        path = dm.fetch_copernicus(args.lat, args.lon, Path(args.cache_dir).expanduser())
-        info = {"name": "Copernicus GLO-30 DSM", "file": path.name, "url": dm.COPERNICUS_URL.format(name=path.stem),
-                "attribution": dm.COPERNICUS_ATTRIBUTION}
+        tiles = dm.fetch_copernicus_area(args.lat, args.lon, half_m, Path(args.cache_dir).expanduser())
+        present = [(t, pth) for t, pth in tiles if pth is not None]
+        if len(tiles) == 1 and present:  # one tile, as before
+            path = present[0][1]
+            info = {"name": "Copernicus GLO-30 DSM", "file": path.name, "url": dm.COPERNICUS_URL.format(name=path.stem),
+                    "attribution": dm.COPERNICUS_ATTRIBUTION, "sha256": hashlib.sha256(path.read_bytes()).hexdigest()}
+            source = dm.read_geotiff(path, info["name"])
+        else:
+            info = {"name": "Copernicus GLO-30 DSM", "attribution": dm.COPERNICUS_ATTRIBUTION,
+                    "tiles": [{"tile": list(t), "file": pth.name if pth else None,
+                               "sha256": hashlib.sha256(pth.read_bytes()).hexdigest() if pth else None} for t, pth in tiles]}
+            try:
+                source = dm.mosaic([(t, dm.read_geotiff(pth, pth.name) if pth else None) for t, pth in tiles])
+            except ValueError as e:
+                print(f"error: {e}", file=sys.stderr)
+                return 1
     else:
         path = Path(args.dem)
-        info = {"name": args.dem_name or path.name, "file": path.name, "attribution": args.attribution or ""}
-    info["sha256"] = hashlib.sha256(path.read_bytes()).hexdigest()
+        info = {"name": args.dem_name or path.name, "file": path.name, "attribution": args.attribution or "",
+                "sha256": hashlib.sha256(path.read_bytes()).hexdigest()}
+        source = dm.read_geotiff(path, info["name"])
+    sea = None
+    if args.sea == "fill":
+        source, sea = dm.fill_sea(source)
+        info["sea"] = "filled: no data or ground <= 0.5 m joined to it or the edge -> shelf 5 % to -30 m"
+
+    def edit_for(stage):
+        if not stage:
+            return None
+        from vivid2.terrain_edit import apply_edits
+
+        return lambda n, e, z: apply_edits(layout, stage, n, e, z)
+
     try:
-        build = dm.build_terrain(dm.read_geotiff(path, info["name"]), args.lat, args.lon,
-                                 vertices=args.vertices, cell_m=args.cell_m, margin_m=args.margin_m)
+        build = dm.build_terrain(source, args.lat, args.lon, vertices=args.vertices, cell_m=args.cell_m,
+                                 margin_m=args.margin_m, pin=pin, edit=edit_for(args.stage), sea=sea)
+        pre = None
+        if args.stage == "post":  # the same map before the event: what the stack's DEM shows
+            pre = dm.build_terrain(source, args.lat, args.lon, vertices=args.vertices, cell_m=args.cell_m,
+                                   margin_m=args.margin_m, pin=pin or dm.pin_of({"landscape": build.settings}),
+                                   edit=edit_for("pre"))
     except ValueError as e:
         print(f"error: {e}", file=sys.stderr)
         return 1
-    out = dm.write_outputs(build, args.map, Path(args.sim_config_dir or repo / "sim_config"),
-                           Path(args.unreal_dir or repo / "unreal" / "VIVID2Env" / "SourceData"), info)
+    if like:
+        info["like"] = like
+    if args.stage:
+        info["layout"] = {"file": str(Path(args.layout)).replace("\\", "/"), "stage": args.stage,
+                          "sha256": hashlib.sha256(Path(args.layout).read_bytes()).hexdigest(), "edits": build.edits}
+    out = dm.write_outputs(build, args.map, sim_cfg, unreal_dir, info)
+    if build.land is not None:
+        import numpy as np
+
+        np.savez_compressed(out["terrain"].parent / "landsea.npz", land=build.land)
+        print(f"land/sea mask: {out['terrain'].parent / 'landsea.npz'} ({100.0 * build.land.mean():.0f} % land)")
+    if pre is not None:
+        pre.terrain.save(out["terrain"].parent / "pre_event_dtm.npz")
+        print(f"pre-event terrain: {out['terrain'].parent / 'pre_event_dtm.npz'}")
     s = build.settings
     print(f"terrain for {args.map}: {out['terrain']}")
     print(f"heightmap: {out['heightmap']}")
     print(f"ground: Unreal Z {s['ground_ue_z_m']['min']:.1f}..{s['ground_ue_z_m']['max']:.1f} m "
           f"(origin {s['ground_ue_z_m']['origin']:.1f} m); step {s['height_step_cm']:.2f} cm")
+    if "headroom_m" in s:
+        print(f"pinned to {like}: headroom {s['headroom_m']['below']:.1f} m below, {s['headroom_m']['above']:.1f} m above")
+    for ed in build.edits:
+        print(f"edit {ed['op']}: {ed['changed_vertices']} vertices, cut {ed['cut_m3']:.0f} m3, fill {ed['fill_m3']:.0f} m3"
+              + (f", within {ed['bbox_ne']}" if "bbox_ne" in ed else ""))
     print("Landscape mode -> Manage -> Import from File:")
     print(f"  resolution {s['resolution'][0]}x{s['resolution'][1]}, section size {s['section_size_quads']}x"
           f"{s['section_size_quads']} quads, {s['sections_per_component']}x{s['sections_per_component']} sections/"
           f"component, {s['components'][0]}x{s['components'][1]} components")
     print(f"  location (centre) {s['landscape_centre_cm']} cm, scale {s['scale']}")
     print(f"scene home-geo-point: {json.dumps(s['home_geo_point'])}")
+    return 0
+
+
+def cmd_damage_build(args) -> int:
+    """A map's layout -> its damage ground truth, surface model, Unreal masks and placements."""
+    from vivid2.damage.gt import gt_paths, sha256_file
+    from vivid2.damage.layout import build_damage, write_build
+    from vivid2.terrain import TerrainModel, terrain_file
+
+    repo = Path(__file__).resolve().parents[2]
+    sim_cfg = Path(args.sim_config_dir or repo / "sim_config")
+    layout_path = Path(args.layout or repo / "unreal" / "VIVID2Env" / "SourceData" / args.map / "layout.json")
+    if not layout_path.exists():
+        print(f"error: no layout {layout_path}", file=sys.stderr)
+        return 1
+    layout = json.loads(layout_path.read_text(encoding="utf-8"))
+    paths = gt_paths(sim_cfg, args.map)
+    if paths["json"].exists() and not args.force:
+        print(f"error: {paths['json']} exists; runs may have been scored against it. Rebuild with --force only if "
+              "no run uses it (rescoring checks its checksum).", file=sys.stderr)
+        return 1
+    tfile = terrain_file(sim_cfg, args.map)
+    post = TerrainModel.load(tfile) if tfile else None
+    pre = TerrainModel.load(paths["pre_event"]) if paths["pre_event"].exists() else None
+    info = paths["dir"] / "terrain.json"
+    home_alt = None
+    if info.exists():
+        home_alt = (json.loads(info.read_text(encoding="utf-8")).get("landscape") or {}).get("home_geo_point", {}).get("altitude")
+    landsea_p = paths["dir"] / "landsea.npz"
+    if landsea_p.exists():
+        import numpy as np
+
+        landsea = np.load(landsea_p)["land"]
+    else:
+        landsea = None
+    cat_p = layout_path.parent / "asset_catalog.json"
+    catalog = json.loads(cat_p.read_text(encoding="utf-8")) if cat_p.exists() else {}
+    try:
+        build = build_damage(layout, post, pre, catalog, home_alt, landsea)
+    except ValueError as e:
+        print(f"error: {e}", file=sys.stderr)
+        return 1
+    if build.problems:
+        for prob in build.problems:
+            print(f"error: {prob}", file=sys.stderr)
+        return 1
+    shas = {**({"post_sha256": sha256_file(tfile)} if tfile else {}),
+            **({"pre_sha256": sha256_file(paths["pre_event"])} if pre is not None else {})}
+    out = write_build(build, layout_path, paths["dir"], shas)
+    cell = build.grid[2]
+    for name, ac in build.doc["area_classes"].items():
+        n = int(((build.classes >> ac["bit"]) & 1).sum())
+        print(f"area {name}: {n * cell * cell:.0f} m2")
+    roads = build.doc["roads"]
+    print(f"roads: {len(roads)} segments, blocked {[r['id'] for r in roads if r['blocked']]}")
+    grades = {}
+    for b in build.doc["buildings"]:
+        grades[b["grade"]] = grades.get(b["grade"], 0) + 1
+    print(f"buildings: {grades or 'none'}")
+    for k, v in out.items():
+        print(f"wrote {k}: {v}")
     return 0
 
 
@@ -425,8 +556,8 @@ def main(argv=None) -> int:
     tsub = s.add_subparsers(dest="terrain_cmd", required=True)
     t = tsub.add_parser("build", help="DEM -> Unreal Landscape heightmap + VIVID 2 terrain model")
     t.add_argument("--map", required=True, help="map name, e.g. ForestSAR")
-    t.add_argument("--lat", type=float, required=True, help="home point latitude (map centre, Unreal origin)")
-    t.add_argument("--lon", type=float, required=True, help="home point longitude")
+    t.add_argument("--lat", type=float, help="home point latitude (map centre, Unreal origin)")
+    t.add_argument("--lon", type=float, help="home point longitude")
     t.add_argument("--dem", default="copernicus",
                    help="GeoTIFF in EPSG:4326, or 'copernicus' to download the GLO-30 tile (default)")
     t.add_argument("--dem-name", help="name recorded for a local DEM")
@@ -437,7 +568,22 @@ def main(argv=None) -> int:
     t.add_argument("--cache-dir", default="~/.cache/vivid2/dem")
     t.add_argument("--sim-config-dir", help="default: sim_config")
     t.add_argument("--unreal-dir", help="default: unreal/VIVID2Env/SourceData")
+    t.add_argument("--like", help="pin the height datum and scale to this map (a variant of it: same home point)")
+    t.add_argument("--layout", help="a map layout.json whose terrain operations to apply (vivid2.terrain_edit)")
+    t.add_argument("--stage", choices=["pre", "post"],
+                   help="with --layout: the map before the event (pre) or after it (post; also writes pre_event_dtm.npz)")
+    t.add_argument("--sea", choices=["error", "fill"], default="error",
+                   help="no data / sea in the DEM: an error (default), or a synthetic seabed plus landsea.npz")
     t.set_defaults(fn=cmd_terrain_build)
+
+    s = sub.add_parser("damage", help="build a map's damage ground truth from its layout (docs/damage.md)")
+    dsub = s.add_subparsers(dest="damage_cmd", required=True)
+    d = dsub.add_parser("build", help="layout.json -> damage ground truth, surface model, masks, placements")
+    d.add_argument("--map", required=True, help="map name, e.g. Landslide")
+    d.add_argument("--layout", help="default: unreal/VIVID2Env/SourceData/<map>/layout.json")
+    d.add_argument("--sim-config-dir", help="default: sim_config")
+    d.add_argument("--force", action="store_true", help="overwrite an existing ground truth (only if no run uses it)")
+    d.set_defaults(fn=cmd_damage_build)
 
     args = p.parse_args(argv)
     if getattr(args, "vlm", None) is None and (getattr(args, "agent", None) in ("vlm", "hybrid") or args.cmd == "eval-frames"):

@@ -30,9 +30,10 @@ from vivid2.recorder import Recorder, RunLog
 from vivid2.scenario import Campaign, Run
 from vivid2.scoring import layer_scores, overall_score, reasoning_score
 from vivid2.sim.scene_builder import build_scene, camera_config, camera_settings, captures, robot_config
-from vivid2.sim.segmentation import SegmentationError, assign_ids, palette, split_seen, visibility
+from vivid2.sim.segmentation import (SegmentationError, assign_ids, min_visible_px, palette, seen_of, split_seen,
+                                     visibility)
 from vivid2.stack.base import (Agent, DistributedTeam, FleetAgent, Frame, GTAnnotation, MissionContext, MissionSpec,
-                               TargetReport)
+                               TargetReport, damage_record)
 from vivid2.stack.reference.controllers import AirSimController
 from vivid2.team_runtime import (FLEET_VERSION, ClockState, SimFleetContext, TeamAgentError, TeamRuntime, lockstep_fetch,
                                  run_tasks)
@@ -60,7 +61,8 @@ def _wxyz(d: Dict[str, float]) -> Tuple[float, float, float, float]:
 
 def mission_spec(run: Run, start_ned=None, terrain=None, camera: Optional[Dict[str, Any]] = None,
                  datum_ned=None, drone_id: Optional[str] = None, team: Optional[List[Dict[str, Any]]] = None,
-                 team_mode: Optional[str] = None, cameras: Optional[Dict[str, Dict[str, Any]]] = None) -> MissionSpec:
+                 team_mode: Optional[str] = None, cameras: Optional[Dict[str, Dict[str, Any]]] = None,
+                 damage: Optional[Dict[str, Any]] = None, dut_terrain=None) -> MissionSpec:
     """What the DUT is told. ``ground_down_m`` is the real ground under the start point.
 
     Scenarios author heights against flat ``search_area.ground_down_m``; on a map
@@ -70,6 +72,10 @@ def mission_spec(run: Run, start_ned=None, terrain=None, camera: Optional[Dict[s
 
     In a team, ``start_ned`` is the drone's own pad and ``datum_ned`` the centre of the pads
     (``dut_start``): every drone measures heights from the ground there.
+
+    ``dut_terrain``: the terrain the stack's coarse DEM is made from, if not ``terrain`` (a map's
+    pre-event terrain: a crew's DEM predates the landslide). ``damage``: the damage task as the
+    stack is told it (``DamageTask.mission_view``).
     """
     s = run.spec
     lim = s["limits"]
@@ -78,7 +84,8 @@ def mission_spec(run: Run, start_ned=None, terrain=None, camera: Optional[Dict[s
     if terrain is not None and datum is not None:
         ground = float(terrain.down_at(datum[0], datum[1]))
     # The DUT gets a coarse DEM, never the 1 m model the scoring uses.
-    dut_terrain = terrain.downsample(DUT_DEM_CELL_M) if terrain is not None else TerrainModel.flat(ground)
+    dem_from = dut_terrain if dut_terrain is not None else terrain
+    dem = dem_from.downsample(DUT_DEM_CELL_M) if dem_from is not None else TerrainModel.flat(ground)
     return MissionSpec(
         mission=s["mission"],
         brief=s["brief"],
@@ -94,13 +101,55 @@ def mission_spec(run: Run, start_ned=None, terrain=None, camera: Optional[Dict[s
         energy_budget_m=lim.get("energy_budget_m"),
         camera=dict(camera) if camera else None,
         cameras={c: dict(v) for c, v in cameras.items()} if cameras else None,
-        terrain=dut_terrain,
+        terrain=dem,
         drone_id=drone_id,
         team=team,
         team_mode=team_mode,
         min_separation_m=float(lim.get("min_separation_m", 5.0)) if team else None,
         no_fly_zones=[dict(z) for z in lim["no_fly"]] if lim.get("no_fly") else None,
+        damage=damage,
     )
+
+
+def damage_setup(run: Run, sim_config_dir: str, terrain: TerrainModel) -> Dict[str, Any]:
+    """A run's clues, damage task, surface model and pre-event terrain (each empty or None if unused).
+
+    Checks the scenario's placements against the map's damage ground truth
+    (``vivid2.damage.check.check_damage_gt``); a problem raises PreflightError before the
+    scene loads. Runs without clues, a damage task or surface-snapped targets skip all of it.
+    """
+    from vivid2.damage.check import check_damage_gt
+    from vivid2.damage.gt import pre_event_model, surface_model
+    from vivid2.damage.run import DamageTask
+
+    spec = run.spec
+    map_name = (spec.get("scene") or {}).get("map")
+    surface, surface_meta = None, None
+    snapping = any(t.get("snap") == "surface" for t in spec["targets"])
+    if snapping:
+        surface, surface_meta = surface_model(sim_config_dir, map_name)
+    pre, pre_meta = pre_event_model(sim_config_dir, map_name)
+    clues = run.resolved_clues(terrain)
+    buried = run.resolved_buried(terrain)
+    try:
+        task = DamageTask.for_run(spec, sim_config_dir, terrain, clues, buried)
+    except (FileNotFoundError, ValueError) as e:
+        raise PreflightError(str(e)) from e
+    if task is not None or clues or snapping:
+        problems = check_damage_gt(spec, task, run.resolved_targets(terrain, surface), run.authored_ground_down_m,
+                                   surface, terrain, buried)
+        if problems:
+            raise PreflightError(f"{run.scenario_id}: " + "; ".join(problems))
+    return {"task": task, "clues": clues, "surface": surface, "surface_meta": surface_meta,
+            "pre": pre, "pre_meta": pre_meta}
+
+
+def damage_meta(dmg: Dict[str, Any]) -> Dict[str, Any]:
+    """meta.json keys for a run's clues, damage task, surface model and pre-event terrain (only those it has)."""
+    return {**({"clues": dmg["clues"]} if dmg["clues"] else {}),
+            **({"damage": dmg["task"].meta()} if dmg["task"] is not None else {}),
+            **({"surface": dmg["surface_meta"]} if dmg["surface_meta"] else {}),
+            **({"dut_terrain": dmg["pre_meta"]} if dmg["pre_meta"] else {})}
 
 
 def serialize_requests(client) -> None:
@@ -371,7 +420,8 @@ class SimMissionContext(MissionContext):
                  camera: Optional[Dict[str, Any]] = None, drone_id: Optional[str] = None,
                  team: Optional[TeamRuntime] = None, datum_ned=None, team_info=None, team_mode: Optional[str] = None,
                  fire_ids: Optional[List[str]] = None, cameras: Optional[Dict[str, CameraInfo]] = None,
-                 ground_truth_to_stack: bool = True):
+                 ground_truth_to_stack: bool = True, clue_ids: Optional[List[str]] = None, damage=None,
+                 dut_terrain=None):
         self._viewer = viewer  # optional live camera windows (vivid2.viewer.RunViewer)
         self._preview_topic: Optional[str] = None  # the viewer's live preview, unsubscribed at the first frame
         if frame_bank not in FRAME_BANK_MODES:
@@ -380,6 +430,8 @@ class SimMissionContext(MissionContext):
         self._seg_ids = seg_ids or {}  # segmentation ID per target/distractor; empty = no visibility ground truth
         self._target_ids = set(target_ids or [])
         self._fire_ids = set(fire_ids or [])  # fires: recorded as fires_visible, never as distractors
+        self._clue_ids = set(clue_ids or [])  # clues (damage task): recorded as clues_visible
+        self._damage = damage  # the run's DamageTask (vivid2.damage.run), or None
         self._seg_colours = palette() if self._seg_ids else None
         self._run = run
         self._world = world
@@ -396,7 +448,9 @@ class SimMissionContext(MissionContext):
         self._gimbal = GimbalState(fov_deg=float(fov_deg), base_fov_deg=float(fov_deg))
         self.mission = mission_spec(run, start_ned, terrain, camera, datum_ned=datum_ned, drone_id=drone_id,
                                     team=team_info, team_mode=team_mode,
-                                    cameras={c: i.spec() for c, i in self._cams.items()} if cameras else None)
+                                    cameras={c: i.spec() for c, i in self._cams.items()} if cameras else None,
+                                    damage=damage.mission_view(dut_terrain is not None) if damage is not None else None,
+                                    dut_terrain=dut_terrain)
         self._team = team
         self.drone_id = drone_id or "Drone1"
         # The clock (t0, frame ids, lockstep...): the team's, or this drone's own.
@@ -586,7 +640,8 @@ class SimMissionContext(MissionContext):
             for oid, v in vis.items():  # seen in segmentation but outside the annotation's frustum test
                 if oid in self._target_ids and oid not in annotated and v["visible_px"]:
                     gt.append(GTAnnotation(oid, tuple(v["bbox_vis"]), v["visible_px"], tuple(v["bbox_vis"]), v.get("contrast")))
-        distractors_seen, fires_seen = split_seen(vis, self._target_ids, self._fire_ids)
+        distractors_seen, fires_seen = split_seen(vis, self._target_ids, self._fire_ids, self._clue_ids)
+        clues_seen = seen_of(vis, self._clue_ids) if self._clue_ids else {}
         if frame_id is None:
             self._clock.frame_id += 1
             frame_id = self._clock.frame_id
@@ -609,6 +664,7 @@ class SimMissionContext(MissionContext):
             **({"gt": [_gt_record(g) for g in gt]} if search else {}), **bank,
             **({"distractors_visible": distractors_seen} if distractors_seen else {}),
             **({"fires_visible": fires_seen} if fires_seen else {}),
+            **({"clues_visible": clues_seen} if clues_seen else {}),
             # mission time the frame took (one capture step in lockstep), and VIVID 2's work on it (paused)
             "capture_s": round(max(0, t_fetched - t_request) / 1e9, 3),
             "record_wall_s": round(time.monotonic() - wall0, 3),
@@ -629,6 +685,9 @@ class SimMissionContext(MissionContext):
             self._search_frames.add(frame.frame_id)
         if not self._gt_to_stack:
             frame.gt = []
+        elif search and self._damage is not None:  # the oracle's view of the damage (docs/rules.md)
+            frame.damage_gt = await asyncio.to_thread(self._damage.observe, frame, clues_seen,
+                                                      min_visible_px(frame.width, frame.height))
         if self._preview_topic is not None:
             # The test has started: stop the live preview, so Unreal stops rendering its camera.
             topic, self._preview_topic = self._preview_topic, None
@@ -718,6 +777,16 @@ class SimMissionContext(MissionContext):
                                       "note": report.note})
         if self._viewer is not None:
             self._viewer.note("reports", {"frame_id": report.frame_id})
+
+    def report_damage(self, report) -> None:
+        if self._damage is None:
+            raise RuntimeError("this run has no damage task (mission.damage is None)")
+        rec = damage_record(report)
+        if report.frame_id not in self._search_frames:  # scored as invalid; flagged live too
+            self.log("events", {"t": self.sim_time_or_last(), "kind": "rule_violation", "rule": "uncited_damage_report",
+                                "frame_id": report.frame_id})
+        self._recorder.log("damage", {"t": int(report.t_ns), "t_report": self.sim_time_or_last(),
+                                     **({"drone": self.drone_id} if self._team is not None else {}), **rec})
 
     def log(self, stream: str, record: Dict[str, Any]) -> None:
         if self._team is not None:
@@ -845,6 +914,8 @@ def score_run_dir(run_dir: Path, weights: Optional[Dict[str, float]] = None) -> 
     scores["overall"] = overall_score({k: v for k, v in scores.items()}, m["safety"]["collisions"], weights)
     meta = log.meta
     _, violations = rule_check(log)
+    if m.get("damage"):  # damage reports break their own rules (vivid2.metrics.damage)
+        violations = violations + m["damage"]["violations"]
     result = {
         "run_id": meta["run_id"], "scenario_id": meta["scenario_id"], "agent": meta["agent"]["agent"],
         "agent_config": meta["agent"], "seed": meta["seed"], "params": meta["params"],
@@ -900,12 +971,14 @@ async def execute_run(
         viewer.start_run(f"{run.run_id}  {agent.name}")
     run_dir = Path(out_dir) / agent.name / run.run_id
     terrain, terrain_meta = load_for_run(sim_config_dir, run.spec)
-    targets = run.resolved_targets(terrain)
+    dmg = damage_setup(run, sim_config_dir, terrain)
+    targets = run.resolved_targets(terrain, dmg["surface"])
     distractors = run.resolved_distractors(terrain)
     fires = run.resolved_fires(terrain)
+    clues = dmg["clues"]
     start_ned = run.resolved_start(terrain)
     sc = run.spec["scene"]
-    scene = build_scene(run, sim_config_dir, targets, distractors, start_ned, fires=fires)
+    scene = build_scene(run, sim_config_dir, targets, distractors, start_ned, fires=fires, clues=clues)
     cam = camera_settings(scene, sc.get("camera", "Payload"), sc.get("drone_name", "Drone1"))
 
     try:
@@ -913,13 +986,13 @@ async def execute_run(
     except Exception as e:
         raise PreflightError(
             f"loading the scene failed ({e!r}). Check that map {sc.get('map', '?')!r} is open and that it has "
-            f"the assets {sorted({t['asset'] for t in targets + fires})}."
+            f"the assets {sorted({t['asset'] for t in targets + fires + clues})}."
         ) from e
-    preflight = run_preflight(world, run.spec, targets + distractors + fires)  # raises PreflightError before anything is recorded
+    preflight = run_preflight(world, run.spec, targets + distractors + fires + clues)  # raises PreflightError before anything is recorded
     seg_ids: Dict[str, int] = {}
     if captures(scene, sc.get("camera", "Payload"), 3, sc.get("drone_name", "Drone1")):
         try:
-            seg_ids = assign_ids(world, targets, distractors, fires)
+            seg_ids = assign_ids(world, targets, distractors, fires, clues)
         except SegmentationError as e:
             raise PreflightError(str(e)) from e
 
@@ -959,7 +1032,8 @@ async def execute_run(
                             terrain=terrain, viewer=viewer, fire_ids=[f["id"] for f in fires],
                             camera={"width": int(cam["width"]), "height": int(cam["height"]),
                                     "fov_deg": float(cam["fov-degrees"])}, cameras=infos,
-                            ground_truth_to_stack=uses_ground_truth(agent))
+                            ground_truth_to_stack=uses_ground_truth(agent), clue_ids=[c["id"] for c in clues],
+                            damage=dmg["task"], dut_terrain=dmg["pre"])
     ctx._preview_topic = preview
     ctx.capture_step_ns = infos[payload_cam].capture_step_ns
     if viewer is not None:
@@ -976,6 +1050,7 @@ async def execute_run(
         "map": sc.get("map"), "preflight": preflight,
         "mission_spec": ctx.mission.record(),  # what the DUT was told; open-loop evaluation reuses it
         "distractors": distractors, **({"fires": fires} if fires else {}), "segmentation_ids": seg_ids,
+        **damage_meta(dmg),
         # 2: ground truth carries per-target visible pixels; 3: and contrast in the colour image (fog)
         "gt_version": 3 if seg_ids else 1,
         "sim_version": SIM_VERSION, "exposure": exposure,
@@ -1029,9 +1104,11 @@ async def execute_team_run(client, run: Run, agent, sim_config_dir: str, out_dir
         viewer.start_run(f"{run.run_id}  {agent.name}")
     run_dir = Path(out_dir) / agent.name / run.run_id
     terrain, terrain_meta = load_for_run(sim_config_dir, run.spec)
-    targets = run.resolved_targets(terrain)
+    dmg = damage_setup(run, sim_config_dir, terrain)
+    targets = run.resolved_targets(terrain, dmg["surface"])
     distractors = run.resolved_distractors(terrain)
     fires = run.resolved_fires(terrain)
+    clues = dmg["clues"]
     centre = run.resolved_start(terrain)  # the pads sit around it; the team's height datum
     fleet = run.resolved_fleet(terrain)
     ids = [d["id"] for d in fleet]
@@ -1039,7 +1116,7 @@ async def execute_team_run(client, run: Run, agent, sim_config_dir: str, out_dir
         raise ValueError(f"{agent.name}: {len(agent.agents)} agents for a team of {len(fleet)}")
     sc = run.spec["scene"]
     camera_id = sc.get("camera", "Payload")
-    scene = build_scene(run, sim_config_dir, targets, distractors, centre, fleet=fleet, fires=fires)
+    scene = build_scene(run, sim_config_dir, targets, distractors, centre, fleet=fleet, fires=fires, clues=clues)
     cam = camera_settings(scene, camera_id, ids[0])
 
     try:
@@ -1047,13 +1124,13 @@ async def execute_team_run(client, run: Run, agent, sim_config_dir: str, out_dir
     except Exception as e:
         raise PreflightError(
             f"loading the scene failed ({e!r}). Check that map {sc.get('map', '?')!r} is open and that it has "
-            f"the assets {sorted({t['asset'] for t in targets + fires})}."
+            f"the assets {sorted({t['asset'] for t in targets + fires + clues})}."
         ) from e
-    preflight = run_preflight(world, run.spec, targets + distractors + fires)
+    preflight = run_preflight(world, run.spec, targets + distractors + fires + clues)
     seg_ids: Dict[str, int] = {}
     if captures(scene, camera_id, 3, ids[0]):
         try:
-            seg_ids = assign_ids(world, targets, distractors, fires)
+            seg_ids = assign_ids(world, targets, distractors, fires, clues)
         except SegmentationError as e:
             raise PreflightError(str(e)) from e
 
@@ -1104,11 +1181,14 @@ async def execute_team_run(client, run: Run, agent, sim_config_dir: str, out_dir
                                 terrain=terrain, viewer=viewer, camera=camera, drone_id=name,
                                 team=team, datum_ned=centre, team_info=team_info, team_mode=mode,
                                 fire_ids=[f["id"] for f in fires], cameras=infos[name],
-                                ground_truth_to_stack=uses_ground_truth(agent))
+                                ground_truth_to_stack=uses_ground_truth(agent), clue_ids=[c["id"] for c in clues],
+                                damage=dmg["task"], dut_terrain=dmg["pre"])
         ctxs[name] = ctx
     ctxs[ids[0]]._preview_topic = preview
     team_mission = mission_spec(run, centre, terrain, camera, datum_ned=centre, team=team_info, team_mode=mode,
-                                cameras={c: i.spec() for c, i in infos[ids[0]].items()})
+                                cameras={c: i.spec() for c, i in infos[ids[0]].items()},
+                                damage=dmg["task"].mission_view(dmg["pre"] is not None) if dmg["task"] else None,
+                                dut_terrain=dmg["pre"])
     if viewer is not None:
         viewer.set_phase("mission clock started: taking off and climbing")
     meta = {
@@ -1127,6 +1207,7 @@ async def execute_team_run(client, run: Run, agent, sim_config_dir: str, out_dir
         "map": sc.get("map"), "preflight": preflight,
         "mission_spec": team_mission.record(),
         "distractors": distractors, **({"fires": fires} if fires else {}), "segmentation_ids": seg_ids,
+        **damage_meta(dmg),
         "gt_version": 3 if seg_ids else 1,
         "sim_version": SIM_VERSION, "fleet_version": FLEET_VERSION, "exposure": exposure,
         "cameras": {c: i.spec() for c, i in infos[ids[0]].items()},

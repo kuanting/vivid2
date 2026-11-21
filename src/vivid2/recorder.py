@@ -14,6 +14,8 @@ Streams:
     reports     {t, frame_id, ned[3], confidence, source, note}
     events      {t, kind, ...}
     comms       {t_send, t_deliver, from, to, seq, bytes, delivered, reason}   (teams; written only when used)
+    damage      {t, t_report, frame_id, kind: area|road|building|clue, ..., confidence, note}
+                (runs with a damage task; written only when used; see vivid2.stack.base.damage_record)
 
 Team runs add ``drone`` to every record (``other_drone`` to drone-drone collisions).
 """
@@ -28,7 +30,7 @@ from typing import Any, Dict, List
 import numpy as np
 
 STREAMS = ("trajectory", "collisions", "frames", "detections", "decisions", "reports", "events")
-OPTIONAL_STREAMS = ("comms",)  # opened on first use, so single-drone run folders don't change
+OPTIONAL_STREAMS = ("comms", "damage")  # opened on first use, so other runs' folders don't change
 
 
 def _default(o: Any):

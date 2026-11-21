@@ -5,6 +5,7 @@ from pathlib import Path
 from typing import Any, Dict, Union
 
 from vivid2.metrics.control import control_metrics
+from vivid2.metrics.damage import damage_metrics
 from vivid2.metrics.mission import mission_metrics
 from vivid2.metrics.perception import perception_metrics
 from vivid2.metrics.planning import planning_metrics
@@ -26,6 +27,8 @@ def compute_all(log_or_dir: Union[RunLog, str, Path]) -> Dict[str, Any]:
     }
     if is_team(log.meta):
         out["team"] = team_metrics(log)
+    if log.meta.get("damage"):  # runs with a damage task only
+        out["damage"] = damage_metrics(log)
     return out
 
 

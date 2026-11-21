@@ -6,7 +6,8 @@
   "additionalProperties": false,
   "properties": {
     "id": {"type": "string", "pattern": "^[A-Za-z0-9_.-]+$"},
-    "mission": {"type": "string", "enum": ["forest_sar", "wildfire_sar", "landslide"]},
+    "mission": {"type": "string", "enum": ["forest_sar", "wildfire_sar", "landslide_sar", "avalanche_sar", "earthquake_sar", "tsunami_sar"],
+                "description": "what the scenario searches in; disaster missions (*_sar but forest/wildfire) may add a damage task (damage)"},
     "description": {"type": "string"},
     "scene": {
       "type": "object",
@@ -92,7 +93,10 @@
           "yaw_deg": {"type": "number", "default": 0},
           "scale": {"$ref": "#/$defs/vec3"},
           "label": {"type": "string", "default": "person"},
-          "description": {"type": "string"}
+          "description": {"type": "string"},
+          "snap": {"enum": ["ground", "surface"], "default": "ground",
+                   "description": "set on the bare ground (default), or on the map's surface model: roofs and water (vivid2 damage build)"},
+          "jitter_m": {"type": "number", "minimum": 0, "description": "this target's horizontal jitter, instead of target_jitter_m"}
         }
       }
     },
@@ -128,6 +132,52 @@
           "yaw_deg": {"type": "number", "description": "the smoke drifts along +X; default: downwind (environment.wind_ned)"},
           "description": {"type": "string"}
         }
+      }
+    },
+    "clues": {
+      "type": "array",
+      "description": "surface clues (a ski, a backpack...) for the damage task's clues product; spawned like distractors and recorded as clues_visible (see docs/damage.md)",
+      "items": {
+        "type": "object",
+        "required": ["id", "asset", "ned", "kind"],
+        "additionalProperties": false,
+        "properties": {
+          "id": {"type": "string"},
+          "asset": {"type": "string"},
+          "ned": {"$ref": "#/$defs/vec3"},
+          "yaw_deg": {"type": "number", "default": 0},
+          "scale": {"$ref": "#/$defs/vec3"},
+          "kind": {"enum": ["ski", "ski_pole", "glove", "backpack", "helmet", "clothing", "vehicle", "other"]},
+          "description": {"type": "string"}
+        }
+      }
+    },
+    "damage": {
+      "type": "object",
+      "description": "the damage task: map what the disaster did, besides finding people (docs/damage.md)",
+      "required": ["products"],
+      "additionalProperties": false,
+      "properties": {
+        "products": {"type": "array", "minItems": 1, "uniqueItems": true,
+                     "items": {"enum": ["areas", "roads", "buildings", "clues"]}},
+        "area_classes": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"type": "string"},
+                         "description": "area classes to map (default: every class in the map's ground truth)"},
+        "aoi_ne": {"type": "array", "minItems": 3, "items": {"$ref": "#/$defs/vec2"},
+                   "description": "area of interest (default: the search area); must lie inside the search area"},
+        "map": {"type": "string", "description": "map whose ground truth to use (default: scene.map)"},
+        "buried": {
+          "type": "array",
+          "description": "people buried out of sight: never targets, they score how well the damage map covers them",
+          "items": {
+            "type": "object", "required": ["id", "ned"], "additionalProperties": false,
+            "properties": {"id": {"type": "string"}, "ned": {"$ref": "#/$defs/vec3"},
+                           "building": {"type": "string", "description": "the damaged building they are in"},
+                           "description": {"type": "string"}}
+          }
+        },
+        "weights": {"type": "object", "propertyNames": {"enum": ["areas", "roads", "buildings", "clues", "buried"]},
+                    "additionalProperties": {"type": "number", "minimum": 0}},
+        "clue_tolerance_m": {"type": "number", "exclusiveMinimum": 0, "default": 5}
       }
     },
     "brief": {"type": "string"},

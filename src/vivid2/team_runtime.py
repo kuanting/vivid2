@@ -382,6 +382,11 @@ class SimFleetContext(FleetContext):
         owner = self._runtime.frame_owner.get(report.frame_id)
         (self.drones[owner] if owner in self.drones else self._first).report_target(report)
 
+    def report_damage(self, report) -> None:
+        """Report damage through the drone whose photo it cites."""
+        owner = self._runtime.frame_owner.get(report.frame_id)
+        (self.drones[owner] if owner in self.drones else self._first).report_damage(report)
+
 
 class TeamAgentError(RuntimeError):
     def __init__(self, who: str, error: BaseException):

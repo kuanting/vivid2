@@ -17,7 +17,7 @@ from vivid2.cameras import GimbalState, clamp_gimbal, slew_time_s, wrap_deg
 from vivid2.geo import focal_px, quat_to_rot, rpy_to_quat, world_to_pixel
 from vivid2.recorder import Recorder
 from vivid2.scenario import Run, Scenario
-from vivid2.stack.base import Controller, Frame, GTAnnotation, MissionContext, TargetReport
+from vivid2.stack.base import Controller, Frame, GTAnnotation, MissionContext, TargetReport, damage_record
 from vivid2.runner import mission_spec
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -50,6 +50,31 @@ def airsim_types(monkeypatch):
 @pytest.fixture
 def root() -> Path:
     return ROOT
+
+
+def lfs_file(path: Path) -> Path:
+    """``path``, or skip the test if it is a Git LFS pointer (CI checks out without LFS)."""
+    if not path.exists() or path.read_bytes()[:40].startswith(b"version https://git-lfs"):
+        pytest.skip(f"{path.name} is stored in Git LFS and not checked out")
+    return path
+
+
+@pytest.fixture(scope="session")
+def damage_sim_config(tmp_path_factory) -> Path:
+    """A sim_config folder with the test map's (TestYard's) damage ground truth, built from its layout
+    (the committed .npz files are in Git LFS, which CI does not check out)."""
+    import json as _json
+    import shutil
+
+    from vivid2.damage.layout import build_damage, write_build
+
+    out = tmp_path_factory.mktemp("sim_config")
+    for f in (ROOT / "sim_config").glob("*.jsonc"):
+        shutil.copy2(f, out / f.name)
+    layout = ROOT / "unreal/VIVID2Env/SourceData/TestYard/layout.json"
+    write_build(build_damage(_json.loads(layout.read_text(encoding="utf-8"))), layout, out / "maps" / "TestYard", {},
+                source_dir=tmp_path_factory.mktemp("source"))
+    return out
 
 
 @pytest.fixture
@@ -118,12 +143,14 @@ class FakeWorld(MissionContext):
     """
 
     def __init__(self, run: Run, recorder: Recorder, width=960, height=720, fov=80.0, box_px=18, targets=None,
-                 surface=None, surface_max_m=30.0):
+                 surface=None, surface_max_m=30.0, damage=None):
         self.run = run
         self.surface = surface
         self.surface_max_m = surface_max_m
         self.recorder = recorder
-        self.mission = mission_spec(run, camera={"width": width, "height": height, "fov_deg": fov})
+        self.damage = damage  # a DamageTask (vivid2.damage.run): frames then carry its ground truth, like gt
+        self.mission = mission_spec(run, camera={"width": width, "height": height, "fov_deg": fov},
+                                    damage=damage.mission_view() if damage is not None else None)
         self.targets = targets if targets is not None else run.resolved_targets()
         self.pos = np.asarray(run.spec["dut_start"]["ned"], float)
         self.path: List[np.ndarray] = []
@@ -192,10 +219,18 @@ class FakeWorld(MissionContext):
         gimbal = None if self.gimbal.is_default() else self.gimbal.record()
         frame = Frame(self.t_ns, self.frame_id, np.zeros((self.H, self.W, 3), np.uint8), self.pos.copy(), q,
                       fov, depth=depth, gt=gt, gimbal=gimbal)
+        clues = {}
+        if self.damage is not None:
+            for c in self.damage.clues:  # a clue in the image shows (500 px)
+                proj = world_to_pixel(c["ned"], self.pos, q, self.W, self.H, fov)
+                if proj and 0 <= proj[0] < self.W and 0 <= proj[1] < self.H:
+                    clues[c["id"]] = {"visible_px": 500, "contrast": 20.0}
+            frame.damage_gt = self.damage.observe(frame, clues)
         self.recorder.log("frames", {"t": self.t_ns, "frame_id": self.frame_id, "cam_pos": self.pos.copy(),
                                      "cam_q": list(q), "width": self.W, "height": self.H, "fov_deg": fov,
                                      **({"gimbal": gimbal} if gimbal else {}),
-                                     "gt": [{"object_id": g.object_id, "bbox": list(g.bbox)} for g in gt]})
+                                     "gt": [{"object_id": g.object_id, "bbox": list(g.bbox)} for g in gt],
+                                     **({"clues_visible": clues} if clues else {})})
         return frame
 
     def render_depth(self, cam_q=NADIR_Q, fov=None) -> np.ndarray:
@@ -232,6 +267,9 @@ class FakeWorld(MissionContext):
         self.recorder.log("reports", {"t": report.t_ns, "t_report": self.t_ns, "frame_id": report.frame_id, "ned": report.ned,
                                       "confidence": report.confidence, "source": report.source, "note": report.note})
 
+    def report_damage(self, report) -> None:
+        self.recorder.log("damage", {"t": report.t_ns, "t_report": self.t_ns, **damage_record(report)})
+
     def should_stop(self) -> bool:
         return self.elapsed_s() >= self.mission.timeout_s
 
@@ -239,8 +277,9 @@ class FakeWorld(MissionContext):
         return self.t_ns / 1e9
 
 
-def write_meta(recorder: Recorder, run: Run, agent_desc: Dict[str, Any], targets, end_ns: int, end_reason="completed"):
-    recorder.write_json("meta.json", {
+def write_meta(recorder: Recorder, run: Run, agent_desc: Dict[str, Any], targets, end_ns: int, end_reason="completed",
+               extra: Optional[Dict[str, Any]] = None):
+    recorder.write_json("meta.json", {**(extra or {}),
         "run_id": run.run_id, "scenario_id": run.scenario_id, "seed": run.seed, "params": run.params,
         "mission": run.spec["mission"], "agent": agent_desc, "targets": targets,
         "search_area": run.spec["search_area"], "limits": run.spec["limits"], "success": run.spec.get("success", {}),

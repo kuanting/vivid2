@@ -5,28 +5,13 @@ from typing import Any, Dict, List, Sequence
 
 import numpy as np
 
-from vivid2.geo import focal_px, pixel_ray_to_ground, quat_to_rot
+from vivid2.geo import focal_px, pixel_ray_to_ground, points_in_polygon, quat_to_rot  # noqa: F401 (re-exported)
 from vivid2.metrics.cameras import search_frames
 from vivid2.metrics.team import by_drone, fleet_of, is_team
 from vivid2.recorder import RunLog
 from vivid2.sim.segmentation import min_visible_px
 
 PERSON_AREA_M2 = 0.85  # a person lying down (about 1.7 m x 0.5 m), the patch a photo must resolve
-
-
-def points_in_polygon(pts: np.ndarray, poly: Sequence[Sequence[float]]) -> np.ndarray:
-    """Vectorised even-odd point-in-polygon test. pts: (N, 2)."""
-    poly = np.asarray(poly, float)
-    x, y = pts[:, 0], pts[:, 1]
-    inside = np.zeros(len(pts), bool)
-    j = len(poly) - 1
-    for i in range(len(poly)):
-        xi, yi = poly[i]
-        xj, yj = poly[j]
-        cond = ((yi > y) != (yj > y)) & (x < (xj - xi) * (y - yi) / (yj - yi + 1e-12) + xi)
-        inside ^= cond
-        j = i
-    return inside
 
 
 def path_length(traj: List[Dict[str, Any]]) -> float:

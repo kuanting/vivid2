@@ -107,8 +107,8 @@ def evaluate_run(
     (out_dir / "frames.jsonl").write_text("".join(json.dumps(f) + "\n" for f in frames), encoding="utf-8")
     for s in STREAMS:
         (out_dir / f"{s}.jsonl").touch()
-    open_meta = {k: meta[k] for k in ("run_id", "scenario_id", "seed", "params", "mission", "targets", "map", "fires")
-                 if k in meta}
+    open_meta = {k: meta[k] for k in ("run_id", "scenario_id", "seed", "params", "mission", "targets", "map", "fires",
+                                      "clues") if k in meta}
     open_meta.update({"mode": "open_loop", "source_run": str(run_dir), "agent": agent_desc,
                       "mission_spec": meta["mission_spec"]})
     (out_dir / "meta.json").write_text(json.dumps(open_meta, indent=2), encoding="utf-8")

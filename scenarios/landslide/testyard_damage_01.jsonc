@@ -1,0 +1,39 @@
+// Damage-task test on VIVID 2's test map, TestYard (tools/build_testyard.py; ground at height 0). The
+// damage is real geometry, built from the same layout as the ground truth
+// (unreal/VIVID2Env/SourceData/TestYard/layout.json -> sim_config/maps/TestYard/damage_gt.json):
+//   * a debris lobe (brown ground, mounds, boulders, logs) across road R01: segment R01-03 is blocked;
+//   * house B02 partial (half its roof sagging in, rubble at its south wall), B03 collapsed (a rubble
+//     pile spilling across road R02: R02-03 blocked), B01 and B04 intact.
+// Two hikers in the open, two clues on the debris (a red backpack, a yellow jacket), two buried victims
+// (one under the debris, one in the collapsed house). Every damage product is asked for.
+{
+  "id": "testyard_damage_01",
+  "mission": "landslide_sar",
+  "description": "Two hikers, two clues, a debris lobe across a road, a collapsed house across another road, a damaged and two intact houses, two buried victims.",
+  "scene": {"base": "scene_testyard.jsonc", "robot_config": "robot_vivid_quad.jsonc", "camera": "Payload", "map": "TestYard"},
+  "dut_start": {"ned": [0, -10, -1], "yaw_deg": 0},
+  "search_area": {"polygon_ne": [[-70, -70], [70, -70], [70, 70], [-70, 70]], "altitude_m": 35, "ground_down_m": 0},
+  "targets": [
+    {"id": "Hiker1", "asset": "VIVID2_Hiker_RedJacket_LyingBack", "ned": [-15, -50, 0], "yaw_deg": 30,
+     "description": "hiker in a red jacket lying on his back, west of road R01"},
+    {"id": "Hiker2", "asset": "VIVID2_Hiker_BlueHoodie_Waving", "ned": [-52, 38, 0], "yaw_deg": 200,
+     "description": "hiker in a blue hoodie waving, east of the collapsed house"}
+  ],
+  "target_jitter_m": 3,
+  "clues": [
+    {"id": "Pack1", "asset": "VIVID2_Decoy_Backpack_Red", "ned": [35, -40, 0], "yaw_deg": 40, "kind": "backpack",
+     "description": "red backpack on the debris"},
+    {"id": "Jacket1", "asset": "VIVID2_Decoy_Jacket_Yellow", "ned": [24, -24, 0], "yaw_deg": 110, "kind": "clothing",
+     "description": "yellow jacket at the edge of the debris"}
+  ],
+  "damage": {
+    "products": ["areas", "roads", "buildings", "clues"],
+    "buried": [{"id": "Buried1", "ned": [40, -30, 0], "description": "under the debris"},
+               {"id": "Buried2", "ned": [-51, 20, 0], "building": "B03", "description": "in the collapsed house"}]
+  },
+  "brief": "A landslide hit the area and a house collapsed. Find the people, map the debris, report blocked road segments and damaged buildings, and report clues (a backpack, a jacket) that could show where someone was buried.",
+  "environment": {"time_of_day": "2026-09-28 12:00:00", "weather": {}, "wind_ned": [0, 0, 0]},
+  "limits": {"timeout_s": 900, "max_speed_mps": 6, "min_agl_m": 0.5, "geofence_margin_m": 20, "energy_budget_m": 4500},
+  "success": {"localization_tolerance_m": 8, "require_all_targets": true},
+  "sweep": {"seeds": 1}
+}

@@ -29,7 +29,7 @@ import os
 import urllib.request
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Dict, Optional, Tuple, Union
+from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 
 import numpy as np
 
@@ -121,6 +121,79 @@ def fetch_copernicus(lat: float, lon: float, cache_dir: PathLike) -> Path:
     return path
 
 
+def copernicus_tiles_for(lat0: float, lon0: float, half_m: float) -> List[Tuple[int, int]]:
+    """(lat, lon) floors of every 1-degree tile a square map of half-size ``half_m`` (plus a margin) touches."""
+    pad = half_m + 200.0
+    lats, lons = enu_to_geo(np.array([-pad, pad, -pad, pad]), np.array([-pad, -pad, pad, pad]), lat0, lon0)
+    return [(la, lo) for la in range(math.floor(lats.min()), math.floor(lats.max()) + 1)
+            for lo in range(math.floor(lons.min()), math.floor(lons.max()) + 1)]
+
+
+def fetch_copernicus_area(lat0: float, lon0: float, half_m: float, cache_dir: PathLike) -> List[Tuple[Tuple[int, int], Optional[Path]]]:
+    """Download the tiles a map needs; a tile that does not exist (open sea) is None."""
+    import urllib.error
+
+    out = []
+    for la, lo in copernicus_tiles_for(lat0, lon0, half_m):
+        try:
+            out.append(((la, lo), fetch_copernicus(la + 0.5, lo + 0.5, cache_dir)))
+        except urllib.error.HTTPError as e:
+            if e.code not in (403, 404):
+                raise
+            out.append(((la, lo), None))
+    return out
+
+
+def mosaic(tiles: List[Tuple[Tuple[int, int], Optional[GeoDEM]]]) -> GeoDEM:
+    """One DEM from 1-degree tiles with equal pixel spacing; missing tiles (None) are no data (NaN)."""
+    have = [d for _, d in tiles if d is not None]
+    if not have:
+        raise ValueError("no DEM tile covers the area (all sea?)")
+    if len(tiles) == 1:
+        return have[0]
+    dlat, dlon = have[0].dlat, have[0].dlon
+    if any(abs(d.dlat - dlat) > 1e-12 or abs(d.dlon - dlon) > 1e-12 for d in have):
+        raise ValueError("DEM tiles with different pixel spacing (a latitude band edge?): pass a merged GeoTIFF with --dem")
+    lat_hi = max(la for (la, _), _ in tiles) + 1
+    lon_lo = min(lo for (_, lo), _ in tiles)
+    rows = int(round((lat_hi - min(la for (la, _), _ in tiles)) / dlat))
+    cols = int(round((max(lo for (_, lo), _ in tiles) + 1 - lon_lo) / dlon))
+    lat_r0, lon_c0 = lat_hi - 0.5 * dlat, lon_lo + 0.5 * dlon
+    z = np.full((rows, cols), np.nan)
+    for _, d in tiles:
+        if d is None:
+            continue
+        r = int(round((lat_r0 - d.lat_r0) / dlat))
+        c = int(round((d.lon_c0 - lon_c0) / dlon))
+        h, w = d.z.shape
+        z[max(r, 0):r + h, max(c, 0):c + w] = d.z[max(-r, 0):max(-r, 0) + min(h, rows - r), max(-c, 0):max(-c, 0) + min(w, cols - c)]
+    return GeoDEM(z=z, lat_r0=lat_r0, lon_c0=lon_c0, dlat=dlat, dlon=dlon,
+                  source=" + ".join(d.source for d in have) or "mosaic")
+
+
+def fill_sea(dem: GeoDEM, sea_level_m: float = 0.5, shelf_slope: float = 0.05,
+             max_depth_m: float = 30.0) -> Tuple[GeoDEM, np.ndarray]:
+    """Give the sea a seabed: (filled DEM, sea mask on the DEM's pixels).
+
+    Sea is no data, or ground at most ``sea_level_m`` high that is connected to no data or the
+    DEM's edge (a DSM's flat sea surface). Its new elevation is a shelf falling ``shelf_slope``
+    per metre from the coast, down to ``-max_depth_m``. Inland no data (holes) stays an error.
+    """
+    import cv2
+
+    z = dem.z
+    cand = ~np.isfinite(z) | (np.nan_to_num(z, nan=-1e9) <= sea_level_m)
+    _, labels = cv2.connectedComponents(cand.astype(np.uint8), connectivity=4)  # label 0 = not a candidate
+    touching = np.concatenate([labels[~np.isfinite(z)], labels[0], labels[-1], labels[:, 0], labels[:, -1]])
+    sea_labels = np.setdiff1d(np.unique(touching), [0])
+    sea = np.isin(labels, sea_labels)
+    px_m = dem.dlat * math.pi / 180.0 * WGS84_A
+    dist = cv2.distanceTransform(sea.astype(np.uint8), cv2.DIST_L2, 5) * px_m  # to the nearest land pixel
+    filled = np.where(sea, -np.minimum(max_depth_m, shelf_slope * dist), z)
+    return GeoDEM(z=filled, lat_r0=dem.lat_r0, lon_c0=dem.lon_c0, dlat=dem.dlat, dlon=dem.dlon,
+                  source=dem.source + " (sea filled)"), sea
+
+
 def enu_to_geo(n: np.ndarray, e: np.ndarray, lat0: float, lon0: float) -> Tuple[np.ndarray, np.ndarray]:
     """Local north/east metres to lat/lon (tangent plane; accurate to cm over a few km)."""
     s = math.sin(math.radians(lat0))
@@ -154,29 +227,59 @@ class TerrainBuild:
     terrain: TerrainModel
     heightmap: np.ndarray            # uint16 (rows = east, cols = north), as Landscape import expects
     settings: Dict[str, Any] = field(default_factory=dict)
+    land: Optional[np.ndarray] = None  # with a sea mask: True on land, per vertex [i = north, j = east]
+    edits: List[Dict[str, Any]] = field(default_factory=list)  # what the terrain edits changed
+
+
+def pin_of(terrain_json: Dict[str, Any]) -> Dict[str, Any]:
+    """The quantisation of an existing map (its terrain.json), to build a variant that matches it vertex for vertex."""
+    ls = terrain_json["landscape"]
+    return {"home_alt": float(ls["home_geo_point"]["altitude"]), "loc_z_cm": int(ls["landscape_centre_cm"][2]),
+            "scale_z": int(ls["scale"][2]), "lat": float(ls["home_geo_point"]["latitude"]),
+            "lon": float(ls["home_geo_point"]["longitude"]), "resolution": list(ls["resolution"]),
+            "cell_m": float(ls["scale"][0]) / 100.0}
 
 
 def build_terrain(dem: GeoDEM, lat0: float, lon0: float, vertices: int = 1009, cell_m: float = 1.0,
-                  margin_m: float = 10.0) -> TerrainBuild:
-    """Sample the DEM on a landscape grid centred on (lat0, lon0)."""
+                  margin_m: float = 10.0, pin: Optional[Dict[str, Any]] = None,
+                  edit: Optional[Callable[[np.ndarray, np.ndarray, np.ndarray], Any]] = None,
+                  sea: Optional[np.ndarray] = None) -> TerrainBuild:
+    """Sample the DEM on a landscape grid centred on (lat0, lon0).
+
+    ``pin`` (``pin_of`` another map): use that map's height datum and heightmap scale instead of
+    fitting them to this relief, so unchanged ground quantises to the same heights. ``edit(N, E, z)``
+    changes the elevations (metres) before quantising and returns ``(z, report)``
+    (vivid2.terrain_edit). ``sea``: the DEM's sea mask (``fill_sea``), sampled into ``land``.
+    """
     if (vertices - 1) % COMPONENT_QUADS:
         raise ValueError(f"vertices must be k*{COMPONENT_QUADS}+1 (e.g. 505, 1009, 2017), got {vertices}")
     half = (vertices - 1) / 2 * cell_m
     axis = np.arange(vertices) * cell_m - half
     n, e = np.meshgrid(axis, axis, indexing="ij")
     lat, lon = enu_to_geo(n, e, lat0, lon0)
-    elev = bicubic(dem.z, *dem.pixel_of(lat, lon))
+    rows, cols = dem.pixel_of(lat, lon)
+    elev = bicubic(dem.z, rows, cols)
     if not np.isfinite(elev).all():
         raise ValueError("the DEM has no data inside the requested area")
+    edits: List[Dict[str, Any]] = []
+    if edit is not None:
+        elev, edits = edit(n, e, elev)
 
-    home_alt = float(math.floor(elev.min() - margin_m))   # real elevation of Unreal Z = 0
+    home_alt = float(math.floor(elev.min() - margin_m)) if pin is None else float(pin["home_alt"])  # real elevation of Unreal Z = 0
     z = elev - home_alt
     zmin, zmax = float(z.min()), float(z.max())
     if zmax > PLAY_AREA_TOP_M - 10:
         raise ValueError(f"relief {zmax - zmin:.0f} m does not fit under Z = {PLAY_AREA_TOP_M:.0f} m")
-    loc_z_cm = int(round((zmin + zmax) / 2 * 100))
-    scale_z = max(1, math.ceil(((zmax - zmin) / 2 + 1.0) * 100 / 256))   # +-256 m * scale_z/100 covers it
-    h = np.rint(32768 + (z * 100 - loc_z_cm) * 128 / scale_z).clip(0, 65535).astype(np.uint16)
+    if pin is None:
+        loc_z_cm = int(round((zmin + zmax) / 2 * 100))
+        scale_z = max(1, math.ceil(((zmax - zmin) / 2 + 1.0) * 100 / 256))   # +-256 m * scale_z/100 covers it
+    else:
+        loc_z_cm, scale_z = int(pin["loc_z_cm"]), int(pin["scale_z"])
+    raw = np.rint(32768 + (z * 100 - loc_z_cm) * 128 / scale_z)
+    if pin is not None and (raw.min() < 0 or raw.max() > 65535):
+        raise ValueError(f"the edited terrain does not fit the pinned heightmap range ({zmin:.1f}..{zmax:.1f} m above "
+                         f"Unreal Z = 0): keep the edits away from the lowest and highest ground")
+    h = raw.clip(0, 65535).astype(np.uint16)
     zq = (loc_z_cm + (h.astype(np.float64) - 32768) * scale_z / 128) / 100
 
     source = f"{dem.source} @ {lat0:.6f},{lon0:.6f} {vertices}x{vertices} x {cell_m:g} m"
@@ -196,7 +299,15 @@ def build_terrain(dem: GeoDEM, lat0: float, lon0: float, vertices: int = 1009, c
                           "origin": round(float(terrain.down_at(0.0, 0.0)) * -1, 3)},
         "height_step_cm": scale_z / 128,
     }
-    return TerrainBuild(terrain=terrain, heightmap=np.ascontiguousarray(h.T), settings=settings)
+    if pin is not None:  # how far the ground may still move before it clips the pinned range
+        step = scale_z / 128 / 100
+        settings["headroom_m"] = {"below": round(float(raw.min()) * step, 3), "above": round(float(65535 - raw.max()) * step, 3)}
+    land = None
+    if sea is not None:
+        r = np.clip(np.rint(rows), 0, sea.shape[0] - 1).astype(int)
+        c = np.clip(np.rint(cols), 0, sea.shape[1] - 1).astype(int)
+        land = ~sea[r, c]
+    return TerrainBuild(terrain=terrain, heightmap=np.ascontiguousarray(h.T), settings=settings, land=land, edits=edits)
 
 
 def write_heightmap_png(path: PathLike, heightmap: np.ndarray) -> None:

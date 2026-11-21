@@ -3,7 +3,7 @@
 The base scene and robot configs are ordinary Project AirSim JSONC files in
 the campaign's sim_config directory. The builder:
   * points the DUT actor at the scenario's robot config and start pose,
-  * adds target actors (hikers, debris...), distractors and fires as ``spawn-objects``,
+  * adds target actors (hikers...), distractors, fires and clues as ``spawn-objects``,
   * turns on bbox annotations for those targets on the payload camera,
   * for a team, clones the DUT actor into Drone1..DroneN, one per launch pad.
 The result is passed to ``World.load_scene(dict)``, so nothing is written to disk.
@@ -25,9 +25,11 @@ def build_scene(run: Run, sim_config_dir: str, targets: List[Dict[str, Any]],
                 distractors: Optional[List[Dict[str, Any]]] = None, start_ned=None,
                 fleet: Optional[List[Dict[str, Any]]] = None,
                 fires: Optional[List[Dict[str, Any]]] = None,
-                robot: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+                robot: Optional[Dict[str, Any]] = None,
+                clues: Optional[List[Dict[str, Any]]] = None) -> Dict[str, Any]:
     """``fleet`` (``Run.resolved_fleet()``): a team's drones; one drone uses ``start_ned``.
-    ``fires`` (``Run.resolved_fires()``) default to the scenario's own, unresolved.
+    ``fires`` (``Run.resolved_fires()``) and ``clues`` (``Run.resolved_clues()``) default to the
+    scenario's own, unresolved.
     ``robot``: a robot config to fly instead of the scenario's ``scene.robot_config``
     (manual flight, ``vivid2.pilot``)."""
     spec = run.spec
@@ -60,7 +62,9 @@ def build_scene(run: Run, sim_config_dir: str, targets: List[Dict[str, Any]],
         distractors = run.spec.get("distractors", [])
     if fires is None:
         fires = run.spec.get("fires", [])
-    for t in list(targets) + list(distractors) + list(fires):
+    if clues is None:
+        clues = run.spec.get("clues", [])
+    for t in list(targets) + list(distractors) + list(fires) + list(clues):
         spawn.append({
             "name": t["id"],
             "asset-path": t["asset"],

@@ -50,15 +50,19 @@ def palette() -> np.ndarray:
 
 
 def assign_ids(world, targets: List[Dict[str, Any]], distractors: Iterable[Dict[str, Any]] = (),
-               fires: Iterable[Dict[str, Any]] = ()) -> Dict[str, int]:
-    """Give every target, distractor and fire a unique segmentation ID; everything else becomes background."""
-    distractors, fires = list(distractors), list(fires)
+               fires: Iterable[Dict[str, Any]] = (), clues: Iterable[Dict[str, Any]] = ()) -> Dict[str, int]:
+    """Give every target, distractor, fire and clue a unique segmentation ID; everything else becomes background.
+
+    Clues (the damage task's) share the fires' range, after the fires, so no existing ID moves.
+    """
+    distractors, fires, clues = list(distractors), list(fires), list(clues)
     if (len(targets) > DISTRACTOR_ID_BASE - TARGET_ID_BASE or len(distractors) > FIRE_ID_BASE - DISTRACTOR_ID_BASE
-            or len(fires) > MAX_ID - FIRE_ID_BASE + 1):
-        raise SegmentationError("too many targets, distractors or fires for 8-bit segmentation IDs")
+            or len(fires) + len(clues) > MAX_ID - FIRE_ID_BASE + 1):
+        raise SegmentationError("too many targets, distractors, fires or clues for 8-bit segmentation IDs")
     world.set_segmentation_id_by_name(".*", BACKGROUND_ID, True, True)
     ids: Dict[str, int] = {}
-    for base, objs in ((TARGET_ID_BASE, targets), (DISTRACTOR_ID_BASE, distractors), (FIRE_ID_BASE, fires)):
+    for base, objs in ((TARGET_ID_BASE, targets), (DISTRACTOR_ID_BASE, distractors), (FIRE_ID_BASE, fires),
+                       (FIRE_ID_BASE + len(fires), clues)):
         for i, obj in enumerate(objs):
             if not world.set_segmentation_id_by_name(obj["id"], base + i, False, True):
                 raise SegmentationError(f"could not set a segmentation ID on {obj['id']!r} (not spawned?)")
@@ -91,18 +95,26 @@ def visibility(seg: np.ndarray, ids: Dict[str, int], colours: np.ndarray,
 
 
 def split_seen(vis: Dict[str, Dict[str, Any]], target_ids: Iterable[str],
-               fire_ids: Iterable[str] = ()) -> Tuple[Dict[str, int], Dict[str, Dict[str, Any]]]:
+               fire_ids: Iterable[str] = (), clue_ids: Iterable[str] = ()) -> Tuple[Dict[str, int], Dict[str, Dict[str, Any]]]:
     """Split one frame's visibility into what the frame record keeps besides the targets.
 
     Returns ``(distractors_visible, fires_visible)``: visible pixels per distractor, and visible
-    pixels and contrast per fire, each only for objects with visible pixels.
+    pixels and contrast per fire, each only for objects with visible pixels. Clues are neither
+    (see ``seen_of``).
     """
-    targets, fires = set(target_ids), set(fire_ids)
+    targets, fires, clues = set(target_ids), set(fire_ids), set(clue_ids)
     distractors = {oid: v["visible_px"] for oid, v in vis.items()
-                   if oid not in targets and oid not in fires and v["visible_px"]}
+                   if oid not in targets and oid not in fires and oid not in clues and v["visible_px"]}
     burning = {oid: {"visible_px": v["visible_px"], "contrast": v.get("contrast")} for oid, v in vis.items()
                if oid in fires and v["visible_px"]}
     return distractors, burning
+
+
+def seen_of(vis: Dict[str, Dict[str, Any]], ids: Iterable[str]) -> Dict[str, Dict[str, Any]]:
+    """Visible pixels and contrast of the objects ``ids`` (e.g. clues) that show in one frame."""
+    want = set(ids)
+    return {oid: {"visible_px": v["visible_px"], "contrast": v.get("contrast")} for oid, v in vis.items()
+            if oid in want and v["visible_px"]}
 
 
 RING_GAP_PX = 2    # at 1920 px wide: skip the anti-aliased edge between object and ground

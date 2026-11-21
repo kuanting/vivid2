@@ -8,7 +8,8 @@ import numpy as np
 
 from vivid2.geo import nadir_footprint, pixel_ray_to_ground, pixel_to_world, world_to_pixel
 from vivid2.hazards.fire import no_fly_ceiling_agl
-from vivid2.stack.base import Agent, Assessment, Frame, MissionContext, Perception, Planner, Reasoner, TargetReport, UsageStats
+from vivid2.stack.base import (Agent, Assessment, DamageMapper, Frame, MissionContext, Perception, Planner, Reasoner,
+                               TargetReport, UsageStats)
 from vivid2.stack.reference.controllers import DESCENT_MPS
 from vivid2.cameras import GIMBAL_SETTLE_S, GIMBAL_SLEW_DPS
 from vivid2.stack.reference.lowflight import CanopyMap, Clearing, DipSettings, LookAround
@@ -397,6 +398,7 @@ class SearchAgent(LowFlightMixin, Agent):
         max_verifications: int = 8,
         dip: Optional[DipSettings] = None,
         look_around: Optional[LookAround] = None,
+        damage_mapper: Optional[DamageMapper] = None,
     ):
         if look_around is not None and dip is None:
             raise ValueError("look-around happens at the bottom of a dip: it needs dip settings")
@@ -413,11 +415,14 @@ class SearchAgent(LowFlightMixin, Agent):
         self.candidate_confidence = candidate_confidence
         self.verify_frames = verify_frames
         self.max_verifications = max_verifications
+        # Damage task (mission.damage): looks at each survey photo; with it the agent flies the whole
+        # survey even after everyone is found, and reports area outlines before flying home.
+        self.mapper = damage_mapper
         self._path: List[List[float]] = []
 
     @property
     def uses_ground_truth(self) -> bool:
-        return bool(getattr(self.perception, "uses_ground_truth", False))
+        return bool(getattr(self.perception, "uses_ground_truth", False) or getattr(self.mapper, "uses_ground_truth", False))
 
     def describe(self) -> Dict[str, Any]:
         provider = getattr(self.reasoner, "provider", None)
@@ -436,6 +441,7 @@ class SearchAgent(LowFlightMixin, Agent):
                         "min_height_m": LOOK_MIN_AGL_M} if self.verify else False),
             **({"dip": self._lf_describe()} if self.low is not None else {}),  # old run hashes stay valid
             **({"look_around": self.look.describe()} if self.look is not None else {}),
+            **({"damage_mapper": self.mapper.describe()} if self.mapper is not None else {}),
             # Layer settings (sidelap, thresholds, VLM effort...) so a config change forces a re-run.
             "params": {
                 "planner": _scalar_params(self.planner),
@@ -471,6 +477,7 @@ class SearchAgent(LowFlightMixin, Agent):
             if await self._lf_guard(ctx):
                 continue
             step = await self._survey_step(ctx, frame)
+            await self._map(ctx, frame)
             if step == "stop":
                 finished = True
                 break
@@ -480,7 +487,30 @@ class SearchAgent(LowFlightMixin, Agent):
 
         if self.low is not None and not finished and not ctx.should_stop():
             await self._lf_tour(ctx, self._dip_look)
+        await self._map_finish(ctx)
         await self._go_home(ctx)
+
+    # -- the damage task ----------------------------------------------------------------------
+    async def _map(self, ctx: MissionContext, frame: Frame) -> None:
+        """Let the damage layer look at a survey photo and send what it reports."""
+        m = ctx.mission
+        if self.mapper is None or getattr(m, "damage", None) is None or not self.mapper.wants(frame, m):
+            return
+        t0 = ctx.elapsed_s()
+        reports, usage, rec = await ctx.think(self.mapper.observe, frame, m)
+        if rec:
+            ctx.log("decisions", {"t": frame.t_ns, "frame_id": frame.frame_id, "layer": "damage_mapper", "output": rec,
+                                  "latency_s": usage.latency_s, "input_tokens": usage.input_tokens,
+                                  "output_tokens": usage.output_tokens, "cost_usd": usage.cost_usd,
+                                  "model": usage.model, "response_s": round(ctx.elapsed_s() - t0, 3)})
+        for r in reports:
+            ctx.report_damage(r)
+
+    async def _map_finish(self, ctx: MissionContext) -> None:
+        if self.mapper is None or getattr(ctx.mission, "damage", None) is None:
+            return
+        for r in await ctx.think(self.mapper.finish, ctx.mission):
+            ctx.report_damage(r)
 
     # -- hooks for a drone flying with others (stack/reference/team.py) -------------------
     def _plan(self, mission, fov: float, wh) -> List[List[float]]:
@@ -528,6 +558,8 @@ class SearchAgent(LowFlightMixin, Agent):
         return "continue"
 
     def _all_found(self, ctx: MissionContext) -> bool:
+        if self.mapper is not None and getattr(ctx.mission, "damage", None) is not None:
+            return False  # the damage task: survey the whole area
         return len(self._reported) >= ctx.mission.expected_targets
 
     async def _pace(self, ctx: MissionContext, t_loop: float) -> None:
