@@ -30,6 +30,8 @@ setup = ["gdown>=5"]
 # The YOLO baseline (coverage_yolo, hybrid). For a GPU, install instead: onnxruntime-directml (Windows)
 # or onnxruntime-gpu (Linux, CUDA); only one onnxruntime package may be installed.
 yolo = ["onnxruntime>=1.18"]
+# The demo movie (tools/demo_movie): a bundled ffmpeg for H.264 + AAC encoding
+demo = ["imageio-ffmpeg>=0.5"]
 dev = ["pytest>=7"]
 
 [project.scripts]

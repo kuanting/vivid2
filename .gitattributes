@@ -3,6 +3,8 @@
 * text=auto
 *.ps1 text eol=crlf
 *.bat text eol=crlf
+# git apply needs this patch byte-exact (LF, like the files it patches)
+patches/projectairsim-pilot-hooks.patch text eol=lf
 
 # Unreal binary assets and map data go through Git LFS.
 unreal/**/*.uasset filter=lfs diff=lfs merge=lfs -text

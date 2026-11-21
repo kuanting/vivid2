@@ -134,6 +134,13 @@ over a simulated radio (`--team dist`). `campaigns/forest_team_v1.jsonc` flies a
 search with 1, 2 and 4 drones and reports how each team stack scales. See
 [docs/teams.md](docs/teams.md).
 
+### Flying by hand
+
+`vivid2 fly --map ForestSAR` (or `--scenario <file>`) puts a drone on a map for you to fly with a
+radio, gamepad or keyboard: a 5-inch FPV quad, or the benchmark quad with its tilting search
+camera. Nothing is recorded or scored. It needs a pilot plugin that is not part of VIVID 2; see
+[docs/manual_flight.md](docs/manual_flight.md).
+
 ## Roadmap
 
 0. **SIL framework + Forest S&R.** Current phase.

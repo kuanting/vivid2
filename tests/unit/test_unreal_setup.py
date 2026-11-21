@@ -54,6 +54,18 @@ def test_uproject_rendered_per_engine(tmp_path, root, engine):
     # UE 5.8 renamed the Fab plugin to FabLauncher (on by default); listing "Fab" breaks the build
     assert ("Fab" in names) == (engine == "5.7")
     assert len(names) == len(set(names))
+    if engine == "5.8":  # Movie Render Queue (demo movie) is editor-only: never in packaged builds
+        mrq = next(p for p in up["Plugins"] if p["Name"] == "MovieRenderPipeline")
+        assert mrq == {"Name": "MovieRenderPipeline", "Enabled": True, "TargetAllowList": ["Editor"]}
+
+
+def test_uproject_plugin_entries_may_be_references():
+    template = {"Plugins": [{"Name": "PCG", "Enabled": True}]}
+    profile = {"extra_plugins": ["PCG", "A", {"Name": "B", "Enabled": True, "TargetAllowList": ["Editor"]}, "A"]}
+    up = us.render_uproject(template, "5.8", profile)
+    assert up["Plugins"] == [{"Name": "PCG", "Enabled": True}, {"Name": "A", "Enabled": True},
+                             {"Name": "B", "Enabled": True, "TargetAllowList": ["Editor"]}]
+    assert profile["extra_plugins"][2] == {"Name": "B", "Enabled": True, "TargetAllowList": ["Editor"]}
 
 
 def test_build_id_and_commit(tmp_path):
@@ -137,3 +149,64 @@ def test_setup_requires_exactly_one_source(tmp_path, root):
 def test_onedrive_direct_link():
     assert us.onedrive_direct("https://1drv.ms/u/s!abc") == "https://1drv.ms/u/s!abc?download=1"
     assert us.onedrive_direct("https://x/y?e=1") == "https://x/y?e=1&download=1"
+
+
+def _fake_pilot_plugin(path):
+    path.mkdir(parents=True)
+    (path / "FpvPilot.uplugin").write_text("{}")
+    return path
+
+
+def test_pilot_hooks_detected_and_their_patch_matches_the_check(tmp_path, root):
+    plugins = _fake_plugins(tmp_path / "Plugins")
+    assert not us.has_pilot_hooks(plugins)
+    patch = (root / us.PILOT_HOOKS_PATCH).read_text(encoding="utf-8")
+    # the file the check looks for is one the patch creates
+    assert f"+++ b/unreal/Blocks/Plugins/{us.PILOT_HOOKS_HEADER}" in patch
+    (plugins / us.PILOT_HOOKS_HEADER).parent.mkdir(parents=True)
+    (plugins / us.PILOT_HOOKS_HEADER).write_text("// hooks")
+    assert us.has_pilot_hooks(plugins)
+    # public repo: the patch names no private project
+    assert "skytwin" not in patch.lower()
+
+
+def test_pilot_plugin_linked_enabled_kept_and_unlinked(tmp_path, root):
+    plugins = _fake_plugins(tmp_path / "Plugins")
+    env = _env_dir(tmp_path, root)
+    pilot = _fake_pilot_plugin(tmp_path / "FpvPilot")
+    quiet = {"env_dir": env, "log": lambda s: None}
+    # the plugin needs the hooks in the Project AirSim plugin
+    with pytest.raises(us.SetupError, match="pilot hooks"):
+        us.setup("5.8", plugin_dir=plugins, pilot_plugin=pilot, **quiet)
+    (plugins / us.PILOT_HOOKS_HEADER).parent.mkdir(parents=True)
+    (plugins / us.PILOT_HOOKS_HEADER).write_text("// hooks")
+
+    def enabled():
+        up = json.loads((env / "VIVID2Env.uproject").read_text())
+        return [p for p in up["Plugins"] if p["Name"] == "FpvPilot"]
+
+    state = us.setup("5.8", plugin_dir=plugins, pilot_plugin=pilot, **quiet)
+    assert us._is_link(env / "Plugins/FpvPilot") and (env / "Plugins/FpvPilot/FpvPilot.uplugin").exists()
+    assert enabled() == [{"Name": "FpvPilot", "Enabled": True}]
+    assert state["pilot_hooks"] and state["pilot_plugin"] == str(pilot.resolve())
+    # a later setup (another engine) keeps it
+    us.setup("5.7", plugin_dir=plugins, **quiet)
+    assert us._is_link(env / "Plugins/FpvPilot") and len(enabled()) == 1
+    # --no-pilot-plugin removes the link and the uproject entry
+    state = us.setup("5.8", plugin_dir=plugins, no_pilot_plugin=True, **quiet)
+    assert not (env / "Plugins/FpvPilot").exists() and enabled() == [] and state["pilot_plugin"] is None
+    with pytest.raises(us.SetupError, match="not the pilot plugin"):
+        us.setup("5.8", plugin_dir=plugins, pilot_plugin=tmp_path, **quiet)
+
+
+def test_copy_simlibs_only_when_missing(tmp_path):
+    src = _fake_plugins(tmp_path / "Prebuilt") / "ProjectAirSim/SimLibs"
+    dest_plugins = tmp_path / "Checkout/Plugins"
+    (dest_plugins / "ProjectAirSim").mkdir(parents=True)
+    us.copy_simlibs(src, dest_plugins, log=lambda s: None)
+    assert us.simlibs_commit(dest_plugins) == "abc123"
+    (src / "commit_hash.txt").write_text("def456\n")
+    us.copy_simlibs(src, dest_plugins, log=lambda s: None)  # already there: untouched
+    assert us.simlibs_commit(dest_plugins) == "abc123"
+    with pytest.raises(us.SetupError, match="SimLibs"):
+        us.copy_simlibs(tmp_path / "nothing", tmp_path / "Other/Plugins", log=lambda s: None)

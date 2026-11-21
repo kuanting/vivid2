@@ -40,6 +40,10 @@ the packs themselves are ignored by git.
 | Pack | Folder | Used for | Notes |
 |---|---|---|---|
 | Forest Fire (Fab) | `Content/ForestFire/` | ForestSAR vegetation (birch trees, shrubs, ferns, grass, stumps, logs, rocks); the flipbook textures and materials of VIVID 2's fire effects; ForestFire's burnt ground texture and the parents of its burnt material instances | Made for UE4; see [the pack in UE 5.8](#the-forest-fire-pack-in-ue-58). |
+| Hiking Collection (Fab) | `Content/Hiking_Collection/` | The hikers: a man and a woman in hiking clothes with a backpack | `tools/build_hikers.py` changes it locally: compatible skeletons, textures capped at 2048 px |
+| Lie Down Animation Pack (Fab, Ailive) | `Content/Fab/Lie_Down_Animation_Pack/` | Hiker poses: on the back, face down, on the side | Fab imports it from FBX; save it after adding it to the project |
+| Body Wave Animation Pack (Fab, Ailive) | `Content/Fab/Body_Wave_Animation_Pack/` | Hiker pose: waving both arms | As above |
+| Third Person template (engine) | `Content/Characters/` | Hiker pose: crouching (`MM_Death_Back_01`) | See [Targets](#targets-hikers) |
 
 ## Targets (hikers)
 
@@ -47,38 +51,74 @@ Scenarios spawn targets by **asset name** through `spawn-objects`. Project
 AirSim looks names up in the asset registry: static meshes, skeletal meshes and
 blueprints.
 
-**Built (v1):** 16 blueprints in `/Game/VIVID2/Targets`, named
-`VIVID2_Hiker_<Outfit>_<Pose>`.
-- **Outfits:**
+**Built (v2, 2026-11-18):** 24 blueprints in `/Game/VIVID2/Targets`, named
+`VIVID2_Hiker_<Outfit>_<Pose>`: realistic people in hiking clothes (jacket,
+trousers, boots, a dark backpack with a harness), with faces and hair. They
+replaced the v1 hikers, which were UE5 mannequins in flat colours, under the
+same names, so scenarios didn't change (`SIM_VERSION` 8).
+`tools/build_hikers.py` builds them through the editor's MCP server.
+- **Outfits:** the jacket and trouser colours are those of the v1 hikers and of
+  the decoys, so the decoys still match.
 
-  | Outfit | Body | Jacket | Trousers |
+  | Outfit | Person | Jacket | Trousers |
   |---|---|---|---|
-  | `RedJacket` | Manny | red | dark |
-  | `YellowJacket` | Manny | yellow | grey |
-  | `BlueHoodie` | Quinn | dark blue | blue |
-  | `GreenJacket` | Manny | olive (low contrast) | khaki |
+  | `RedJacket` | man | red | dark |
+  | `YellowJacket` | woman | yellow | grey |
+  | `BlueHoodie` | teenager (the man at 94 %) | dark blue | blue |
+  | `GreenJacket` | man | olive (low contrast) | khaki |
 
-- **Poses:** `Standing`, `Crouching`, `LyingBack`, `LyingFront`.
-- **Construction:** each blueprint is one skeletal mesh (the UE5 mannequin) held
-  in a fixed animation pose. The jacket and trousers use flat matte colours
-  (`M_VIVID2_Clothing`); the mannequin's own material leaves white panels.
-- **Lying poses:** the template has no lying animation (its "death" clips are
-  short staggers ending in a crouch), so the lying poses are the idle pose
-  rotated flat and lifted 15 cm.
-- **Pivot:** the pivot is at the feet, so scenario `ned.z` = 0 puts the hiker
-  on the terrain.
-- **Size from the air:** from 45–60 m a lying hiker is about 20–25 payload
-  pixels long; a standing one shows only head and shoulders.
+- **Poses:** each is one frame of a motion-capture clip.
+
+  | Pose | Clip (pack) | Looks like |
+  |---|---|---|
+  | `Standing` | `MM_Idle` / `MF_Idle` (Hiking Collection) | standing, arms down |
+  | `Crouching` | `MM_Death_Back_01` at 1.1 s (Third Person template) | crouched, hunched forward |
+  | `LyingBack` | `Sprawling_Out_on_the_Floor` at 5 s (Lie Down) | on the back, arms and legs spread |
+  | `LyingFront` | `Liying_Face_Dwon_on_the_Floor` at 5 s (Lie Down) | face down, arms folded over the head, backpack up |
+  | `LyingSide` | `Lying_on_the_Side_with_One_Arm` at 6 s (Lie Down) | on the side, propped on one arm |
+  | `Waving` | `Both_Arm_Wave` at 3.5 s (Body Wave) | standing, both arms up in a V |
+
+  `LyingSide` and `Waving` are new in v2. The hiker faces +X (north at
+  `yaw_deg` 0).
+- **Construction:**
+  - **Mesh:** each blueprint is one skeletal mesh component, the pack's
+    combined man or woman (body, head, card hair and outfit in one mesh). It
+    holds one frame of a clip: single-node animation, not playing. A moving pose
+    would differ between runs, because the game clock follows the wall clock.
+  - **Colours:** the jacket and trousers use instances of
+    `M_VIVID2_ClothTint`. It keeps the pack's fabric (normal, roughness and
+    metallic maps) and sets the colour: base colour = colour × the texture's
+    relative brightness, clamped to 0.6–1.6.
+  - **Collision:** the mesh's physics asset collides (BlockAll), so preflight's
+    3D box and drone collisions see the hiker.
+- **The clips are Manny clips on a MetaHuman-style skeleton.** The pack's
+  skeleton (`SK_Human_Skeleton`) lists the clips' skeletons as compatible, and
+  takes bone translations from them (`bUseRetargetModesFromCompatibleSkeleton`).
+  With the pack's own retarget modes, a Manny clip pulls the right forearm off
+  at the elbow. These are local changes to the pack, made by the builder.
+- **Pivot:** on the ground, under the body's centre. Some clips move the body
+  away from the root (the crouch by 2 m). The builder offsets the mesh by the
+  measured centre of each pose's footprint, from line traces against the
+  posed body. Measured centres are within 20 cm of the pivot.
+- **Size:** a standing man is 1.78 m, the woman 1.68 m.
+- **Textures:** the pack ships 8K textures. The builder caps the 64 the hikers
+  use at 2048 px (a local pack change): the payload camera never sees a hiker
+  larger than about 1,000 pixels, and the packaged build stays small.
 - **Cooking:** `DirectoriesToAlwaysCook` includes `/Game/VIVID2/Targets`,
-  because hikers are spawned by name and no map references them.
-- **Mannequin content:** the mannequins come from the engine's Third Person
-  template content (`Content/Characters`, not committed). Add it with
+  because hikers are spawned by name and no map references them. The pack
+  assets they use are cooked as references.
+- **Rebuild:** add the packs (table above; save the Fab animation packs after
+  adding them), open the editor with the MCP server on, then run
+  `python tools/build_hikers.py`. It updates existing assets in place. Deleting
+  and re-creating an asset that something references breaks the references.
+- **Third Person template content:** the crouch clip comes from the engine's
+  Third Person template (`Content/Characters`, not committed). Add it with
   Add → Add Feature or Content Pack → Third Person, or copy
   `<UE>/Templates/TemplateResources/High/Characters/Content` to
   `Content/Characters`.
-- **Upgrade path:** realistic clothed people (a Fab human pack, or MetaHumans
-  once the MetaHuman optional content is installed) can replace the mannequins
-  under the same asset names.
+- **Not done yet:** sitting on the ground (from the Homeless NPC Animation
+  Pack, not installed yet), more outfits, and realistic decoys. Next to real
+  people, the basic-shape decoys are easier to rule out.
 
 Rules for any target asset:
 - The origin must be at ground level (the feet, or the lowest point when

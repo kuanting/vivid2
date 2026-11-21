@@ -19,7 +19,7 @@
      "description": "adult, yellow jacket, grey trousers, standing in the burnt area"},
     // in a clearing (radius 9 m, measured in ForestSAR on 2026-11-03) ahead of the fire: a dip reaches it
     {"id": "Hiker2", "asset": "VIVID2_Hiker_RedJacket_LyingBack", "ned": [74, -66, 0], "yaw_deg": 30,
-     "description": "adult, red jacket, dark trousers, lying on her back"},
+     "description": "adult, red jacket, dark trousers, lying on his back"},
     // under canopy, low contrast
     {"id": "Hiker3", "asset": "VIVID2_Hiker_GreenJacket_Crouching", "ned": [-110, -40, 0], "yaw_deg": 200,
      "description": "adult, olive green jacket, crouching"}

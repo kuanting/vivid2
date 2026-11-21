@@ -12,6 +12,8 @@
     vivid2 unreal setup --engine 5.8 --download
     vivid2 unreal setup --engine 5.7 --airsim-root ../ProjectAirSim
     vivid2 terrain build --map ForestSAR --lat 24.2436 --lon 121.2467
+    vivid2 fly --map ForestSAR --drone fpv5
+    vivid2 fly --scenario scenarios/forest_sar/forest_clearing_01.jsonc --drone quad --launch
 """
 from __future__ import annotations
 
@@ -19,6 +21,9 @@ import argparse
 import asyncio
 import hashlib
 import json
+import os
+import shlex
+import subprocess
 import sys
 from pathlib import Path
 
@@ -169,12 +174,17 @@ def cmd_unreal_setup(args) -> int:
             do_download=args.download,
             apply_patch=args.apply_patch,
             force=args.force,
+            copy_simlibs_from=Path(args.copy_simlibs_from) if args.copy_simlibs_from else None,
+            pilot_plugin=Path(args.pilot_plugin) if args.pilot_plugin else None,
+            no_pilot_plugin=args.no_pilot_plugin,
         )
     except us.SetupError as e:
         print(f"error: {e}", file=sys.stderr)
         return 1
     print(f"VIVID2Env set up for UE {state['engine']}: {state['uproject']}")
     print(f"  plugins: {state['plugins_dir']} (BuildId {state['plugin_build_id']}, engine {state['engine_build_id']})")
+    print(f"  manual flight: pilot hooks {'yes' if state['pilot_hooks'] else 'no'}, "
+          f"pilot plugin {state['pilot_plugin'] or 'not linked'}")
     return 0
 
 
@@ -198,6 +208,72 @@ def cmd_unreal_pack(args) -> int:
           f"\"{args.engine}\" -> plugin_zip (set url and provider):")
     print(json.dumps({"url": "<share link>", "provider": "gdrive", "sha256": info["sha256"],
                       "size": info["size"], "file_name": info["file_name"]}, indent=2))
+    return 0
+
+
+def cmd_fly(args) -> int:
+    from vivid2 import pilot
+    from vivid2 import unreal_setup as us
+
+    repo = Path(__file__).resolve().parents[2]
+    sim_config_dir = str(Path(args.sim_config_dir) if args.sim_config_dir else repo / "sim_config")
+    try:
+        if args.scenario:
+            run = pilot.scenario_run(args.scenario, args.seed, args.map)
+        elif args.map:
+            run = pilot.map_run(args.map)
+        else:
+            print("error: give --map or --scenario", file=sys.stderr)
+            return 2
+        scene, info = pilot.pilot_scene(run, sim_config_dir, args.drone, with_targets=not args.no_targets)
+    except (ValueError, FileNotFoundError) as e:
+        print(f"error: {e}", file=sys.stderr)
+        return 2
+    map_name = info["map"]
+    print(f"{info['drone']} on {map_name} ({info['scenario']}{', ' + json.dumps(info['params']) if info['params'] else ''}): "
+          f"start {info['start_ned']} NED, {info['altitude_m']} m above sea level, air density x{info['air_density_ratio']}")
+    if info["targets"] or info["distractors"] or info["fires"]:
+        print(f"  targets {info['targets']}, decoys {info['distractors']}, fires {info['fires']}")
+    if args.print_scene:
+        print(json.dumps(scene, indent=2))
+        return 0
+
+    proc = None
+    if args.launch:
+        state = us.status()
+        try:
+            if state is None:
+                raise RuntimeError("VIVID2Env is not set up; run vivid2 unreal setup ...")
+            cmd = pilot.launch_command(state, map_name)
+        except RuntimeError as e:
+            print(f"error: {e}", file=sys.stderr)
+            return 1
+        if os.name == "nt":
+            # Unreal's own quoting (-ExecCmds="a b", Windows paths): pass the extra arguments verbatim.
+            cmd = subprocess.list2cmdline(cmd) + (" " + args.unreal_args if args.unreal_args else "")
+            print("launching:", cmd)
+        else:
+            cmd += shlex.split(args.unreal_args or "")
+            print("launching:", " ".join(cmd))
+        # MSYS_NO_PATHCONV keeps a Git Bash parent from rewriting /Game/... into a file path.
+        proc = subprocess.Popen(cmd, env={**os.environ, "MSYS_NO_PATHCONV": "1"})
+        try:
+            pilot.wait_for_sim(args.address, args.timeout, proc)
+        except (RuntimeError, TimeoutError) as e:
+            print(f"error: {e}", file=sys.stderr)
+            return 1
+    try:
+        pilot.load_into_sim(scene, map_name, run.spec.get("environment", {}), sim_config_dir, args.address)
+    except Exception as e:  # noqa: BLE001 - connection, preflight and sim errors all end the command
+        print(f"error: {e}", file=sys.stderr)
+        print("  Is the map open and playing (editor Play, or --launch), with the pilot plugin set up "
+              "(vivid2 unreal status)?", file=sys.stderr)
+        return 1
+    print(pilot.KEYS)
+    if args.drone == "quad":
+        print(pilot.KEYS_GIMBAL)
+    if proc is not None and args.wait:
+        return proc.wait()
     return 0
 
 
@@ -306,8 +382,15 @@ def main(argv=None) -> int:
     src.add_argument("--airsim-root", help="Project AirSim checkout (uses unreal/Blocks/Plugins)")
     src.add_argument("--plugin-zip", help="prebuilt plugin zip downloaded manually")
     src.add_argument("--download", action="store_true", help="download the prebuilt plugin zip from unreal/engines.json")
-    u.add_argument("--apply-patch", action="store_true", help="with --airsim-root: apply the UE 5.8 patch if needed")
+    u.add_argument("--apply-patch", action="store_true",
+                   help="with --airsim-root: apply the UE 5.8, team weather and pilot hooks patches if needed")
     u.add_argument("--force", action="store_true", help="replace real (non-link) plugin folders in VIVID2Env")
+    u.add_argument("--copy-simlibs-from", help="with --airsim-root: copy this prebuilt SimLibs folder into the "
+                                               "checkout's plugin if it has none")
+    pil = u.add_mutually_exclusive_group()
+    pil.add_argument("--pilot-plugin", help="link and enable the pilot plugin (folder with FpvPilot.uplugin) for "
+                                            "manual flight (vivid2 fly); kept on later setups")
+    pil.add_argument("--no-pilot-plugin", action="store_true", help="unlink the pilot plugin")
     u.set_defaults(fn=cmd_unreal_setup)
     u = usub.add_parser("status", help="show the current VIVID2Env engine/plugin setup")
     u.set_defaults(fn=cmd_unreal_status)
@@ -317,6 +400,26 @@ def main(argv=None) -> int:
     u.add_argument("--out", default="dist")
     u.add_argument("--strip-pdb", action="store_true", help="omit debug symbols (*.pdb) to shrink the zip")
     u.set_defaults(fn=cmd_unreal_pack)
+
+    s = sub.add_parser("fly", help="fly a map by hand with a radio or gamepad (needs the pilot plugin; "
+                                   "docs/manual_flight.md)")
+    s.add_argument("--map", help="map to fly (with --scenario: fly the scenario on this map instead)")
+    s.add_argument("--scenario", help="scenario file: its start, hikers, decoys, fires and weather")
+    s.add_argument("--seed", type=int, default=0, help="the scenario's seed (target jitter)")
+    s.add_argument("--drone", choices=["fpv5", "quad"], default="fpv5",
+                   help="fpv5: 5-inch FPV quad (acro); quad: VIVID 2's benchmark quad (angle mode, tilting "
+                        "search camera)")
+    s.add_argument("--no-targets", action="store_true", help="leave the scenario's hikers and decoys out")
+    s.add_argument("--launch", action="store_true", help="start the map in a game window first (else load into "
+                                                         "the editor's Play session or a running game)")
+    s.add_argument("--wait", action="store_true", help="with --launch: wait for the game to exit, return its code")
+    s.add_argument("--unreal-args", help="extra Unreal command-line arguments for --launch (write it with '=': "
+                                         "--unreal-args=\"-FpvPilotFlightTest -FpvPilotQuitAfterTest\")")
+    s.add_argument("--timeout", type=float, default=900.0, help="seconds to wait for a launched game's sim")
+    s.add_argument("--address", default="127.0.0.1")
+    s.add_argument("--sim-config-dir", help="default: sim_config")
+    s.add_argument("--print-scene", action="store_true", help="print the scene JSON and exit (no sim)")
+    s.set_defaults(fn=cmd_fly)
 
     s = sub.add_parser("terrain", help="build a map's terrain from a real elevation model")
     tsub = s.add_subparsers(dest="terrain_cmd", required=True)

@@ -1,0 +1,35 @@
+// ForestSAR map: a family of three, in the poses real searches see: one waving in a clearing, one lying
+// on his side under the trees, one face down. Uses the Waving and LyingSide hikers (tools/build_hikers.py).
+// Positions: the radius-9 m clearing at 74,-66 (forest_clearing_01), the partial canopy at 90,40
+// (forest_hiker_01) and the spot at -120,110 (forest_hiker_02).
+{
+  "id": "forest_hiker_03",
+  "mission": "forest_sar",
+  "description": "A family of three at noon: a woman waving in a clearing, a teenager lying on his side under trees, a man face down.",
+  "scene": {"base": "scene_forest_sar.jsonc", "robot_config": "robot_vivid_quad.jsonc", "camera": "Payload", "map": "ForestSAR"},
+  "dut_start": {"ned": [0, 0, -1], "yaw_deg": 0},
+  // 60 m above the start keeps at least 18 m over the treetops (ground -10..+11 m, trees <= 31 m).
+  "search_area": {"polygon_ne": [[-150, -100], [150, -100], [150, 140], [-150, 140]], "altitude_m": 60, "ground_down_m": 0},
+  "targets": [
+    {"id": "Hiker1", "asset": "VIVID2_Hiker_YellowJacket_Waving", "ned": [74, -66, 0], "yaw_deg": 150,
+     "description": "woman, yellow jacket, grey trousers, waving both arms"},
+    {"id": "Hiker2", "asset": "VIVID2_Hiker_BlueHoodie_LyingSide", "ned": [90, 40, 0], "yaw_deg": 250,
+     "description": "teenager, dark blue hoodie, lying on his side"},
+    {"id": "Hiker3", "asset": "VIVID2_Hiker_RedJacket_LyingFront", "ned": [-120, 110, 0], "yaw_deg": 20,
+     "description": "man, red jacket, dark trousers, lying face down"}
+  ],
+  // Small, so the waving hiker stays inside the clearing.
+  "target_jitter_m": 5,
+  // A decoy in each hiker's colour; the sleeping bag is person-sized.
+  "distractors": [
+    {"id": "Decoy1", "asset": "VIVID2_Decoy_Jacket_Yellow", "ned": [-40, -90, 0], "yaw_deg": 40, "description": "dropped yellow jacket"},
+    {"id": "Decoy2", "asset": "VIVID2_Decoy_SleepingBag_Blue", "ned": [-100, -40, 0], "yaw_deg": 15, "description": "blue sleeping bag"},
+    {"id": "Decoy3", "asset": "VIVID2_Decoy_Tarp_Red", "ned": [0, 60, 0], "yaw_deg": -30, "description": "red tarp"}
+  ],
+  "brief": "A family of three on a day hike is overdue: a woman in a yellow jacket, her teenage son in a dark blue hoodie and her husband in a red jacket. They may have split up. Any of them may be lying down, injured, or trying to signal to you.",
+  "environment": {"time_of_day": "2026-09-28 12:30:00", "weather": {}, "wind_ned": [2, -1, 0]},
+  "limits": {"timeout_s": 1200, "max_speed_mps": 8, "min_agl_m": 0.5, "geofence_margin_m": 25, "energy_budget_m": 12000},
+  "success": {"localization_tolerance_m": 10, "require_all_targets": true},
+  // Noon fog only hazes the ground from the survey height (forest_fog_01); 0 is the clear-air control.
+  "sweep": {"environment.weather.fog": [0, 0.2], "seeds": 2}
+}

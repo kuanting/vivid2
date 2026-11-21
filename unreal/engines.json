@@ -16,7 +16,8 @@
         "PCGToolset",
         "MetaHumanGenerator",
         "NiagaraToolsets",
-        "ConfigSettingsToolset"
+        "ConfigSettingsToolset",
+        {"Name": "MovieRenderPipeline", "Enabled": true, "TargetAllowList": ["Editor"]}
       ],
       "editor_maps": true,
       "plugin_sources": ["download", "plugin-zip", "airsim-root", "plugin-dir"],

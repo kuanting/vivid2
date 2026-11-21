@@ -1,0 +1,1274 @@
+diff --git a/client/python/projectairsim/src/projectairsim/schema/robot_config_schema.jsonc b/client/python/projectairsim/src/projectairsim/schema/robot_config_schema.jsonc
+index d73d844..08ccfeb 100644
+--- a/client/python/projectairsim/src/projectairsim/schema/robot_config_schema.jsonc
++++ b/client/python/projectairsim/src/projectairsim/schema/robot_config_schema.jsonc
+@@ -68,7 +68,7 @@
+         },
+         "type": {
+           "type": "string",
+-          "enum": [ "simple-flight-api", "simple-drive-api","px4-api", "ardupilot-api", "manual-controller-api", "matlab-controller-api"]
++          "enum": [ "simple-flight-api", "simple-drive-api","px4-api", "ardupilot-api", "manual-controller-api", "matlab-controller-api", "external-controller-api"]
+         },
+         "simple-flight-api-settings": {
+           "type": "object",
+@@ -92,6 +92,14 @@
+             "actuator-order": { "$ref": "#/definitions/actuator-order" }
+           }
+         },
++        "external-controller-api-settings": {
++          "type": "object",
++          "required": [ "factory", "actuator-order" ],
++          "properties": {
++            "factory": { "type": "string" },
++            "actuator-order": { "$ref": "#/definitions/actuator-order" }
++          }
++        },
+         "matlab-controller-api-settings": {
+           "type": "object",
+           "required": [ "actuator-order" ],
+diff --git a/unreal/Blocks/Plugins/ProjectAirSim/Source/ProjectAirSim/Private/Controllers/ExternalControllerApi.cpp b/unreal/Blocks/Plugins/ProjectAirSim/Source/ProjectAirSim/Private/Controllers/ExternalControllerApi.cpp
+new file mode 100644
+index 0000000..bfc4de0
+--- /dev/null
++++ b/unreal/Blocks/Plugins/ProjectAirSim/Source/ProjectAirSim/Private/Controllers/ExternalControllerApi.cpp
+@@ -0,0 +1,221 @@
++// Copyright (C) 2026 K. T. Lai
++//
++// MIT License.
++
++#include "Controllers/ExternalControllerApi.h"
++
++#include <algorithm>
++#include <exception>
++
++#include "HAL/PlatformTime.h"
++#include "UnrealLogger.h"
++#include "core_sim/clock.hpp"
++#include "core_sim/physics_common_types.hpp"
++#include "core_sim/scene.hpp"
++#include "core_sim/sensors/imu.hpp"
++#include "json.hpp"
++
++namespace projectairsim = microsoft::projectairsim;
++using json = nlohmann::json;
++
++FExternalControllerApi::FExternalControllerApi(
++    const projectairsim::Robot& InRobot, FExternalFlightControllerPtr InImpl)
++    : SimRobot(InRobot), Impl(MoveTemp(InImpl)) {
++  RobotId = UTF8_TO_TCHAR(SimRobot.GetID().c_str());
++  Mailbox = ProjectAirSimExt::GetOrCreateMailbox(RobotId);
++
++  DefaultGimbal.roll_lock = false;
++  DefaultGimbal.pitch_lock = false;
++  DefaultGimbal.yaw_lock = false;
++
++  // actuator-order maps output index -> actuator id
++  try {
++    const json Controller = json::parse(SimRobot.GetControllerSettings());
++    const json Settings = Controller.value(SettingsKey, json::object());
++    const json Order = Settings.value("actuator-order", json::array());
++    int Idx = 0;
++    for (const auto& Entry : Order) {
++      if (Idx >= FExtCtrlOutput::MaxMotors) break;
++      ActuatorIndex[Entry.value("id", std::string())] = Idx++;
++    }
++    NumMotors = Idx;
++  } catch (const std::exception& Ex) {
++    UnrealLogger::Log(projectairsim::LogLevel::kError,
++                      TEXT("[external-controller-api] Robot '%s': bad "
++                           "settings: %hs"),
++                      *RobotId, Ex.what());
++  }
++  Output.NumMotors = NumMotors;
++}
++
++FExternalControllerApi::~FExternalControllerApi() = default;
++
++void FExternalControllerApi::AttachToScene(projectairsim::Scene& Scene) {
++  for (const auto& ActorRef : Scene.GetActors()) {
++    if (ActorRef.get().GetType() != projectairsim::ActorType::kRobot) continue;
++    auto& Robot = static_cast<projectairsim::Robot&>(ActorRef.get());
++    if (Robot.GetControllerType() != TypeName) continue;
++
++    const FString Id = UTF8_TO_TCHAR(Robot.GetID().c_str());
++    FString FactoryName;
++    FString SettingsJson = TEXT("{}");
++    try {
++      const json Controller = json::parse(Robot.GetControllerSettings());
++      const json Settings = Controller.value(SettingsKey, json::object());
++      FactoryName = UTF8_TO_TCHAR(Settings.value("factory", std::string()).c_str());
++      SettingsJson = UTF8_TO_TCHAR(Settings.dump().c_str());
++    } catch (const std::exception& Ex) {
++      UnrealLogger::Log(projectairsim::LogLevel::kError,
++                        TEXT("[external-controller-api] Robot '%s': cannot "
++                             "parse controller settings: %hs"),
++                        *Id, Ex.what());
++    }
++
++    FExternalFlightControllerPtr Impl =
++        ProjectAirSimExt::CreateController(FactoryName, Id, SettingsJson);
++    if (Impl.IsValid()) {
++      UnrealLogger::Log(projectairsim::LogLevel::kTrace,
++                        TEXT("external-controller-api: attached '%s' to "
++                             "robot '%s'"),
++                        *FactoryName, *Id);
++    } else {
++      UnrealLogger::Log(projectairsim::LogLevel::kError,
++                        TEXT("external-controller-api: no factory '%s' for "
++                             "robot '%s' (is the host module loaded?). Motors "
++                             "will stay at zero."),
++                        *FactoryName, *Id);
++    }
++    Robot.SetController(std::make_unique<FExternalControllerApi>(Robot, Impl));
++  }
++}
++
++void FExternalControllerApi::BeginUpdate() {
++  // First enabled IMU, if any
++  ImuSensor = nullptr;
++  for (const auto& SensorRef : SimRobot.GetSensors()) {
++    auto& Sensor = SensorRef.get();
++    if (Sensor.GetType() == projectairsim::SensorType::kImu &&
++        Sensor.IsEnabled()) {
++      ImuSensor = static_cast<projectairsim::Imu*>(&Sensor);
++      break;
++    }
++  }
++  LastSimNanos = -1;
++  if (Impl.IsValid()) Impl->OnBegin(RobotId, NumMotors);
++}
++
++void FExternalControllerApi::EndUpdate() {
++  if (Impl.IsValid()) Impl->OnEnd();
++}
++
++void FExternalControllerApi::Reset() {
++  {
++    std::lock_guard<std::mutex> Lock(OutputLock);
++    for (float& M : Output.Motor) M = 0.0f;
++  }
++  LastSimNanos = -1;
++  if (Impl.IsValid()) Impl->OnReset();
++}
++
++void FExternalControllerApi::SetKinematics(
++    const projectairsim::Kinematics* InKinematics) {
++  Kinematics = InKinematics;
++}
++
++void FExternalControllerApi::ApplyPendingReset() {
++  float Pos[3];
++  float Quat[4];
++  if (!Mailbox.IsValid() || !Mailbox->ConsumeReset(Pos, Quat)) return;
++
++  projectairsim::Kinematics NewKin;  // zero twist and accels
++  NewKin.pose.position = projectairsim::Vector3(Pos[0], Pos[1], Pos[2]);
++  NewKin.pose.orientation =
++      projectairsim::Quaternion(Quat[0], Quat[1], Quat[2], Quat[3]).normalized();
++  SimRobot.UpdateKinematics(NewKin);
++  SimRobot.UpdateCollisionInfo(projectairsim::CollisionInfo());
++
++  LastSimNanos = -1;
++  if (Impl.IsValid()) Impl->OnReset();
++}
++
++void FExternalControllerApi::Update() {
++  ApplyPendingReset();
++
++  FExtCtrlState State;
++  const int64 Now = projectairsim::SimClock::Get()->NowSimNanos();
++  State.SimTimeNanos = Now;
++  State.DtNanos = LastSimNanos < 0 ? 0 : Now - LastSimNanos;
++  LastSimNanos = Now;
++
++  if (Kinematics != nullptr) {
++    const auto& Pose = Kinematics->pose;
++    State.OrientationWxyz[0] = Pose.orientation.w();
++    State.OrientationWxyz[1] = Pose.orientation.x();
++    State.OrientationWxyz[2] = Pose.orientation.y();
++    State.OrientationWxyz[3] = Pose.orientation.z();
++    for (int i = 0; i < 3; ++i) {
++      State.PositionNed[i] = Pose.position[i];
++      State.VelocityNed[i] = Kinematics->twist.linear[i];
++      State.AngularVelBody[i] = Kinematics->twist.angular[i];
++      State.Gyro[i] = State.AngularVelBody[i];
++    }
++    // Ground-truth specific force in body frame: R^T * (a - g)
++    const projectairsim::Vector3 Gravity(0.0f, 0.0f, 9.80665f);
++    const projectairsim::Vector3 SpecificForce =
++        Pose.orientation.conjugate() * (Kinematics->accels.linear - Gravity);
++    for (int i = 0; i < 3; ++i) State.Accel[i] = SpecificForce[i];
++  }
++
++  if (ImuSensor != nullptr) {
++    const auto ImuMsg = ImuSensor->getOutput();
++    const auto Gyro = ImuMsg.GetAngularVelocity();
++    const auto Accel = ImuMsg.GetLinearAcceleration();
++    for (int i = 0; i < 3; ++i) {
++      State.Gyro[i] = Gyro[i];
++      State.Accel[i] = Accel[i];
++    }
++    State.bHasImu = true;
++  }
++
++  ProjectAirSimExt::FRcFrame Rc;
++  if (Mailbox.IsValid() && Mailbox->ReadLatest(Rc)) {
++    State.bRcValid = true;
++    State.RcCount = Rc.Count;
++    for (int32 i = 0; i < Rc.Count; ++i) State.Rc[i] = Rc.Channels[i];
++    State.RcAgeNanos = static_cast<int64>(
++        (FPlatformTime::Seconds() - Rc.WallSeconds) * 1.0e9);
++  }
++
++  const auto& Collision = SimRobot.GetCollisionInfo();
++  State.bCollided = Collision.has_collided;
++  for (int i = 0; i < 3; ++i) State.CollisionNormalNed[i] = Collision.normal[i];
++
++  FExtCtrlOutput NewOutput;
++  NewOutput.NumMotors = NumMotors;
++  if (Impl.IsValid()) {
++    Impl->Step(State, NewOutput);
++  }
++  NewOutput.NumMotors = NumMotors;
++  for (int32 i = 0; i < FExtCtrlOutput::MaxMotors; ++i) {
++    const float M = NewOutput.Motor[i];
++    NewOutput.Motor[i] = FMath::IsFinite(M) ? FMath::Clamp(M, 0.0f, 1.0f) : 0.0f;
++  }
++
++  std::lock_guard<std::mutex> Lock(OutputLock);
++  Output = NewOutput;
++}
++
++std::vector<float> FExternalControllerApi::GetControlSignals(
++    const std::string& ActuatorId) {
++  const auto It = ActuatorIndex.find(ActuatorId);
++  if (It == ActuatorIndex.end()) return std::vector<float>(1, 0.0f);
++  std::lock_guard<std::mutex> Lock(OutputLock);
++  return std::vector<float>(1, Output.Motor[It->second]);
++}
++
++const microsoft::projectairsim::IController::GimbalState&
++FExternalControllerApi::GetGimbalSignal(const std::string& GimbalId) {
++  // Not supported: NAN fields mean "no command", so gimbals keep their
++  // configured stabilisation.
++  return DefaultGimbal;
++}
+diff --git a/unreal/Blocks/Plugins/ProjectAirSim/Source/ProjectAirSim/Private/Controllers/ExternalControllerApi.h b/unreal/Blocks/Plugins/ProjectAirSim/Source/ProjectAirSim/Private/Controllers/ExternalControllerApi.h
+new file mode 100644
+index 0000000..f1332b3
+--- /dev/null
++++ b/unreal/Blocks/Plugins/ProjectAirSim/Source/ProjectAirSim/Private/Controllers/ExternalControllerApi.h
+@@ -0,0 +1,73 @@
++// Copyright (C) 2026 K. T. Lai
++//
++// MIT License.
++//
++// IController that forwards each physics step to an IExternalFlightController
++// supplied by a host module (see ProjectAirSimExternalController.h).
++
++#pragma once
++
++#include <mutex>
++#include <string>
++#include <unordered_map>
++#include <vector>
++
++#include "Controllers/ExternalControllerRegistry.h"
++#include "ProjectAirSimExternalController.h"
++#include "core_sim/actor/robot.hpp"
++#include "core_sim/runtime_components.hpp"
++
++namespace microsoft {
++namespace projectairsim {
++class Imu;
++}  // namespace projectairsim
++}  // namespace microsoft
++
++class FExternalControllerApi : public microsoft::projectairsim::IController {
++ public:
++  static constexpr const char* TypeName = "external-controller-api";
++  static constexpr const char* SettingsKey = "external-controller-api-settings";
++
++  // Impl may be null: the robot then gets zero motor commands (never leave a
++  // robot without a controller, Robot::UpdateActuators does not null-check).
++  FExternalControllerApi(const microsoft::projectairsim::Robot& InRobot,
++                         FExternalFlightControllerPtr InImpl);
++  ~FExternalControllerApi() override;
++
++  // Attach an external controller to every robot in the scene whose
++  // controller type is external-controller-api. Call after SimServer has
++  // loaded the scene and before it starts.
++  static void AttachToScene(microsoft::projectairsim::Scene& Scene);
++
++  // IRuntimeComponent
++  void BeginUpdate() override;
++  void EndUpdate() override;
++  void Reset() override;
++
++  // IController
++  void SetKinematics(
++      const microsoft::projectairsim::Kinematics* InKinematics) override;
++  void Update() override;
++  std::vector<float> GetControlSignals(const std::string& ActuatorId) override;
++  const GimbalState& GetGimbalSignal(const std::string& GimbalId) override;
++
++ private:
++  void ApplyPendingReset();
++
++  microsoft::projectairsim::Robot SimRobot;
++  FExternalFlightControllerPtr Impl;
++  ProjectAirSimExt::FRcMailboxPtr Mailbox;
++  FString RobotId;
++
++  const microsoft::projectairsim::Kinematics* Kinematics = nullptr;
++  microsoft::projectairsim::Imu* ImuSensor = nullptr;
++
++  std::unordered_map<std::string, int> ActuatorIndex;
++  int32 NumMotors = 0;
++
++  std::mutex OutputLock;
++  FExtCtrlOutput Output;
++
++  int64 LastSimNanos = -1;
++  GimbalState DefaultGimbal;
++};
+diff --git a/unreal/Blocks/Plugins/ProjectAirSim/Source/ProjectAirSim/Private/Controllers/ExternalControllerRegistry.cpp b/unreal/Blocks/Plugins/ProjectAirSim/Source/ProjectAirSim/Private/Controllers/ExternalControllerRegistry.cpp
+new file mode 100644
+index 0000000..57a248d
+--- /dev/null
++++ b/unreal/Blocks/Plugins/ProjectAirSim/Source/ProjectAirSim/Private/Controllers/ExternalControllerRegistry.cpp
+@@ -0,0 +1,133 @@
++// Copyright (C) 2026 K. T. Lai
++//
++// MIT License.
++
++#include "Controllers/ExternalControllerRegistry.h"
++
++#include "HAL/PlatformTime.h"
++#include "Misc/ScopeLock.h"
++
++namespace ProjectAirSimExt {
++
++// ---------------------------------------------------------------------------
++// FRcMailbox
++
++void FRcMailbox::Write(const float* Channels, int32 NumChannels,
++                       double WallSeconds) {
++  FRcFrame& Frame = Buffers[WriteIdx];
++  Frame.Count = FMath::Clamp(NumChannels, 0, 16);
++  for (int32 i = 0; i < Frame.Count; ++i) {
++    Frame.Channels[i] = FMath::Clamp(Channels[i], -1.0f, 1.0f);
++  }
++  for (int32 i = Frame.Count; i < 16; ++i) Frame.Channels[i] = 0.0f;
++  Frame.WallSeconds = WallSeconds;
++
++  // Publish: swap our back buffer with the shared one and mark it dirty.
++  const uint8 Old = Shared.exchange(static_cast<uint8>(WriteIdx | DirtyBit),
++                                    std::memory_order_acq_rel);
++  WriteIdx = Old & IndexMask;
++  bEverWritten.store(true, std::memory_order_release);
++}
++
++bool FRcMailbox::ReadLatest(FRcFrame& Out) {
++  if (!bEverWritten.load(std::memory_order_acquire)) return false;
++  if (Shared.load(std::memory_order_acquire) & DirtyBit) {
++    const uint8 Old = Shared.exchange(ReadIdx, std::memory_order_acq_rel);
++    ReadIdx = Old & IndexMask;
++  }
++  Out = Buffers[ReadIdx];
++  return true;
++}
++
++void FRcMailbox::RequestReset(const float PositionNed[3],
++                              const float OrientationWxyz[4]) {
++  FScopeLock Lock(&ResetLock);
++  for (int i = 0; i < 3; ++i) ResetPos[i] = PositionNed[i];
++  for (int i = 0; i < 4; ++i) ResetQuat[i] = OrientationWxyz[i];
++  bResetPending = true;
++  bResetFlag.store(true, std::memory_order_release);
++}
++
++bool FRcMailbox::ConsumeReset(float PositionNed[3], float OrientationWxyz[4]) {
++  // Fast path: no lock unless a reset was requested.
++  if (!bResetFlag.load(std::memory_order_acquire)) return false;
++  FScopeLock Lock(&ResetLock);
++  if (!bResetPending) return false;
++  for (int i = 0; i < 3; ++i) PositionNed[i] = ResetPos[i];
++  for (int i = 0; i < 4; ++i) OrientationWxyz[i] = ResetQuat[i];
++  bResetPending = false;
++  bResetFlag.store(false, std::memory_order_release);
++  return true;
++}
++
++// ---------------------------------------------------------------------------
++// Registry
++
++namespace {
++
++struct FRegistry {
++  FCriticalSection Lock;
++  TMap<FString, FExternalFlightControllerFactory> Factories;
++  TMap<FString, FRcMailboxPtr> Mailboxes;
++};
++
++FRegistry& GetRegistry() {
++  static FRegistry Registry;
++  return Registry;
++}
++
++}  // namespace
++
++FRcMailboxPtr GetOrCreateMailbox(const FString& RobotId) {
++  FRegistry& Registry = GetRegistry();
++  FScopeLock Lock(&Registry.Lock);
++  if (FRcMailboxPtr* Found = Registry.Mailboxes.Find(RobotId)) {
++    return *Found;
++  }
++  FRcMailboxPtr Mailbox = MakeShared<FRcMailbox, ESPMode::ThreadSafe>();
++  Registry.Mailboxes.Add(RobotId, Mailbox);
++  return Mailbox;
++}
++
++FExternalFlightControllerPtr CreateController(const FString& FactoryName,
++                                              const FString& RobotId,
++                                              const FString& SettingsJson) {
++  FExternalFlightControllerFactory Factory;
++  {
++    FRegistry& Registry = GetRegistry();
++    FScopeLock Lock(&Registry.Lock);
++    if (const FExternalFlightControllerFactory* Found =
++            Registry.Factories.Find(FactoryName)) {
++      Factory = *Found;
++    }
++  }
++  if (!Factory) return nullptr;
++  return Factory(RobotId, SettingsJson);
++}
++
++void RegisterControllerFactory(const FString& Name,
++                               FExternalFlightControllerFactory Factory) {
++  FRegistry& Registry = GetRegistry();
++  FScopeLock Lock(&Registry.Lock);
++  Registry.Factories.Add(Name, MoveTemp(Factory));
++}
++
++void UnregisterControllerFactory(const FString& Name) {
++  FRegistry& Registry = GetRegistry();
++  FScopeLock Lock(&Registry.Lock);
++  Registry.Factories.Remove(Name);
++}
++
++void SetRcInput(const FString& RobotId, const float* Channels,
++                int32 NumChannels) {
++  if (Channels == nullptr || NumChannels <= 0) return;
++  GetOrCreateMailbox(RobotId)->Write(Channels, NumChannels,
++                                     FPlatformTime::Seconds());
++}
++
++void RequestReset(const FString& RobotId, const float PositionNed[3],
++                  const float OrientationWxyz[4]) {
++  GetOrCreateMailbox(RobotId)->RequestReset(PositionNed, OrientationWxyz);
++}
++
++}  // namespace ProjectAirSimExt
+diff --git a/unreal/Blocks/Plugins/ProjectAirSim/Source/ProjectAirSim/Private/Controllers/ExternalControllerRegistry.h b/unreal/Blocks/Plugins/ProjectAirSim/Source/ProjectAirSim/Private/Controllers/ExternalControllerRegistry.h
+new file mode 100644
+index 0000000..ce44200
+--- /dev/null
++++ b/unreal/Blocks/Plugins/ProjectAirSim/Source/ProjectAirSim/Private/Controllers/ExternalControllerRegistry.h
+@@ -0,0 +1,66 @@
++// Copyright (C) 2026 K. T. Lai
++//
++// MIT License.
++//
++// Internal side of ProjectAirSimExternalController.h: factory registry and the
++// per-robot mailboxes (RC input, reset requests) shared between the game
++// thread and the sim thread.
++
++#pragma once
++
++#include <atomic>
++
++#include "CoreMinimal.h"
++#include "HAL/CriticalSection.h"
++#include "ProjectAirSimExternalController.h"
++
++namespace ProjectAirSimExt {
++
++struct FRcFrame {
++  int32 Count = 0;
++  float Channels[16] = {0};
++  double WallSeconds = 0.0;  // FPlatformTime::Seconds() when pushed
++};
++
++// Single-producer / single-consumer triple buffer. Wait-free on both sides.
++class FRcMailbox {
++ public:
++  // Producer (one thread).
++  void Write(const float* Channels, int32 NumChannels, double WallSeconds);
++
++  // Consumer (sim thread). Returns false if nothing was ever written.
++  bool ReadLatest(FRcFrame& Out);
++
++  // Reset request (any thread -> sim thread).
++  void RequestReset(const float PositionNed[3], const float OrientationWxyz[4]);
++  bool ConsumeReset(float PositionNed[3], float OrientationWxyz[4]);
++
++ private:
++  static constexpr uint8 DirtyBit = 0x4;
++  static constexpr uint8 IndexMask = 0x3;
++
++  FRcFrame Buffers[3];
++  std::atomic<uint8> Shared{1};  // index of the shared buffer (+ dirty bit)
++  uint8 WriteIdx = 0;            // owned by the producer
++  uint8 ReadIdx = 2;             // owned by the consumer
++  std::atomic<bool> bEverWritten{false};
++
++  FCriticalSection ResetLock;
++  bool bResetPending = false;
++  float ResetPos[3] = {0, 0, 0};
++  float ResetQuat[4] = {1, 0, 0, 0};
++  std::atomic<bool> bResetFlag{false};
++};
++
++using FRcMailboxPtr = TSharedPtr<FRcMailbox, ESPMode::ThreadSafe>;
++
++// Returns the mailbox for a robot, creating it if needed. Thread-safe.
++FRcMailboxPtr GetOrCreateMailbox(const FString& RobotId);
++
++// Creates a controller with the named factory, or nullptr if the factory is
++// missing or refuses. Thread-safe.
++FExternalFlightControllerPtr CreateController(const FString& FactoryName,
++                                              const FString& RobotId,
++                                              const FString& SettingsJson);
++
++}  // namespace ProjectAirSimExt
+diff --git a/unreal/Blocks/Plugins/ProjectAirSim/Source/ProjectAirSim/Private/ProjectAirSimGameMode.cpp b/unreal/Blocks/Plugins/ProjectAirSim/Source/ProjectAirSim/Private/ProjectAirSimGameMode.cpp
+index 75d4967..fcc489e 100644
+--- a/unreal/Blocks/Plugins/ProjectAirSim/Source/ProjectAirSim/Private/ProjectAirSimGameMode.cpp
++++ b/unreal/Blocks/Plugins/ProjectAirSim/Source/ProjectAirSim/Private/ProjectAirSimGameMode.cpp
+@@ -6,7 +6,10 @@
+ #include "ProjectAirSimGameMode.h"
+ 
+ #include <exception>
++#include <string>
+ 
++#include "Misc/CommandLine.h"
++#include "Misc/Parse.h"
+ #include "Runtime/Core/Public/Misc/Paths.h"
+ 
+ AProjectAirSimGameMode::AProjectAirSimGameMode(
+@@ -20,7 +23,40 @@ AProjectAirSimGameMode::AProjectAirSimGameMode(
+ void AProjectAirSimGameMode::StartPlay() {
+   Super::StartPlay();
+ 
+-  UnrealSimLoader.LaunchSimulation(this->GetWorld());
++  std::string SceneJson;
++  FString ScenePath = GetInitialSceneConfigPath();
++  if (!ScenePath.IsEmpty()) {
++    if (FPaths::IsRelative(ScenePath)) {
++      ScenePath = FPaths::Combine(FPaths::ProjectDir(), ScenePath);
++    }
++    FString Error;
++    if (!AUnrealSimLoader::ResolveSceneConfig(ScenePath, SceneJson, Error)) {
++      UE_LOG(LogTemp, Error,
++             TEXT("ProjectAirSim: cannot load scene config '%s': %s"),
++             *ScenePath, *Error);
++      SceneJson.clear();
++    }
++  }
++
++  UnrealSimLoader.LaunchSimulation(this->GetWorld(), SceneJson,
++                                   TCHAR_TO_UTF8(*GetSimBindAddress()));
++}
++
++FString AProjectAirSimGameMode::GetInitialSceneConfigPath() const {
++  FString Path;
++  if (FParse::Value(FCommandLine::Get(), TEXT("sceneconfig="), Path)) {
++    return Path;
++  }
++  return FString();
++}
++
++FString AProjectAirSimGameMode::GetSimBindAddress() const {
++  FString Address;
++  if (FParse::Value(FCommandLine::Get(), TEXT("pasbindip="), Address) &&
++      !Address.IsEmpty()) {
++    return Address;
++  }
++  return TEXT("*");
+ }
+ 
+ void AProjectAirSimGameMode::EndPlay(const EEndPlayReason::Type EndPlayReason) {
+diff --git a/unreal/Blocks/Plugins/ProjectAirSim/Source/ProjectAirSim/Private/Robot/UnrealRobot.cpp b/unreal/Blocks/Plugins/ProjectAirSim/Source/ProjectAirSim/Private/Robot/UnrealRobot.cpp
+index 72e6049..a1c3c55 100644
+--- a/unreal/Blocks/Plugins/ProjectAirSim/Source/ProjectAirSim/Private/Robot/UnrealRobot.cpp
++++ b/unreal/Blocks/Plugins/ProjectAirSim/Source/ProjectAirSim/Private/Robot/UnrealRobot.cpp
+@@ -16,6 +16,8 @@
+ #include "Components/StaticMeshComponent.h"
+ #include "Engine/TextureRenderTarget2D.h"
+ #include "GameFramework/GameUserSettings.h"
++#include "HAL/IConsoleManager.h"
++#include "HAL/PlatformTime.h"
+ #include "Misc/ScopeLock.h"
+ #include "ProjectAirSim.h"
+ #include "Runtime/Engine/Classes/Engine/StaticMesh.h"
+@@ -404,16 +406,106 @@ void AUnrealRobot::InitializeSensors(
+       });
+ }
+ 
++// Game hook: render the robot at an interpolated pose instead of the
++// latest sim pose, so motion is smooth when the sim step and the frame rate
++// differ.
++static TAutoConsoleVariable<int32> CVarPoseInterp(
++    TEXT("pas.Robot.PoseInterp"), 0,
++    TEXT("1: render robots at a pose interpolated between sim steps "
++         "(non-Unreal physics). 0 (default): latest sim pose."),
++    ECVF_Default);
++
++static TAutoConsoleVariable<float> CVarPoseInterpDelayMs(
++    TEXT("pas.Robot.PoseInterpDelayMs"), -1.0f,
++    TEXT("Render delay behind the newest sim pose in ms. Negative (default): "
++         "1.5 sim steps."),
++    ECVF_Default);
++
++// A jump larger than this between consecutive sim poses is a teleport: the
++// history is cleared and the robot moves without a collision sweep.
++static constexpr float PoseTeleportDistanceM = 2.0f;
++
++void AUnrealRobot::InterpolatePose(projectairsim::Pose& OutPose,
++                                   TimeNano& OutSimNanos) const {
++  const FPoseSample& Newest = PoseHistory[PoseHistoryHead];
++  OutPose = Newest.Pose;
++  OutSimNanos = Newest.SimNanos;
++  if (PoseHistoryCount < 2) return;
++
++  const FPoseSample& Prev =
++      PoseHistory[(PoseHistoryHead - 1 + PoseHistorySize) % PoseHistorySize];
++  const TimeNano Step =
++      FMath::Max<TimeNano>(Newest.SimNanos - Prev.SimNanos, 1);
++  const float DelayMs = CVarPoseInterpDelayMs.GetValueOnAnyThread();
++  const TimeNano Delay = DelayMs < 0.0f
++                             ? Step * 3 / 2
++                             : static_cast<TimeNano>(DelayMs * 1.0e6);
++
++  // Estimate the current sim time from the wall time since the newest sample
++  // arrived (capped so a paused sim freezes on its newest pose).
++  const double SinceNewest =
++      FMath::Clamp(FPlatformTime::Seconds() - Newest.WallSeconds, 0.0, 0.05);
++  const TimeNano RenderTime =
++      Newest.SimNanos + static_cast<TimeNano>(SinceNewest * 1.0e9) - Delay;
++  if (RenderTime >= Newest.SimNanos) return;  // no extrapolation
++
++  for (int32 k = 0; k < PoseHistoryCount - 1; ++k) {
++    const FPoseSample& B =
++        PoseHistory[(PoseHistoryHead - k + PoseHistorySize) % PoseHistorySize];
++    const FPoseSample& A =
++        PoseHistory[(PoseHistoryHead - k - 1 + PoseHistorySize) %
++                    PoseHistorySize];
++    if (RenderTime >= A.SimNanos) {
++      const float Alpha =
++          static_cast<float>(RenderTime - A.SimNanos) /
++          static_cast<float>(FMath::Max<TimeNano>(B.SimNanos - A.SimNanos, 1));
++      OutPose.position =
++          A.Pose.position + (B.Pose.position - A.Pose.position) * Alpha;
++      OutPose.orientation =
++          A.Pose.orientation.slerp(Alpha, B.Pose.orientation);
++      OutSimNanos = RenderTime;
++      return;
++    }
++  }
++
++  // Older than the history: use the oldest sample.
++  const FPoseSample& Oldest =
++      PoseHistory[(PoseHistoryHead - (PoseHistoryCount - 1) + PoseHistorySize) %
++                  PoseHistorySize];
++  OutPose = Oldest.Pose;
++  OutSimNanos = Oldest.SimNanos;
++}
++
+ void AUnrealRobot::MoveRobotToUnrealPose(bool bUseCollisionSweep) {
+-  if (RobotRootLink == nullptr || bHasKinematicsUpdated == false) return;
++  if (RobotRootLink == nullptr) return;
++
++  projectairsim::Pose TgtPose;
++  bool bTeleport = false;
++  {
++    // Copy target pose data under the lock (the sim thread writes it)
++    FScopeLock ScopeLock(&UpdateMutex);
++    const bool bInterp =
++        CVarPoseInterp.GetValueOnAnyThread() != 0 &&
++        SimRobot.GetPhysicsType() !=
++            projectairsim::PhysicsType::kUnrealPhysics &&
++        PoseHistoryCount > 0;
++    if (bInterp) {
++      TimeNano PoseTime = 0;
++      InterpolatePose(TgtPose, PoseTime);
++      UnrealPoseUpdatedTimeStamp = PoseTime;
++      bTeleport = bPoseTeleported;
++      bPoseTeleported = false;
++    } else {
++      if (bHasKinematicsUpdated == false) return;
++      TgtPose = RobotKinematics.pose;
++      UnrealPoseUpdatedTimeStamp = KinematicsUpdatedTimeStamp;
++    }
++    bHasKinematicsUpdated = false;  // done processing kinematics, clear flag
++  }
+ 
+   // Clear robot's has_collided flag before trying to move again
+   SimRobot.SetHasCollided(false);
+-
+-  // Copy target pose data in case it gets updated again while processing
+-  projectairsim::Pose TgtPose = RobotKinematics.pose;
+-  UnrealPoseUpdatedTimeStamp = KinematicsUpdatedTimeStamp;
+-  bHasKinematicsUpdated = false;  // done processing kinematics, clear flag
++  if (bTeleport) bUseCollisionSweep = false;
+ 
+   // Use local copy of target pose to do actual robot pose update
+   const FVector TgtLocNEU =
+@@ -468,6 +560,29 @@ void AUnrealRobot::SetRobotKinematics(const projectairsim::Kinematics& InKin,
+   KinematicsUpdatedTimeStamp = InTimestamp;
+   bHasKinematicsUpdated = true;
+ 
++  // Pose history for render interpolation
++  if (PoseHistoryCount > 0) {
++    const FPoseSample& Newest = PoseHistory[PoseHistoryHead];
++    if (InTimestamp < Newest.SimNanos ||
++        (InKin.pose.position - Newest.Pose.position).norm() >
++            PoseTeleportDistanceM) {
++      PoseHistoryCount = 0;  // time went back or the robot teleported
++      bPoseTeleported = true;
++    }
++  }
++  if (PoseHistoryCount > 0 &&
++      InTimestamp == PoseHistory[PoseHistoryHead].SimNanos) {
++    PoseHistory[PoseHistoryHead].Pose = InKin.pose;  // same step, replace
++    PoseHistory[PoseHistoryHead].WallSeconds = FPlatformTime::Seconds();
++  } else {
++    PoseHistoryHead = (PoseHistoryHead + 1) % PoseHistorySize;
++    FPoseSample& Sample = PoseHistory[PoseHistoryHead];
++    Sample.SimNanos = InTimestamp;
++    Sample.WallSeconds = FPlatformTime::Seconds();
++    Sample.Pose = InKin.pose;
++    PoseHistoryCount = FMath::Min(PoseHistoryCount + 1, PoseHistorySize);
++  }
++
+   // UnrealLogger::Log(projectairsim::LogLevel::kTrace,
+   //                   TEXT("UpdateRobotTargetKinematics xyz=%f, %f, %f"),
+   //                   RobotTargetKinematics.pose.position.x(),
+diff --git a/unreal/Blocks/Plugins/ProjectAirSim/Source/ProjectAirSim/Private/Robot/UnrealRobot.h b/unreal/Blocks/Plugins/ProjectAirSim/Source/ProjectAirSim/Private/Robot/UnrealRobot.h
+index 61db5c0..1c5e580 100644
+--- a/unreal/Blocks/Plugins/ProjectAirSim/Source/ProjectAirSim/Private/Robot/UnrealRobot.h
++++ b/unreal/Blocks/Plugins/ProjectAirSim/Source/ProjectAirSim/Private/Robot/UnrealRobot.h
+@@ -129,5 +129,22 @@ class AUnrealRobot : public AActor {
+   bool bHasUnrealPoseUpdated = false;
+   TimeNano UnrealPoseUpdatedTimeStamp = 0;
+ 
++  // Pose history for render interpolation (pas.Robot.PoseInterp, game
++  // hook). Written by SetRobotKinematics on the sim thread, read by
++  // MoveRobotToUnrealPose on the game thread, both under UpdateMutex.
++  struct FPoseSample {
++    TimeNano SimNanos = 0;
++    double WallSeconds = 0.0;
++    microsoft::projectairsim::Pose Pose;
++  };
++  static constexpr int32 PoseHistorySize = 8;
++  FPoseSample PoseHistory[PoseHistorySize];
++  int32 PoseHistoryCount = 0;
++  int32 PoseHistoryHead = 0;  // index of the newest sample
++  bool bPoseTeleported = false;
++
++  void InterpolatePose(microsoft::projectairsim::Pose& OutPose,
++                       TimeNano& OutSimNanos) const;
++
+   TMap<FString, ActuatedFTransform> RobotActuatedTransforms;
+ };
+diff --git a/unreal/Blocks/Plugins/ProjectAirSim/Source/ProjectAirSim/Private/UnrealScene.cpp b/unreal/Blocks/Plugins/ProjectAirSim/Source/ProjectAirSim/Private/UnrealScene.cpp
+index 1b40b6c..fc22a38 100644
+--- a/unreal/Blocks/Plugins/ProjectAirSim/Source/ProjectAirSim/Private/UnrealScene.cpp
++++ b/unreal/Blocks/Plugins/ProjectAirSim/Source/ProjectAirSim/Private/UnrealScene.cpp
+@@ -23,6 +23,31 @@
+ #include "World/WeatherLib.h"
+ #include "core_sim/clock.hpp"
+ #include "Sensors/UnrealCamera.h"
++#include "HAL/IConsoleManager.h"
++#include "HAL/PlatformTime.h"
++
++// Game hook: games render every frame regardless of whether the sim has
++// produced a new step, so they turn this off. The robot pose is then smoothed
++// by pas.Robot.PoseInterp instead.
++static TAutoConsoleVariable<int32> CVarSyncGamePauseToSimClock(
++    TEXT("pas.SyncGamePauseToSimClock"), 1,
++    TEXT("1 (default): pause Unreal whenever the sim clock has not advanced "
++         "(non-Unreal physics). 0: never pause, render every frame."),
++    ECVF_Default);
++
++// Game hook: keep a steppable sim clock on wall-clock time from the game
++// thread. The scheduler's own pacing sleeps between steps, and on Windows a
++// sleep rounds up to the 15.6 ms timer tick unless the process raised the
++// timer resolution (Windows 11 ignores that for hidden windows), so a 2 ms
++// step can run several times slower than real time. With this on, set the
++// scene's real-time-update-rate below step-ns (e.g. 0.5 ms for a 2 ms step):
++// the scheduler then never sleeps and this paces it with
++// ContinueUntilSimTime(). Overrides client pause requests while on.
++static TAutoConsoleVariable<int32> CVarSimRealTimePacing(
++    TEXT("pas.SimRealTimePacing"), 0,
++    TEXT("1: pace a steppable sim clock to wall-clock time every frame. "
++         "0 (default): the scheduler's own real-time-update-rate pacing."),
++    ECVF_Default);
+ 
+ namespace projectairsim = microsoft::projectairsim;
+ 
+@@ -463,10 +488,19 @@ void AUnrealScene::Tick(float DeltaTime) {
+     // Unreal time follows after SimClock so just check if sim time has
+     // advanced to decide if Unreal needs to pause/resume to stay in sync.
+     cur_sim_time = projectairsim::SimClock::Get()->NowSimNanos();
+-    if (is_unreal_paused && unreal_time < cur_sim_time) {
+-      UGameplayStatics::SetGamePaused(unreal_world, false);
+-    } else if (!is_unreal_paused && unreal_time >= cur_sim_time) {
+-      UGameplayStatics::SetGamePaused(unreal_world, true);
++    if (CVarSimRealTimePacing.GetValueOnGameThread() != 0 && sim_scene &&
++        sim_scene->GetClockSettings().type ==
++            projectairsim::ClockType::kSteppable) {
++      PaceSimToWallClock(cur_sim_time);
++    } else {
++      pacing_wall_start_ = -1.0;
++    }
++    if (CVarSyncGamePauseToSimClock.GetValueOnGameThread() != 0) {
++      if (is_unreal_paused && unreal_time < cur_sim_time) {
++        UGameplayStatics::SetGamePaused(unreal_world, false);
++      } else if (!is_unreal_paused && unreal_time >= cur_sim_time) {
++        UGameplayStatics::SetGamePaused(unreal_world, true);
++      }
+     }
+   }
+ 
+@@ -493,6 +527,30 @@ void AUnrealScene::Tick(float DeltaTime) {
+   if (unreal_viewport_camera_) unreal_viewport_camera_->Tick(DeltaTime);
+ }
+ 
++void AUnrealScene::PaceSimToWallClock(TimeNano cur_sim_time) {
++  const double now = FPlatformTime::Seconds();
++  const TimeNano step = sim_scene->GetClockSettings().step;
++  if (pacing_wall_start_ < 0.0) {
++    pacing_wall_start_ = now;
++    pacing_sim_start_ = cur_sim_time;
++  }
++  TimeNano target =
++      pacing_sim_start_ +
++      static_cast<TimeNano>((now - pacing_wall_start_) * 1.0e9);
++
++  // After a hitch (breakpoint, level load, slow machine) drop the backlog
++  // instead of fast-forwarding through it.
++  constexpr TimeNano kMaxLagNanos = 100'000'000;
++  if (target - cur_sim_time > kMaxLagNanos) {
++    pacing_wall_start_ = now;
++    pacing_sim_start_ = cur_sim_time;
++    target = cur_sim_time;
++  }
++
++  // Run up to two steps ahead of the wall clock until the next frame.
++  projectairsim::SimClock::Get()->ContinueUntilSimTime(target + 2 * step);
++}
++
+ AActor* AUnrealScene::FindActor(const std::string& object_name) const {
+   if (world_api) return world_api->FindActor(object_name);
+   return nullptr;
+diff --git a/unreal/Blocks/Plugins/ProjectAirSim/Source/ProjectAirSim/Private/UnrealScene.h b/unreal/Blocks/Plugins/ProjectAirSim/Source/ProjectAirSim/Private/UnrealScene.h
+index 50ac6de..cafd67b 100644
+--- a/unreal/Blocks/Plugins/ProjectAirSim/Source/ProjectAirSim/Private/UnrealScene.h
++++ b/unreal/Blocks/Plugins/ProjectAirSim/Source/ProjectAirSim/Private/UnrealScene.h
+@@ -51,6 +51,11 @@ class AUnrealScene : public AActor {
+ 
+   void Tick(float DeltaTime) override;
+ 
++  // pas.SimRealTimePacing (game hook)
++  void PaceSimToWallClock(TimeNano cur_sim_time);
++  double pacing_wall_start_ = -1.0;
++  TimeNano pacing_sim_start_ = 0;
++
+   bool GetUnrealBoundingBox3D(
+       const std::string& ObjectName,
+       microsoft::projectairsim::BoxAlignment BoxAlignment,
+diff --git a/unreal/Blocks/Plugins/ProjectAirSim/Source/ProjectAirSim/Private/UnrealSimLoader.cpp b/unreal/Blocks/Plugins/ProjectAirSim/Source/ProjectAirSim/Private/UnrealSimLoader.cpp
+index c0d9e3e..c7aee03 100644
+--- a/unreal/Blocks/Plugins/ProjectAirSim/Source/ProjectAirSim/Private/UnrealSimLoader.cpp
++++ b/unreal/Blocks/Plugins/ProjectAirSim/Source/ProjectAirSim/Private/UnrealSimLoader.cpp
+@@ -10,12 +10,18 @@
+ #include <string>
+ #include <unordered_map>
+ 
++#include "Controllers/ExternalControllerApi.h"
+ #include "Engine/Engine.h"
+ #include "Interfaces/IPluginManager.h"
+ #include "Kismet/KismetSystemLibrary.h"
++#include "Misc/FileHelper.h"
++#include "Misc/Paths.h"
+ #include "ProjectAirSim.h"
++#include "Renderers/GISRenderer.h"
+ #include "UnrealLogger.h"
+ #include "UnrealScene.h"
++#include "UnrealSimTopicData.h"
++#include "json.hpp"
+ #include "simserver.hpp"
+ #include "Constant.h"
+ 
+@@ -57,6 +63,12 @@ AUnrealSimLoader::~AUnrealSimLoader() {
+ }
+ 
+ void AUnrealSimLoader::LaunchSimulation(UWorld* World) {
++  LaunchSimulation(World, std::string(), std::string("*"));
++}
++
++void AUnrealSimLoader::LaunchSimulation(UWorld* World,
++                                        const std::string& InitialSceneJson,
++                                        const std::string& BindAddress) {
+   UnrealLogger::Log(
+       projectairsim::LogLevel::kTrace,
+       TEXT("[AUnrealSimLoader::LaunchSimulation()] Launching simulation "
+@@ -82,11 +94,39 @@ void AUnrealSimLoader::LaunchSimulation(UWorld* World) {
+     std::string TopicsPort = LoadTopicsPort();
+     std::string ServicesPort = LoadServicesPort();
+ 
+-    // // Load simulator and default scene
+-    SimServer->LoadSimulator(std::stoi(TopicsPort), std::stoi(ServicesPort),
+-                             client_auth_public_key);
+-
+-    SimServer->LoadScene();
++    // Load simulator, binding the topic/service ports to BindAddress
++    if (BindAddress.empty() || BindAddress == "*") {
++      SimServer->LoadSimulator(std::stoi(TopicsPort), std::stoi(ServicesPort),
++                               client_auth_public_key);
++    } else {
++      nlohmann::json SimConfig = {
++          {"id", "Sim"},
++          {"default-scene", "{\"id\": \"DefaultScene\"}"},
++          {"topics", {{"ip", BindAddress}, {"port", std::stoi(TopicsPort)}}},
++          {"services",
++           {{"ip", BindAddress}, {"port", std::stoi(ServicesPort)}}}};
++      SimServer->GetSimulator()->LoadSimulator(SimConfig.dump(),
++                                               client_auth_public_key);
++      SimServer->RegisterServiceMethods();
++      UnrealLogger::Log(projectairsim::LogLevel::kTrace,
++                        TEXT("[AUnrealSimLoader] Sim ports bound to %hs."),
++                        BindAddress.c_str());
++    }
++
++    // Load the initial scene (or the default empty scene)
++    if (InitialSceneJson.empty()) {
++      SimServer->LoadScene();
++    } else {
++      try {
++        SimServer->LoadScene(InitialSceneJson);
++      } catch (const std::exception& SceneException) {
++        UnrealLogger::Log(projectairsim::LogLevel::kError,
++                          TEXT("[AUnrealSimLoader] Initial scene failed to "
++                               "load: '%hs'. Loading the default scene."),
++                          SceneException.what());
++        SimServer->LoadScene();
++      }
++    }
+ 
+     // Load UE UnrealRobots for each sim robot in scene with
+     // SpawnActorDeferred() so that it will not trigger BeginPlay() until
+@@ -345,6 +385,10 @@ void AUnrealSimLoader::LoadUnrealScene() {
+ 
+   UnrealHelpers::RunCommandOnGameThread(
+       [this, &Scene]() {
++        // Give robots using external-controller-api their host controller
++        // before the scene starts (Robot::BeginUpdate calls the controller).
++        FExternalControllerApi::AttachToScene(Scene);
++
+         {
+           // Create an UnrealScene actor and have it load all of the Unreal
+           // Actors
+@@ -486,3 +530,99 @@ void AUnrealSimLoader::UnloadUnrealScene() {
+   // Force GC to clear out old actors so new actors can use their original names
+   UnrealHelpers::ForceUnrealGarbageCollection();
+ }
++
++bool AUnrealSimLoader::ReloadScene(const std::string& SceneJson) {
++  // Same sequence as the LoadScene service (SimServer::SimReloadSceneWithJSON)
++  // but callable from the host.
++  try {
++    SimServer->StopScene();
++    StopUnrealScene();
++    UnloadUnrealScene();
++    SimServer->UnloadScene();
++
++    SimServer->LoadScene(SceneJson);
++    SimServer->RegisterServiceMethods();
++    LoadUnrealScene();
++    StartUnrealScene();
++    SimServer->StartScene();
++    return true;
++  } catch (const std::exception& Exception) {
++    UnrealLogger::Log(projectairsim::LogLevel::kError,
++                      TEXT("[AUnrealSimLoader::ReloadScene()] Exception '%hs'. "
++                           "Loading the default scene."),
++                      Exception.what());
++  } catch (...) {
++    UnrealLogger::Log(projectairsim::LogLevel::kError,
++                      TEXT("[AUnrealSimLoader::ReloadScene()] Unknown "
++                           "exception. Loading the default scene."));
++  }
++
++  try {
++    SimServer->LoadScene();
++    SimServer->RegisterServiceMethods();
++  } catch (...) {
++  }
++  return false;
++}
++
++namespace {
++
++bool LoadJsonc(const FString& Path, nlohmann::json& Out, FString& OutError) {
++  FString Text;
++  if (!FFileHelper::LoadFileToString(Text, *Path)) {
++    OutError = FString::Printf(TEXT("cannot read '%s'"), *Path);
++    return false;
++  }
++  try {
++    Out = nlohmann::json::parse(std::string(TCHAR_TO_UTF8(*Text)), nullptr,
++                                /*allow_exceptions=*/true,
++                                /*ignore_comments=*/true);
++  } catch (const std::exception& Ex) {
++    OutError = FString::Printf(TEXT("cannot parse '%s': %hs"), *Path, Ex.what());
++    return false;
++  }
++  return true;
++}
++
++bool InlineConfig(nlohmann::json& Entry, const char* Key, const FString& BaseDir,
++                  FString& OutError) {
++  if (!Entry.contains(Key) || !Entry[Key].is_string()) return true;
++  const FString Rel = UTF8_TO_TCHAR(Entry[Key].get<std::string>().c_str());
++  const FString Full = FPaths::ConvertRelativePathToFull(BaseDir, Rel);
++  nlohmann::json Sub;
++  if (!LoadJsonc(Full, Sub, OutError)) return false;
++  Entry[Key] = Sub;
++  return true;
++}
++
++}  // namespace
++
++bool AUnrealSimLoader::ResolveSceneConfig(const FString& ScenePath,
++                                          std::string& OutJson,
++                                          FString& OutError) {
++  nlohmann::json Scene;
++  const FString FullPath = FPaths::ConvertRelativePathToFull(ScenePath);
++  if (!LoadJsonc(FullPath, Scene, OutError)) return false;
++  const FString BaseDir = FPaths::GetPath(FullPath);
++
++  if (Scene.contains("actors") && Scene["actors"].is_array()) {
++    for (auto& Actor : Scene["actors"]) {
++      if (Actor.value("type", std::string()) == "robot" &&
++          !InlineConfig(Actor, "robot-config", BaseDir, OutError)) {
++        return false;
++      }
++    }
++  }
++  if (Scene.contains("environment-actors") &&
++      Scene["environment-actors"].is_array()) {
++    for (auto& EnvActor : Scene["environment-actors"]) {
++      if (EnvActor.value("type", std::string()) == "env_actor" &&
++          !InlineConfig(EnvActor, "env-actor-config", BaseDir, OutError)) {
++        return false;
++      }
++    }
++  }
++
++  OutJson = Scene.dump();
++  return true;
++}
+diff --git a/unreal/Blocks/Plugins/ProjectAirSim/Source/ProjectAirSim/Public/ProjectAirSimExternalController.h b/unreal/Blocks/Plugins/ProjectAirSim/Source/ProjectAirSim/Public/ProjectAirSimExternalController.h
+new file mode 100644
+index 0000000..2ce2fcc
+--- /dev/null
++++ b/unreal/Blocks/Plugins/ProjectAirSim/Source/ProjectAirSim/Public/ProjectAirSimExternalController.h
+@@ -0,0 +1,116 @@
++// Copyright (C) 2026 K. T. Lai
++//
++// MIT License.
++//
++// External flight-controller hook for Project AirSim.
++//
++// Lets a game/host module plug its own multirotor controller into the sim
++// physics loop. A robot whose config has
++//
++//   "controller": {
++//     "type": "external-controller-api",
++//     "external-controller-api-settings": {
++//       "factory": "<name registered with RegisterExternalControllerFactory>",
++//       "actuator-order": [ {"id": "Prop_FR_actuator"}, ... ],
++//       ...any other settings, passed through as JSON...
++//     }
++//   }
++//
++// gets an IExternalFlightController created by that factory when the scene
++// loads. Step() runs on the sim thread once per physics step, after physics and
++// sensors and before the actuators read their commands.
++//
++// This header only contains plain data and UE core types. It does not include
++// any SimLibs headers. Host modules must not include SimLibs headers either:
++// SimLibs are static libraries, so a second copy would be linked into the host
++// module, with its own singletons (e.g. SimClock).
++
++#pragma once
++
++#include "CoreMinimal.h"
++#include "Templates/Function.h"
++#include "Templates/SharedPointer.h"
++
++// Sim state handed to the controller each step. Frames: world NED, body FRD,
++// quaternions are Hamilton (w, x, y, z) rotating body -> NED.
++struct FExtCtrlState {
++  int64 SimTimeNanos = 0;  // sim time of this step
++  int64 DtNanos = 0;       // sim time since the previous step (0 on first)
++
++  // IMU (from the robot's first enabled IMU sensor, with its noise model).
++  // If the robot has no IMU, these are ground truth and bHasImu is false.
++  bool bHasImu = false;
++  float Gyro[3] = {0, 0, 0};   // rad/s, body FRD
++  float Accel[3] = {0, 0, 0};  // specific force m/s^2, body FRD (~(0,0,-g) level)
++
++  // Ground truth kinematics.
++  float OrientationWxyz[4] = {1, 0, 0, 0};
++  float PositionNed[3] = {0, 0, 0};       // m
++  float VelocityNed[3] = {0, 0, 0};       // m/s
++  float AngularVelBody[3] = {0, 0, 0};    // rad/s, body FRD
++
++  // Latest RC frame pushed with SetExternalRcInput().
++  bool bRcValid = false;   // false until the first frame arrives
++  int32 RcCount = 0;
++  float Rc[16] = {0};      // [-1, 1]
++  int64 RcAgeNanos = 0;    // wall time since the frame was pushed
++
++  // Collision reported by Unreal for this robot since the last pose update.
++  bool bCollided = false;
++  float CollisionNormalNed[3] = {0, 0, 0};
++};
++
++// Controller output. Motor[i] is the command for actuator-order[i], [0, 1].
++struct FExtCtrlOutput {
++  static constexpr int32 MaxMotors = 8;
++  int32 NumMotors = 0;
++  float Motor[MaxMotors] = {0};
++};
++
++// Implemented by the host. All methods except the factory run on the sim
++// thread: no UObject access, no allocation in Step().
++class IExternalFlightController {
++ public:
++  virtual ~IExternalFlightController() = default;
++
++  // Scene started. NumMotors = length of actuator-order.
++  virtual void OnBegin(const FString& RobotId, int32 NumMotors) {}
++
++  // One physics step. Write NumMotors commands into Out.
++  virtual void Step(const FExtCtrlState& State, FExtCtrlOutput& Out) = 0;
++
++  // Scene stopped or controller reset.
++  virtual void OnEnd() {}
++  virtual void OnReset() {}
++};
++
++using FExternalFlightControllerPtr =
++    TSharedPtr<IExternalFlightController, ESPMode::ThreadSafe>;
++
++// Creates a controller for a robot. SettingsJson is the
++// "external-controller-api-settings" object. Called on the game thread when a
++// scene loads. Return nullptr to refuse (the robot then gets zero outputs).
++using FExternalFlightControllerFactory = TFunction<FExternalFlightControllerPtr(
++    const FString& RobotId, const FString& SettingsJson)>;
++
++namespace ProjectAirSimExt {
++
++PROJECTAIRSIM_API void RegisterControllerFactory(
++    const FString& Name, FExternalFlightControllerFactory Factory);
++
++PROJECTAIRSIM_API void UnregisterControllerFactory(const FString& Name);
++
++// Push the latest RC channels for a robot (values in [-1, 1], up to 16).
++// Call from one thread only (normally the game thread). Wait-free; the sim
++// thread sees the newest frame at its next step.
++PROJECTAIRSIM_API void SetRcInput(const FString& RobotId, const float* Channels,
++                                  int32 NumChannels);
++
++// Teleport a robot to a pose (NED metres, quaternion wxyz) with zero
++// velocity. Applied on the sim thread at the robot's next controller step.
++// Only works for robots using external-controller-api.
++PROJECTAIRSIM_API void RequestReset(const FString& RobotId,
++                                    const float PositionNed[3],
++                                    const float OrientationWxyz[4]);
++
++}  // namespace ProjectAirSimExt
+diff --git a/unreal/Blocks/Plugins/ProjectAirSim/Source/ProjectAirSim/Public/ProjectAirSimGameMode.h b/unreal/Blocks/Plugins/ProjectAirSim/Source/ProjectAirSim/Public/ProjectAirSimGameMode.h
+index 405eade..18c418f 100644
+--- a/unreal/Blocks/Plugins/ProjectAirSim/Source/ProjectAirSim/Public/ProjectAirSimGameMode.h
++++ b/unreal/Blocks/Plugins/ProjectAirSim/Source/ProjectAirSim/Public/ProjectAirSimGameMode.h
+@@ -23,6 +23,19 @@ class PROJECTAIRSIM_API AProjectAirSimGameMode : public AGameModeBase {
+ 
+   void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
+ 
++ protected:
++  // Scene config file (JSONC) to load at start without a client. Default:
++  // the -sceneconfig=<path> command-line argument, else empty (the default
++  // empty scene, upstream behaviour). Relative paths are relative to the
++  // project directory.
++  virtual FString GetInitialSceneConfigPath() const;
++
++  // IP address the sim's topic/service ports bind to. Default: the
++  // -pasbindip=<ip> command-line argument, else "*" (all interfaces).
++  virtual FString GetSimBindAddress() const;
++
++  AUnrealSimLoader& GetSimLoader() { return UnrealSimLoader; }
++
+  private:
+   AUnrealSimLoader UnrealSimLoader;
+ };
+diff --git a/unreal/Blocks/Plugins/ProjectAirSim/Source/ProjectAirSim/Public/UnrealSimLoader.h b/unreal/Blocks/Plugins/ProjectAirSim/Source/ProjectAirSim/Public/UnrealSimLoader.h
+index 0185806..0b8f6be 100644
+--- a/unreal/Blocks/Plugins/ProjectAirSim/Source/ProjectAirSim/Public/UnrealSimLoader.h
++++ b/unreal/Blocks/Plugins/ProjectAirSim/Source/ProjectAirSim/Public/UnrealSimLoader.h
+@@ -11,9 +11,12 @@
+ 
+ #include "CoreMinimal.h"
+ #include "Engine/EngineTypes.h"
+-#include "Renderers/GISRenderer.h"
+-#include "UnrealScene.h"
+-#include "UnrealSimTopicData.h"
++
++// Forward declarations keep this header free of private plugin headers so
++// that host game modules can include ProjectAirSimGameMode.h (game hook).
++class AUnrealScene;
++class AGISRenderer;
++class AUnrealSimTopicData;
+ 
+ namespace microsoft {
+ namespace projectairsim {
+@@ -37,6 +40,23 @@ class PROJECTAIRSIM_API AUnrealSimLoader {
+ 
+   void LaunchSimulation(UWorld* World);
+ 
++  // Launch with an initial scene (resolved JSON, see ResolveSceneConfig) and
++  // the IP address the topic/service ports bind to ("*" = all interfaces,
++  // the upstream default; "127.0.0.1" = local only). Empty InitialSceneJson
++  // loads the default empty scene, as LaunchSimulation(World) does.
++  void LaunchSimulation(UWorld* World, const std::string& InitialSceneJson,
++                        const std::string& BindAddress);
++
++  // Replace the running scene, same as the LoadScene service a client calls.
++  // Returns false (and logs) on failure; the default scene is loaded then.
++  bool ReloadScene(const std::string& SceneJson);
++
++  // Read a scene config (JSONC, comments allowed) and inline each robot's
++  // "robot-config" and env actor's "env-actor-config" file, resolved relative
++  // to the scene file's folder. Produces the JSON the sim expects.
++  static bool ResolveSceneConfig(const FString& ScenePath,
++                                 std::string& OutJson, FString& OutError);
++
+   void TeardownSimulation();
+ 
+  private:

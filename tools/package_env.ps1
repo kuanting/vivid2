@@ -14,6 +14,10 @@
   The editor may stay open: only the game target is compiled (-nocompileeditor), and the
   cook uses the editor binaries as they are. Close the editor if the cook runs out of memory.
 
+  The pilot plugin for manual flight (vivid2 unreal setup --pilot-plugin) is not part of VIVID 2:
+  packaging refuses while it is enabled, unless -AllowPrivatePlugins (a build for your own use).
+  Run vivid2 unreal setup ... --no-pilot-plugin to package a build to share.
+
 .EXAMPLE
   vivid2 unreal setup --engine 5.8 --download      # once: plugin + VIVID2Env.uproject for that engine
   powershell -ExecutionPolicy Bypass -File tools\package_env.ps1 -Engine 5.8 -Zip
@@ -27,7 +31,8 @@ param(
     [ValidateSet("Development", "Shipping", "DebugGame")]
     [string]$Config = "Development",
     [string]$OutDir = "",
-    [switch]$Zip
+    [switch]$Zip,
+    [switch]$AllowPrivatePlugins
 )
 
 $ErrorActionPreference = "Stop"
@@ -38,6 +43,10 @@ $uproject = Join-Path $repo "unreal\VIVID2Env\VIVID2Env.uproject"
 if (-not (Test-Path $uproject)) { throw "VIVID2Env.uproject not found; run: vivid2 unreal setup --engine $Engine ..." }
 $assoc = (Get-Content $uproject -Raw | ConvertFrom-Json).EngineAssociation
 if ($assoc -ne $Engine) { throw "VIVID2Env.uproject is set up for UE $assoc; rerun: vivid2 unreal setup --engine $Engine ..." }
+$pilot = (Get-Content $uproject -Raw | ConvertFrom-Json).Plugins | Where-Object { $_.Name -eq "FpvPilot" -and $_.Enabled }
+if ($pilot -and -not $AllowPrivatePlugins) {
+    throw "The pilot plugin (FpvPilot) is enabled; it is not part of VIVID 2. Unlink it first (vivid2 unreal setup --engine $Engine ... --no-pilot-plugin) or pass -AllowPrivatePlugins for a build you keep."
+}
 
 $uat = Join-Path $UERoot "Engine\Build\BatchFiles\RunUAT.bat"
 if (-not (Test-Path $uat)) { throw "RunUAT not found at $uat (set -UERoot)" }

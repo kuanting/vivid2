@@ -24,13 +24,16 @@ def _fmt3(v) -> str:
 def build_scene(run: Run, sim_config_dir: str, targets: List[Dict[str, Any]],
                 distractors: Optional[List[Dict[str, Any]]] = None, start_ned=None,
                 fleet: Optional[List[Dict[str, Any]]] = None,
-                fires: Optional[List[Dict[str, Any]]] = None) -> Dict[str, Any]:
+                fires: Optional[List[Dict[str, Any]]] = None,
+                robot: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
     """``fleet`` (``Run.resolved_fleet()``): a team's drones; one drone uses ``start_ned``.
-    ``fires`` (``Run.resolved_fires()``) default to the scenario's own, unresolved."""
+    ``fires`` (``Run.resolved_fires()``) default to the scenario's own, unresolved.
+    ``robot``: a robot config to fly instead of the scenario's ``scene.robot_config``
+    (manual flight, ``vivid2.pilot``)."""
     spec = run.spec
     sc = spec["scene"]
     scene = load_jsonc(os.path.join(sim_config_dir, sc["base"]))
-    robot = load_jsonc(os.path.join(sim_config_dir, sc["robot_config"]))
+    robot = copy.deepcopy(robot) if robot is not None else load_jsonc(os.path.join(sim_config_dir, sc["robot_config"]))
 
     drone_name = sc.get("drone_name", "Drone1")
     actor = next((a for a in scene["actors"] if a["type"] == "robot" and a["name"] == drone_name), None)

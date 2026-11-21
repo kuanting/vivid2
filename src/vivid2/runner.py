@@ -180,8 +180,10 @@ def detect_depth_scale(raw: np.ndarray, cam_height_m: float) -> Optional[float]:
 # (frame 1 is the first survey frame), and the payload camera's exposure settles at survey height;
 # 6: payload frames in lockstep (the simulator runs one capture step per frame and is paused while the
 # images are sent and recorded), agents pace frames by mission (sim) time, so the frames a run takes no
-# longer depend on the machine's speed; a find is timed when it is reported.
-SIM_VERSION = 7
+# longer depend on the machine's speed; a find is timed when it is reported; 7: gimballed search camera,
+# recorded forward camera, heading control; 8: realistic hikers (people in hiking clothes with backpacks
+# from a Fab pack, real lying poses) replace the mannequins under the same names (tools/build_hikers.py).
+SIM_VERSION = 8
 
 
 RULES_VERSION = 1

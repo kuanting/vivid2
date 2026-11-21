@@ -1,0 +1,54 @@
+// DEMO, not part of the benchmark (only campaigns/demo_golden_hour.jsonc uses it): the real team run
+// that the demo movie "The Golden Hour" re-enacts (tools/demo_movie, docs/demo_movie.md).
+// ForestFire map at golden hour: a man fell and lies injured in a forest clearing ahead of the fire;
+// a woman who went for help is cut off in the burnt area behind the fire front. Four drones search.
+// Fires, wind, search area and no-fly area are those of scenarios/wildfire/wildfire_hiker_01.jsonc;
+// both hiker spots are clear of flames and smoke (hazards.fire.check_fires).
+{
+  "id": "golden_hour_01",
+  "mission": "wildfire_sar",
+  "description": "Demo movie run: two hikers near an active fire front at golden hour, searched by a team of four drones.",
+  "scene": {"base": "scene_forest_sar.jsonc", "robot_config": "robot_vivid_quad.jsonc", "camera": "Payload", "map": "ForestFire"},
+  "dut_start": {"ned": [0, 0, -1], "yaw_deg": 0},
+  "fleet": {"size": 4, "spacing_m": 10},
+  "comms": {"range_m": 400, "latency_s": 0.2, "bandwidth_kbps": 250, "loss": 0.02},
+  "search_area": {"polygon_ne": [[-150, -100], [150, -100], [150, 230], [-150, 230]], "altitude_m": 55, "ground_down_m": 0},
+  "targets": [
+    // "Chen": fell into a clearing (radius 9 m) ahead of the fire, can't move
+    {"id": "Hiker1", "asset": "VIVID2_Hiker_RedJacket_LyingSide", "ned": [74, -66, 0], "yaw_deg": 30,
+     "description": "man, red jacket, dark trousers, lying on his side"},
+    // "Lin": cut off in the burnt area behind the front, waving for help from an open burnt patch
+    // (radius 14.6 m, tools/dip_reach.py on the first demo run): under the 9 m snags at (-60, 165) the
+    // reference team's closer look had to stay at 36 m and lost her at the frame's edge
+    {"id": "Hiker2", "asset": "VIVID2_Hiker_YellowJacket_Waving", "ned": [62, 182, 0], "yaw_deg": 265,
+     "description": "woman, yellow jacket, grey trousers, standing and waving in the burnt area"}
+  ],
+  "target_jitter_m": 0,
+  "distractors": [
+    {"id": "Decoy1", "asset": "VIVID2_Decoy_Tarp_Red", "ned": [-30, -80, 0], "yaw_deg": -20, "description": "red tarp"},
+    {"id": "Decoy2", "asset": "VIVID2_Decoy_Tent_Orange", "ned": [40, 150, 0], "yaw_deg": 0, "description": "orange dome tent in the burnt area"}
+  ],
+  "fires": [
+    {"id": "Fire01", "asset": "VIVID2_Fire_Medium", "ned": [-130, 111, 0], "description": "front"},
+    {"id": "Fire02", "asset": "VIVID2_Fire_Large", "ned": [-95, 99, 0], "description": "front"},
+    {"id": "Fire03", "asset": "VIVID2_Fire_Medium", "ned": [-60, 101, 0], "description": "front"},
+    {"id": "Fire04", "asset": "VIVID2_Fire_Small", "ned": [-25, 107, 0], "description": "front"},
+    {"id": "Fire05", "asset": "VIVID2_Fire_Large", "ned": [10, 94, 0], "description": "front"},
+    {"id": "Fire06", "asset": "VIVID2_Fire_Medium", "ned": [45, 82, 0], "description": "front"},
+    {"id": "Fire07", "asset": "VIVID2_Fire_Large", "ned": [80, 77, 0], "description": "front"},
+    {"id": "Fire08", "asset": "VIVID2_Fire_Small", "ned": [115, 84, 0], "description": "front"},
+    {"id": "Fire09", "asset": "VIVID2_Fire_Medium", "ned": [150, 76, 0], "description": "front"},
+    {"id": "Fire10", "asset": "VIVID2_Fire_Small", "ned": [40, 55, 0], "description": "spot fire ahead of the front"},
+    {"id": "Fire11", "asset": "VIVID2_Fire_Small", "ned": [-60, 68, 0], "description": "spot fire ahead of the front"},
+    {"id": "Fire12", "asset": "VIVID2_Fire_Smolder", "ned": [0, 180, 0], "description": "smouldering in the burnt area"},
+    {"id": "Fire13", "asset": "VIVID2_Fire_Smolder", "ned": [-120, 200, 0], "description": "smouldering in the burnt area"},
+    {"id": "Fire14", "asset": "VIVID2_Fire_Smolder", "ned": [100, 170, 0], "description": "smouldering in the burnt area"}
+  ],
+  "brief": "A wildfire is burning in the forest east of the trailhead and moving west. Two hikers are missing: a man in a red jacket who fell and is injured, probably lying down in the forest, and a woman in a yellow jacket who went for help and may be cut off by the fire in the burnt ground. Do not fly below 30 m over the fire front.",
+  "environment": {"time_of_day": "2026-09-28 17:00:00", "weather": {}, "wind_ned": [0, -3, 0]},
+  "limits": {"timeout_s": 600, "max_speed_mps": 6, "min_agl_m": 0.5, "geofence_margin_m": 20, "energy_budget_m": 3500,
+             "min_separation_m": 5,
+             "no_fly": [{"polygon_ne": [[-160, 40], [160, 40], [160, 130], [-160, 130]], "ceiling_agl_m": 30,
+                         "description": "active fire front"}]},
+  "success": {"localization_tolerance_m": 10, "require_all_targets": true}
+}

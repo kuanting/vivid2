@@ -1,0 +1,8 @@
+// DEMO, not part of the benchmark: the team run that the demo movie "The Golden Hour" re-enacts
+// (tools/demo_movie, docs/demo_movie.md). One seed; the movie uses exactly this run.
+{
+  "name": "demo_golden_hour",
+  "sim_config_dir": "../sim_config",
+  "scenarios": ["../scenarios/demo/golden_hour_01.jsonc"],
+  "seeds": 1
+}

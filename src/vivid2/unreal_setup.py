@@ -12,6 +12,11 @@ user can get a working plugin in one of four ways:
 The plugin folders are linked (directory junctions on Windows) into
 unreal/VIVID2Env/Plugins, VIVID2Env.uproject is rendered for the engine, and
 the result is recorded in unreal/VIVID2Env/.vivid2-setup.json.
+
+Manual flight (vivid2 fly, docs/manual_flight.md) needs two more things: the pilot hooks in
+the Project AirSim plugin (patches/projectairsim-pilot-hooks.patch, applied with --airsim-root
+--apply-patch) and a pilot plugin (--pilot-plugin, a folder with FpvPilot.uplugin) linked into
+unreal/VIVID2Env/Plugins and enabled in the uproject. The pilot plugin is not part of VIVID 2.
 """
 from __future__ import annotations
 
@@ -58,17 +63,25 @@ def render_uproject(template: Dict[str, Any], engine: str, profile: Dict[str, An
     out = json.loads(json.dumps(template))
     out["EngineAssociation"] = engine
     names = {p["Name"] for p in out.get("Plugins", [])}
-    for name in profile.get("extra_plugins", []):
-        if name not in names:
-            out.setdefault("Plugins", []).append({"Name": name, "Enabled": True})
+    for entry in profile.get("extra_plugins", []):
+        # a plugin name, or a whole plugin reference (e.g. with "TargetAllowList": ["Editor"] for
+        # editor-only plugins that must not end up in packaged builds)
+        ref = {"Name": entry, "Enabled": True} if isinstance(entry, str) else dict(entry)
+        if ref["Name"] not in names:
+            out.setdefault("Plugins", []).append(ref)
+            names.add(ref["Name"])
     return out
 
 
-def write_uproject(engine: str, env_dir: Path = ENV_DIR, engines: Optional[Dict[str, Any]] = None) -> Path:
+def write_uproject(engine: str, env_dir: Path = ENV_DIR, engines: Optional[Dict[str, Any]] = None,
+                   pilot_plugin: bool = False) -> Path:
     template = json.loads((env_dir / "VIVID2Env.uproject.template.json").read_text(encoding="utf-8"))
+    out = render_uproject(template, engine, engine_profile(engine, engines))
+    if pilot_plugin:
+        # Linked by --pilot-plugin; the plugin is off by default (EnabledByDefault false).
+        out.setdefault("Plugins", []).append({"Name": PILOT_PLUGIN, "Enabled": True})
     path = env_dir / "VIVID2Env.uproject"
-    path.write_text(json.dumps(render_uproject(template, engine, engine_profile(engine, engines)), indent="\t") + "\n",
-                    encoding="utf-8")
+    path.write_text(json.dumps(out, indent="\t") + "\n", encoding="utf-8")
     return path
 
 
@@ -122,6 +135,41 @@ TEAM_WEATHER_PATCH = "patches/projectairsim-team-weather.patch"
 def has_team_weather_fix(airsim_root: Path) -> bool:
     src = airsim_root / "unreal/Blocks/Plugins/ProjectAirSim/Source/ProjectAirSim/Private/World/WeatherLib.cpp"
     return src.exists() and "HideOtherRobotsWeather" in src.read_text(encoding="utf-8", errors="ignore")
+
+
+# Manual flight (vivid2 fly): an external flight-controller hook, an RC input mailbox and real-time
+# pacing for the sim clock. Inert unless a robot's controller is "external-controller-api".
+PILOT_HOOKS_PATCH = "patches/projectairsim-pilot-hooks.patch"
+PILOT_HOOKS_HEADER = "ProjectAirSim/Source/ProjectAirSim/Public/ProjectAirSimExternalController.h"
+
+
+def has_pilot_hooks(plugins_dir: Path) -> bool:
+    return (Path(plugins_dir) / PILOT_HOOKS_HEADER).exists()
+
+
+# The pilot plugin (manual flight with a radio or gamepad); not part of VIVID 2.
+PILOT_PLUGIN = "FpvPilot"
+
+
+def check_pilot_plugin(path: Path) -> Path:
+    path = Path(path).resolve()
+    if not (path / f"{PILOT_PLUGIN}.uplugin").exists():
+        raise SetupError(f"{path} is not the pilot plugin (no {PILOT_PLUGIN}.uplugin)")
+    return path
+
+
+def copy_simlibs(src: Path, plugins_dir: Path, log: Callable[[str], None] = print) -> Path:
+    """Copy a prebuilt SimLibs folder (untracked in git) into a checkout's plugin, if it has none."""
+    dest = Path(plugins_dir) / "ProjectAirSim" / "SimLibs"
+    if dest.exists():
+        log(f"SimLibs already present in {dest}; not copying")
+        return dest
+    src = Path(src)
+    if not (src / "commit_hash.txt").exists():
+        raise SetupError(f"{src} does not look like a SimLibs folder (no commit_hash.txt)")
+    shutil.copytree(src, dest)
+    log(f"copied SimLibs ({simlibs_commit(Path(plugins_dir))}) from {src}")
+    return dest
 
 
 # -- linking -------------------------------------------------------------------
@@ -276,12 +324,27 @@ def setup(
     force: bool = False,
     env_dir: Path = ENV_DIR,
     log: Callable[[str], None] = print,
+    copy_simlibs_from: Optional[Path] = None,
+    pilot_plugin: Optional[Path] = None,
+    no_pilot_plugin: bool = False,
 ) -> Dict[str, Any]:
     engines = load_engines()
     profile = engine_profile(engine, engines)
     chosen = [x for x in (plugin_dir, airsim_root, plugin_zip, do_download or None) if x]
     if len(chosen) != 1:
         raise SetupError("choose exactly one of --plugin-dir, --airsim-root, --plugin-zip, --download")
+    if copy_simlibs_from and not airsim_root:
+        raise SetupError("--copy-simlibs-from only applies with --airsim-root")
+    if pilot_plugin and no_pilot_plugin:
+        raise SetupError("choose one of --pilot-plugin and --no-pilot-plugin")
+    # The pilot plugin stays linked across setups unless --no-pilot-plugin removes it.
+    pilot_link = env_dir / "Plugins" / PILOT_PLUGIN
+    previous = status(env_dir) or {}
+    pilot: Optional[Path] = None
+    if pilot_plugin:
+        pilot = check_pilot_plugin(pilot_plugin)
+    elif not no_pilot_plugin and previous.get("pilot_plugin") and _is_link(pilot_link):
+        pilot = check_pilot_plugin(Path(previous["pilot_plugin"]))
 
     source: Dict[str, Any]
     if plugin_dir:
@@ -305,8 +368,19 @@ def setup(
             else:  # single-drone runs don't need it
                 log(f"warning: {root} lacks the team weather fix; team runs (fleet.size > 1) would see every "
                     f"drone's fog. Apply it: git -C \"{root}\" apply \"{patch}\" (or rerun with --apply-patch)")
+        if not has_pilot_hooks(plugins):
+            patch = REPO / PILOT_HOOKS_PATCH
+            if apply_patch:
+                subprocess.run(["git", "-C", str(root), "apply", str(patch)], check=True)
+                log(f"applied {patch.name} to {root}")
+            elif pilot:
+                raise SetupError(f"{root} lacks the pilot hooks the pilot plugin needs. Apply them:\n"
+                                 f"  git -C \"{root}\" apply \"{patch}\"\nor rerun with --apply-patch")
+        if copy_simlibs_from:
+            copy_simlibs(Path(copy_simlibs_from), plugins, log)
         if not (plugins / "ProjectAirSim/SimLibs").exists():
-            log(f"warning: no SimLibs in {plugins}/ProjectAirSim; run build.cmd in {root} first")
+            log(f"warning: no SimLibs in {plugins}/ProjectAirSim; copy a prebuilt one with --copy-simlibs-from "
+                f"or run build.cmd simlibs_release in {root}")
         source = {"kind": "airsim-root", "path": str(root)}
     else:
         z = profile.get("plugin_zip")
@@ -327,7 +401,16 @@ def setup(
         source = {"kind": "plugin-zip" if plugin_zip else "download", "path": str(zpath), "extracted": str(plugins)}
 
     link_plugins(plugins, env_dir, force)
-    uproject = write_uproject(engine, env_dir, engines)
+    if pilot:
+        if not has_pilot_hooks(plugins):
+            raise SetupError(f"the Project AirSim plugin in {plugins} lacks the pilot hooks "
+                             f"({PILOT_HOOKS_PATCH}); use --airsim-root <checkout> --apply-patch")
+        link_dir(pilot, pilot_link, force)
+        log(f"pilot plugin linked: {pilot_link} -> {pilot}")
+    elif _is_link(pilot_link):
+        os.rmdir(pilot_link) if sys.platform == "win32" else pilot_link.unlink()
+        log(f"pilot plugin unlinked: {pilot_link}")
+    uproject = write_uproject(engine, env_dir, engines, pilot_plugin=pilot is not None)
 
     eng_dir = find_engine_dir(engine)
     state = {
@@ -337,6 +420,8 @@ def setup(
         "plugin_build_id": plugin_build_id(plugins),
         "simlibs_commit": simlibs_commit(plugins),
         "plugins_dir": str(plugins),
+        "pilot_hooks": has_pilot_hooks(plugins),
+        "pilot_plugin": str(pilot) if pilot else None,
         "source": source,
         "uproject": str(uproject),
         "updated": datetime.now().isoformat(timespec="seconds"),

@@ -22,6 +22,8 @@ unreal/**/*.VC.db
 # Created by `vivid2 unreal setup`: plugin junctions, engine-specific uproject, setup record
 unreal/VIVID2Env/Plugins/ProjectAirSim
 unreal/VIVID2Env/Plugins/Drone
+# Optional pilot plugin for manual flight (vivid2 unreal setup --pilot-plugin); not part of VIVID 2
+unreal/VIVID2Env/Plugins/FpvPilot
 unreal/VIVID2Env/VIVID2Env.uproject
 unreal/VIVID2Env/.vivid2-setup.json
 # Third-party content (Fab, Megascans, marketplace packs) can't be redistributed
@@ -29,6 +31,8 @@ unreal/VIVID2Env/.vivid2-setup.json
 # needs are listed in docs/environments.md.
 unreal/VIVID2Env/Content/*
 !unreal/VIVID2Env/Content/VIVID2/
+# The demo movie's film level, sequences and props are rebuilt by tools/demo_movie
+unreal/VIVID2Env/Content/VIVID2/Demo/
 
 # Local Claude Code settings
 .claude/settings.local.json

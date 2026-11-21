@@ -78,9 +78,19 @@ collision, and collision that matches the shape. Check both levels:
   catches this, but it's better avoided.
 - **Pose hikers in the mesh.** Spawned skeletal meshes play no animation and
   stand in the reference pose. Make standing, sitting and lying variants as
-  static meshes, or as blueprints with a fixed pose.
-- **Put the pivot at ground level** (feet, or the lowest point when lying), so
-  a target's `ned.z` is the ground height.
+  static meshes, or as blueprints with a fixed pose (one frame of a clip,
+  not playing: a moving pose would differ between runs).
+- **Put the pivot at ground level, under the body** (feet, or the lowest point
+  when lying), so a target's `ned.z` is the ground height and its `ned` is
+  where the person is. Scoring measures a report's distance from `ned`. Some
+  clips move the body away from the root; offset the mesh back.
+- **Hair must be a mesh.** Project AirSim gives segmentation IDs to static,
+  skeletal and procedural meshes and to landscapes only. A groom (strand hair)
+  shows in the colour image but not in the ground-truth mask. Use card hair, or
+  a hood or hat.
+- **Every part of a target needs query collision.** Project AirSim's 3D box
+  (`GetComponentsBoundingBox`) skips parts without collision, and preflight
+  stops on a target that measures 0 m.
 - **Cook everything spawned by name.** Assets referenced only by name are not
   packaged. Add the folder to `DirectoriesToAlwaysCook` in
   `Config/DefaultGame.ini`, for example `+DirectoriesToAlwaysCook=(Path="/Game/VIVID2/Targets")`.
