@@ -1,0 +1,50 @@
+// Landslide map (ForestSAR's south-east slope after a debris slide, Lishan; see docs/environments.md):
+// a slab of the slope above the mountain road R01 failed, buried the road (segments R01-04 and R01-05
+// blocked), crushed house B03 and the orchard shed B05, piled debris against farmhouse B02 and ran
+// 220 m down the slope. Everything placed here is from unreal/VIVID2Env/SourceData/Landslide/layout.json:
+// the cars ("vehicles"), the houses, and the spots the debris step kept clear for people and clues
+// ("scatter.keep_clear_ne").
+// Noon, clear. Four people a camera can see: the driver of the car stopped short of the debris, a
+// resident who escaped onto the intact end of B02's roof, a person trapped to the thighs in the debris
+// and an injured person lying on it lower down. Two people are buried out of sight (B03's occupant, and someone
+// swept into the debris): they are not targets; the damage map should send rescuers to them.
+// The slide falls 185 m from the scar to its toe, so the survey follows the ground (altitude_ref).
+{
+  "id": "landslide_sar_01",
+  "mission": "landslide_sar",
+  "description": "Debris slide across a mountain road: a driver by the car, a person on a damaged roof, one trapped in the debris and one injured on it; two buried victims; map the debris, blocked road segments, damaged houses and clues.",
+  "scene": {"base": "scene_forest_sar.jsonc", "robot_config": "robot_vivid_quad.jsonc", "camera": "Payload", "map": "Landslide"},
+  // on the road north-east of the slide, where the crew arrives (the road is at 204 m; Unreal Z)
+  "dut_start": {"ned": [-85, 430.5, -1], "yaw_deg": 200},
+  // 345 m x 245 m: the road from above B01 to B04, the scar and the whole deposit down to its toe
+  // (ground from 265 m above the scar to 45 m below the toe). altitude_m is above the ground under the
+  // drone; trees reach about 31 m.
+  "search_area": {"polygon_ne": [[-75, 210], [-75, 455], [-420, 455], [-420, 210]], "altitude_m": 50,
+                  "altitude_ref": "terrain", "ground_down_m": 0},
+  "targets": [
+    {"id": "Driver1", "asset": "VIVID2_Hiker_BlueHoodie_Waving", "ned": [-215.33, 324.84, 0], "yaw_deg": 220, "jitter_m": 0,
+     "description": "driver of the silver sedan (V05) stopped short of the debris, standing beside it (its door open), waving"},
+    {"id": "Roof1", "asset": "VIVID2_Hiker_YellowJacket_Waving", "ned": [-199.32, 343.94, 0], "yaw_deg": 60, "jitter_m": 0,
+     "snap": "surface", "description": "person on the intact end of farmhouse B02's flat roof, waving"},
+    {"id": "Trapped1", "asset": "VIVID2_Hiker_RedJacket_Waving", "ned": [-276, 322, 0.7], "yaw_deg": 300, "jitter_m": 1.5,
+     "description": "person trapped to the thighs in the debris below the road, waving"},
+    {"id": "Injured1", "asset": "VIVID2_Hiker_GreenJacket_LyingSide", "ned": [-345, 398, 0], "yaw_deg": 135, "jitter_m": 1.5,
+     "description": "injured person in a green jacket lying on the lower debris"}
+  ],
+  "clues": [
+    {"id": "Jacket1", "asset": "VIVID2_Decoy_Jacket_Yellow", "ned": [-305, 352, 0], "yaw_deg": 20, "kind": "clothing",
+     "description": "a yellow jacket from house B03, carried down the debris"},
+    {"id": "Bag1", "asset": "VIVID2_Decoy_SleepingBag_Blue", "ned": [-322, 372, 0], "yaw_deg": 75, "kind": "other",
+     "description": "a rolled blue sleeping bag from house B03 on the debris"}
+  ],
+  "damage": {
+    "products": ["areas", "roads", "buildings", "clues"],
+    "buried": [{"id": "Buried1", "ned": [-254.4, 286.7, 1.0], "building": "B03", "description": "in the crushed house B03"},
+               {"id": "Buried2", "ned": [-262, 330, 2.0], "description": "swept into the debris below the road"}]
+  },
+  "brief": "A debris slide has cut the mountain road below Lishan and hit the houses along it. Find the people (a driver whose car was stopped by the slide, residents of the houses), map the debris, report which road segments are blocked and how badly each house is damaged, and report belongings on the debris that could show where someone is buried.",
+  "environment": {"time_of_day": "2026-09-28 12:00:00", "weather": {}, "wind_ned": [0, 0, 0]},
+  "limits": {"timeout_s": 1500, "max_speed_mps": 6, "min_agl_m": 0.5, "geofence_margin_m": 20, "energy_budget_m": 9000},
+  "success": {"localization_tolerance_m": 10, "require_all_targets": true},
+  "sweep": {"seeds": 2}
+}

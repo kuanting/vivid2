@@ -232,6 +232,9 @@ class MissionSpec:
     # [{id, footprint_ne, height_m, roof, use}], "building_grades", "clue_kinds", "terrain"
     # ("pre_event": ``terrain`` is the DEM from before the event)}. Report with ctx.report_damage.
     damage: Optional[Dict[str, Any]] = None
+    # "terrain" when ``altitude_m`` is height above the ground under the drone, a terrain-following
+    # survey for steep ground (scenario ``search_area.altitude_ref``); None: above the start's ground.
+    altitude_ref: Optional[str] = None
 
     def record(self) -> Dict[str, Any]:
         """JSON-ready fields for meta.json; the terrain is summarised, not copied."""
@@ -251,7 +254,7 @@ class MissionSpec:
 
 TEAM_FIELDS = ("drone_id", "team", "team_mode", "min_separation_m")
 # Left out of record() when None, so records of runs without them stay as they were.
-OPTIONAL_FIELDS = TEAM_FIELDS + ("no_fly_zones", "cameras", "damage")
+OPTIONAL_FIELDS = TEAM_FIELDS + ("no_fly_zones", "cameras", "damage", "altitude_ref")
 
 
 class Perception(abc.ABC):

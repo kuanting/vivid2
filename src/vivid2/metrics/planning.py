@@ -1,7 +1,7 @@
 """Planning metrics: how much of the search area the camera actually covered."""
 from __future__ import annotations
 
-from typing import Any, Dict, List, Sequence
+from typing import Any, Dict, List, Optional, Sequence
 
 import numpy as np
 
@@ -31,16 +31,21 @@ def _cells(polygon_ne: Sequence[Sequence[float]], cell_m: float) -> np.ndarray:
     return grid[points_in_polygon(grid, poly)]
 
 
-def footprint_hits(frame: Dict[str, Any], cells: np.ndarray, ground_down_m: float):
+def footprint_hits(frame: Dict[str, Any], cells: np.ndarray, ground_down_m):
     """Which cells a photo covers (None if it covers nothing it can be credited for).
 
     A photo with the gimbal at rest (straight down, full field of view): the cells inside its four
     ground corners; if the horizon is in view (the drone banking hard), none. A photo the stack
     tilted or zoomed: the cells in view where a person would show at least the visibility
     threshold of pixels, so looking at the horizon does not count the far ground.
+
+    ``ground_down_m`` is one ground plane, or each cell's own ground (a terrain-following survey:
+    a nadir photo then covers the cells whose ground is in the image).
     """
     if frame.get("gimbal"):
         return detectable_hits(frame, cells, ground_down_m)
+    if np.ndim(ground_down_m):
+        return _nadir_hits_on_terrain(frame, cells, np.asarray(ground_down_m, float))
     w, h = frame["width"], frame["height"]
     corners = [
         pixel_ray_to_ground(u, v, frame["cam_pos"], frame["cam_q"], w, h, frame["fov_deg"], ground_down_m)
@@ -51,11 +56,29 @@ def footprint_hits(frame: Dict[str, Any], cells: np.ndarray, ground_down_m: floa
     return points_in_polygon(cells, [c[:2] for c in corners])
 
 
-def detectable_hits(frame: Dict[str, Any], cells: np.ndarray, ground_down_m: float) -> np.ndarray:
+def _nadir_hits_on_terrain(frame: Dict[str, Any], cells: np.ndarray, ground: np.ndarray) -> Optional[np.ndarray]:
+    """A nadir photo over terrain: the cells whose ground point is in the image (None if the horizon is)."""
+    w, h, fov = frame["width"], frame["height"], frame["fov_deg"]
+    low = float(ground.max()) if len(ground) else 0.0  # the lowest ground: below the camera
+    if any(pixel_ray_to_ground(u, v, frame["cam_pos"], frame["cam_q"], w, h, fov, low) is None
+           for u, v in ((0, 0), (w, 0), (w, h), (0, h))):
+        return None
+    cam = np.asarray(frame["cam_pos"], float)
+    pc = (np.column_stack([cells, ground]) - cam) @ quat_to_rot(frame["cam_q"])
+    x = pc[:, 0]
+    front = x > 1e-6
+    xs = np.where(front, x, 1.0)
+    f = focal_px(w, fov)
+    u, v = w / 2.0 + f * pc[:, 1] / xs, h / 2.0 + f * pc[:, 2] / xs
+    return front & (u >= 0) & (u < w) & (v >= 0) & (v < h)
+
+
+def detectable_hits(frame: Dict[str, Any], cells: np.ndarray, ground_down_m) -> np.ndarray:
     """Cells in a photo's view where a lying person (PERSON_AREA_M2) covers at least the visibility threshold.
 
     A ground patch of area A seen at range r, incidence cos_i and planar depth x covers
-    A cos_i f^2 r / x^3 pixels (pinhole camera, focal length f in pixels).
+    A cos_i f^2 r / x^3 pixels (pinhole camera, focal length f in pixels). ``ground_down_m``: one
+    plane or each cell's ground.
     """
     w, h, fov = frame["width"], frame["height"], frame["fov_deg"]
     cam = np.asarray(frame["cam_pos"], float)
@@ -73,12 +96,15 @@ def detectable_hits(frame: Dict[str, Any], cells: np.ndarray, ground_down_m: flo
 
 
 def coverage(
-    frames: List[Dict[str, Any]], polygon_ne: Sequence[Sequence[float]], ground_down_m: float, cell_m: float = 2.0
+    frames: List[Dict[str, Any]], polygon_ne: Sequence[Sequence[float]], ground_down_m: float, cell_m: float = 2.0,
+    terrain=None,
 ) -> Dict[str, float]:
+    """``terrain``: measure on this ground model instead of the plane at ``ground_down_m``."""
     cells = _cells(polygon_ne, cell_m)
+    ground = ground_down_m if terrain is None else np.asarray(terrain.down_at(cells[:, 0], cells[:, 1]), float)
     hits = np.zeros(len(cells), int)
     for f in frames:
-        hit = footprint_hits(f, cells, ground_down_m)
+        hit = footprint_hits(f, cells, ground)
         if hit is not None:
             hits += hit
     return _coverage_summary(cells, hits, cell_m)
@@ -100,7 +126,8 @@ def planning_metrics(log: RunLog) -> Dict[str, Any]:
     ground = (meta.get("mission_spec") or {}).get("ground_down_m", meta["search_area"].get("ground_down_m", 0.0))
     if is_team(meta):
         return _team_planning(log, ground)
-    cov = coverage(search_frames(log["frames"], meta), meta["search_area"]["polygon_ne"], ground)
+    cov = coverage(search_frames(log["frames"], meta), meta["search_area"]["polygon_ne"], ground,
+                   terrain=survey_terrain(meta))
     length = path_length(log["trajectory"])
     return {
         **cov,
@@ -108,6 +135,17 @@ def planning_metrics(log: RunLog) -> Dict[str, Any]:
         "coverage_per_km_m2": cov["covered_m2"] / (length / 1000.0) if length > 0 else 0.0,
         **verification_stats(log["events"]),
     }
+
+
+def survey_terrain(meta: Dict[str, Any]):
+    """The run's terrain model if its survey followed the terrain (``search_area.altitude_ref`` "terrain"):
+    coverage is then measured on the ground itself, not on the plane through the start. Otherwise None."""
+    if (meta.get("search_area") or {}).get("altitude_ref") != "terrain":
+        return None
+    from vivid2.terrain import from_meta
+
+    t = from_meta(meta)
+    return None if t.is_flat else t
 
 
 COVERAGE_MILESTONE = 0.9  # team runs: mission time until the team has seen this share of the area

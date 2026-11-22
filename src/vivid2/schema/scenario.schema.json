@@ -76,6 +76,8 @@
       "properties": {
         "polygon_ne": {"type": "array", "minItems": 3, "items": {"$ref": "#/$defs/vec2"}},
         "altitude_m": {"type": "number", "exclusiveMinimum": 0},
+        "altitude_ref": {"type": "string", "enum": ["start", "terrain"], "default": "start",
+                         "description": "what altitude_m is measured from: the ground at the start (a survey at one height) or the ground under the drone (a terrain-following survey, for steep ground; one drone only)"},
         "ground_down_m": {"type": "number", "default": 0}
       }
     },

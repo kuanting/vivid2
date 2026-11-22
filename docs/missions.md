@@ -166,7 +166,7 @@ damage task, its rules and its score are in [damage.md](damage.md).
 
 | Mission | Map | Damage products | Status |
 |---|---|---|---|
-| `landslide_sar` | Landslide (ForestSAR's slope with a road; LandslideBefore is the map before the slide) | debris areas, blocked roads, buried buildings, clues | Framework done; tested on the test map TestYard (`scenarios/landslide/testyard_damage_01.jsonc`). Map next |
+| `landslide_sar` | Landslide (ForestSAR's slope with a road; LandslideBefore is the map before the slide) | debris areas, blocked roads, buried buildings, clues | **Started**: `scenarios/landslide/landslide_sar_01.jsonc` (noon) and `_02` (dusk, fog), campaign `landslide_v1`; also the test map TestYard (`testyard_damage_01`) |
 | `avalanche_sar` | Avalanche (Japanese Northern Alps) | debris extent, clues (skis, poles, a glove, a backpack) | Planned |
 | `earthquake_sar` | CoastQuake (a Hualien coast town) | building grades, blocked roads | Planned |
 | `tsunami_sar` | CoastTsunami (the same town, flooded) | flood extent, blocked roads, building grades | Planned |
@@ -185,3 +185,13 @@ map, and before each run a preflight check confirms that map is the one open
 (by its `BP_VIVID2Map_<map>` marker actor, or the actors listed in
 `scene.map_check.actors`) and that every target spawned under its own name.
 If not, the runs for that map are skipped with a message saying what to fix.
+
+`search_area.altitude_m` is the suggested survey height above the ground at the
+start. On steep ground (a landslide, an avalanche path) one height can't work:
+over the high end it hits the trees, over the low end it sees people as a few
+pixels. There, set `"altitude_ref": "terrain"`: the height is then above the
+ground under the drone (`MissionSpec.altitude_ref`), the reference agents fly a
+terrain-following survey (the same lanes, a waypoint every 10 m at `altitude_m`
+above the highest coarse ground within 25 m, climbing to clear the ground before
+flying home), and coverage is measured on the ground itself rather than on the
+plane through the start. One drone only for now.

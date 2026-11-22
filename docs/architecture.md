@@ -151,8 +151,10 @@ See [teams.md](teams.md) for the agent API (central `FleetAgent` and distributed
   the start's ground: the reference agents fly at
   `ground_down_m - altitude_m` NED. On ForestSAR the start is 257.7 m up, so the
   authored plane at down 0 would put "55 m up" inside the hill. Coverage is
-  scored on the same plane. A terrain-following planner (M3.4) will replace
-  this fixed altitude.
+  scored on the same plane. With `search_area.altitude_ref: "terrain"`
+  (`MissionSpec.altitude_ref`) `altitude_m` is above the ground under the drone
+  instead: the reference agents fly a terrain-following survey over the coarse
+  DEM, and coverage is scored on the run's terrain model.
 
 ## YOLO baseline
 

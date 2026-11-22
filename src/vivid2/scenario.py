@@ -190,6 +190,8 @@ def validate_scenario(spec: Dict, where: str = "") -> None:
             e.message = f"{where}: {e.message}"
         raise
     problems = check_fires(spec) + check_damage_spec(spec)
+    if spec["search_area"].get("altitude_ref") == "terrain" and fleet_size(spec) > 1:
+        problems.append('a terrain-following survey (search_area.altitude_ref "terrain") is for one drone only')
     if problems:
         raise ValueError(f"{where or spec.get('id', 'scenario')}: " + "; ".join(problems))
 

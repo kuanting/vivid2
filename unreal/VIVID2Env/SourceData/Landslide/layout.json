@@ -1,0 +1,69 @@
+{
+  "map": "Landslide",
+  "about": "A debris slide across a mountain road on ForestSAR's south-east slope (Lishan, Taiwan): the road R01 is cut along the 2188 m contour (Unreal Z 203 m) from the east flank round to the south edge; a slab of the steep slope above it (the scar) failed, and its debris buried the road and two buildings and ran 220 m down the slope. LandslideBefore is the same map before the slide (terrain stage 'pre': the road bench and house pads); Landslide is after it (stage 'post').",
+  "frame": "NED metres from the Unreal origin (north = Unreal X, east = Unreal Y), on ForestSAR's terrain.",
+  "mask": {"size_px": 2048, "extent_m": 1008.0},
+  "regions": {
+    "scar": {"polygon_ne": [[-198, 230], [-184, 248], [-180, 272], [-186, 296], [-204, 312], [-226, 306], [-232, 282], [-233, 256], [-222, 234]],
+             "edge": {"noise_m": 3.0, "noise_scale_m": 8.0, "soft_m": 2.0, "seed": 3}},
+    "deposit": {"polygon_ne": [[-228, 258], [-222, 284], [-224, 312], [-238, 332], [-262, 350], [-290, 378], [-320, 404],
+                               [-350, 428], [-372, 440], [-394, 438], [-402, 416], [-380, 380], [-352, 356], [-322, 328],
+                               [-296, 300], [-276, 276], [-258, 254], [-242, 246]],
+                "edge": {"noise_m": 4.0, "noise_scale_m": 12.0, "soft_m": 2.5, "seed": 5}}
+  },
+  "area_classes": {
+    "scar": {"regions": ["scar"], "blocks_roads": false,
+             "about": "steep ground the slide stripped bare: soil and rock, no trees, unstable"},
+    "debris": {"regions": ["deposit"],
+               "about": "soil, rocks and broken trees the slide deposited, burying what was there"}
+  },
+  "roads": [
+    {"id": "R01", "kind": "mountain road, two lanes", "width_m": 6, "segment_m": 100,
+     "polyline_ne": [[39, 410], [1, 413], [-37, 410], [-71, 425], [-105, 438], [-142, 445], [-177, 433], [-195, 400],
+                     [-203, 363], [-213, 328], [-235, 297], [-254, 265], [-281, 237], [-315, 224], [-349, 240],
+                     [-384, 240], [-413, 214], [-445, 197], [-478, 179]]}
+  ],
+  "buildings": [
+    {"id": "B01", "ne": [-120, 431], "size_m": [12, 8], "yaw_deg": 170, "height_m": 7, "roof": "flat", "use": "farmhouse", "ems98": 0},
+    {"id": "B02", "ne": [-198, 342], "size_m": [12, 8], "yaw_deg": 254, "height_m": 7, "roof": "flat", "use": "farmhouse",
+     "ems98": 3, "cause": "debris piled against its west wall"},
+    {"id": "B03", "ne": [-254.4, 286.7], "size_m": [10, 7], "yaw_deg": 239, "height_m": 6, "roof": "flat", "use": "house",
+     "ems98": 5, "cause": "buried and crushed by the debris"},
+    {"id": "B04", "ne": [-334.2, 222.9], "size_m": [12, 8], "yaw_deg": 155, "height_m": 7, "roof": "flat", "use": "farmhouse", "ems98": 0},
+    {"id": "B05", "ne": [-300, 335], "size_m": [6, 4], "yaw_deg": 150, "height_m": 3, "roof": "flat", "use": "orchard shed",
+     "ems98": 5, "cause": "buried by the debris"}
+  ],
+  "terrain": {
+    "like": "ForestSAR",
+    "pre": [
+      {"op": "flatten", "polygon_ne": [[-129, 425], [-111, 422], [-110, 437], [-128, 440]], "level": "median", "blend_m": 8},
+      {"op": "flatten", "polygon_ne": [[-190, 334], [-188, 352], [-206, 352], [-208, 334]], "level": "median", "blend_m": 8},
+      {"op": "flatten", "polygon_ne": [[-262, 278], [-246, 278], [-246, 296], [-262, 296]], "level": "median", "blend_m": 8},
+      {"op": "flatten", "polygon_ne": [[-342, 214], [-326, 214], [-326, 232], [-342, 232]], "level": "median", "blend_m": 8},
+      {"op": "flatten", "polygon_ne": [[-305, 330], [-295, 330], [-295, 340], [-305, 340]], "level": "median", "blend_m": 5},
+      {"op": "road_bench", "road": "R01", "width_m": 8, "max_grade": 0.10, "batter": 2.0, "smooth_m": 20}
+    ],
+    "post": [
+      {"op": "lower", "region": "scar", "amount_m": 5.0, "taper_m": 12, "noise_m": 1.2, "noise_scale_m": 10, "seed": 3},
+      {"op": "raise", "region": "deposit", "amount_m": 5.0, "taper_m": 25, "noise_m": 1.5, "noise_scale_m": 12, "seed": 5}
+    ]
+  },
+  "scatter": {"about": "debris scattered by tools/build_landslide.py (step debris); nothing is placed within keep_clear_m of these spots, which the landslide scenarios use for people and clues",
+              "keep_clear_ne": [[-305, 352], [-276, 322], [-345, 398], [-258, 300], [-322, 372]], "keep_clear_m": 4.0, "seed": 21},
+  "vehicles": {"about": "cars placed by tools/build_landslide.py (step cars) from the Velocity Cars Pack (static blueprints, no driver or passengers, lights off); 'pre' is where a car is in LandslideBefore and 'post' in Landslide ('same' = unmoved; a car without one is absent from that map); not part of the damage ground truth. Before the slide: cars parked by B01-B04 and one on the road. After it: B03's car carried down the deposit onto its side, a car caught in the debris on the road, and two cars stopped either side of the blocked road (the east one's driver got out).",
+               "pack": "/Game/Velocity_Cars_Pack/Blueprints/Static_Blueprints/BP_Static_Velocity_",
+               "items": [
+                 {"id": "V01", "model": "Gaurus", "color": "white", "plate": "BKR-2071", "pre": {"ne": [-112.0, 429.5], "yaw_deg": 80}, "post": "same"},
+                 {"id": "V02", "model": "Sparrow", "color": "silver", "plate": "AQN-5536", "pre": {"ne": [-197.5, 350.5], "yaw_deg": 344}, "post": "same"},
+                 {"id": "V03", "model": "Gayal", "color": "white", "plate": "RDA-8102", "pre": {"ne": [-248.0, 293.5], "yaw_deg": 239},
+                  "post": {"ne": [-312.0, 385.0], "yaw_deg": 200, "roll_deg": 100, "sink_m": 0.35, "rocks": 10}},
+                 {"id": "V04", "model": "Shadow", "color": "dark_blue", "plate": "BFM-3390", "pre": {"ne": [-327.5, 218.5], "yaw_deg": 245}, "post": "same"},
+                 {"id": "V05", "model": "Thunder", "color": "silver", "plate": "AXL-6627", "pre": {"ne": [-178.3, 427.4], "yaw_deg": -118.6},
+                  "post": {"ne": [-214.7, 322.8], "yaw_deg": -125.4, "doors": {"FL": 1.0}}},
+                 {"id": "V06", "model": "Raptor", "color": "red", "plate": "BHT-0915", "post": {"ne": [-279.8, 240.5], "yaw_deg": 46.0, "doors": {"FL": 0.8}}},
+                 {"id": "V07", "model": "Sunrise", "color": "dark_red", "plate": "AMZ-4478",
+                  "post": {"ne": [-243.7, 282.4], "yaw_deg": -50.7, "pitch_deg": -8, "roll_deg": 14, "sink_m": 0.8, "rocks": 16}}
+               ]},
+  "expect": {"blocked": ["R01-04", "R01-05"],
+             "grades": {"B01": "none", "B02": "partial", "B03": "collapsed", "B04": "none", "B05": "collapsed"}}
+}

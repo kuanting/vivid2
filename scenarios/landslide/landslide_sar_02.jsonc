@@ -1,0 +1,41 @@
+// Landslide map, the same slide as landslide_sar_01 (see there) at dusk in haze (fog 0.02: at dusk Project AirSim fog washes the ground out from about 0.05), with other people:
+// the driver of the red SUV (V06) stopped on the far (west) side of the debris, standing by its open
+// door; a person trapped to the thighs in the debris beside the road; a resident lying injured on the
+// intact end of B02's roof; and a person who walked down onto the debris. Buried out of sight: one in
+// the crushed orchard shed B05 and the driver of the sedan (V07) the debris caught on the road. A red
+// backpack and a red tarp from the shed lie on the debris.
+{
+  "id": "landslide_sar_02",
+  "mission": "landslide_sar",
+  "description": "Debris slide across a mountain road at dusk in haze: a driver by an SUV on the far side, a person trapped in the debris, an injured person on a damaged roof, one on the debris; two buried victims; map the debris, blocked road segments, damaged houses and clues.",
+  "scene": {"base": "scene_forest_sar.jsonc", "robot_config": "robot_vivid_quad.jsonc", "camera": "Payload", "map": "Landslide"},
+  "dut_start": {"ned": [-85, 430.5, -1], "yaw_deg": 200},
+  "search_area": {"polygon_ne": [[-75, 210], [-75, 455], [-420, 455], [-420, 210]], "altitude_m": 50,
+                  "altitude_ref": "terrain", "ground_down_m": 0},
+  "targets": [
+    {"id": "Driver2", "asset": "VIVID2_Hiker_RedJacket_Standing", "ned": [-279.48, 238.38, 0], "yaw_deg": 90, "jitter_m": 0,
+     "description": "driver of the red SUV (V06) stopped west of the debris, standing beside it (its door open)"},
+    {"id": "Trapped2", "asset": "VIVID2_Hiker_BlueHoodie_Waving", "ned": [-258, 300, 0.6], "yaw_deg": 20, "jitter_m": 1.5,
+     "description": "person in a blue hoodie trapped to the thighs in the debris beside the road, waving"},
+    {"id": "Roof2", "asset": "VIVID2_Hiker_YellowJacket_LyingBack", "ned": [-198.06, 347.22, 0], "yaw_deg": 164, "jitter_m": 0,
+     "snap": "surface", "description": "injured resident lying on the intact end of farmhouse B02's flat roof"},
+    {"id": "Walker2", "asset": "VIVID2_Hiker_GreenJacket_Standing", "ned": [-322, 372, 0], "yaw_deg": 250, "jitter_m": 1.5,
+     "description": "person in a green jacket standing on the debris"}
+  ],
+  "clues": [
+    {"id": "Pack1", "asset": "VIVID2_Decoy_Backpack_Red", "ned": [-305, 352, 0], "yaw_deg": 140, "kind": "backpack",
+     "description": "a red backpack on the debris"},
+    {"id": "Tarp1", "asset": "VIVID2_Decoy_Tarp_Red", "ned": [-345, 398, 0], "yaw_deg": 30, "kind": "other",
+     "description": "a red tarp from the orchard shed B05, carried down the debris"}
+  ],
+  "damage": {
+    "products": ["areas", "roads", "buildings", "clues"],
+    "buried": [{"id": "Buried1", "ned": [-300, 335, 0.5], "building": "B05", "description": "in the crushed orchard shed B05"},
+               {"id": "Buried2", "ned": [-243.7, 282.4, 0.5], "description": "in the sedan (V07) the debris caught on the road"}]
+  },
+  "brief": "A debris slide has cut the mountain road below Lishan and hit the houses along it; it is getting dark and haze is coming in. Find the people (drivers stopped by the slide, residents of the houses), map the debris, report which road segments are blocked and how badly each house is damaged, and report belongings on the debris that could show where someone is buried.",
+  "environment": {"time_of_day": "2026-09-28 17:30:00", "weather": {"fog": 0.02}, "wind_ned": [0, 0, 0]},
+  "limits": {"timeout_s": 1500, "max_speed_mps": 6, "min_agl_m": 0.5, "geofence_margin_m": 20, "energy_budget_m": 9000},
+  "success": {"localization_tolerance_m": 10, "require_all_targets": true},
+  "sweep": {"seeds": 2}
+}

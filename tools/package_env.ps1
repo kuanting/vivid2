@@ -4,14 +4,14 @@
 
 .DESCRIPTION
   Without -Group: cooks every map listed in Config/DefaultGame.ini (ForestSAR, ForestSAR_Open,
-  ForestSAR_Dense, ForestFire, BlocksMap) plus the content spawned at runtime (hikers, decoys, fires,
-  Blocks proxies, drone, weather), and archives the build to build\VIVID2Env-ue<engine>-Win64\Windows.
+  ForestSAR_Dense, ForestFire, LandslideBefore, Landslide, TestYard) plus the content spawned at
+  runtime (hikers, decoys, fires, drone, weather), and archives the build to build\VIVID2Env-ue<engine>-Win64\Windows.
   With -Zip it also writes dist\VIVID2Env-ue<engine>-Win64-<commit>.zip to copy to other machines.
 
   With -Group <name>: cooks only that group's maps from unreal\VIVID2Env\package_groups.json (maps
-  that share content ship together; every group also gets BlocksMap), plus the same runtime content,
+  that share content ship together; every group also gets TestYard), plus the same runtime content,
   to build\VIVID2Env-<group>-ue<engine>-Win64 and dist\VIVID2Env-<group>-ue<engine>-Win64-<commit>.zip.
-  Started without a map, any build opens BlocksMap.
+  Started without a map, any build opens TestYard.
 
   -NoDebugInfo leaves out the game's debug symbols (VIVID2Env.pdb, about 0.5 GB); crash dumps from
   such a build have no function names.
@@ -83,7 +83,7 @@ $project = (Resolve-Path $uproject).Path
 # Quote "-name=$value" arguments: PowerShell passes an unquoted -clientconfig=$Config literally.
 $extra = @()
 # -MapsToCook overrides the ini's MapsToCook; DirectoriesToAlwaysCook and the default map
-# (BlocksMap, in every group) are still cooked.
+# (TestYard, in every group) are still cooked.
 if ($Group) { $extra += "-MapsToCook=" + (($maps | ForEach-Object { "$mapRoot$_" }) -join "+") }
 if ($NoDebugInfo) { $extra += "-nodebuginfo" }
 & $uat BuildCookRun "-project=$project" -platform=Win64 "-clientconfig=$Config" `

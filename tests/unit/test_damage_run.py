@@ -185,3 +185,22 @@ def test_a_team_reports_damage_through_the_drone_whose_photo_it_cites(tmp_path, 
     log = RunLog.load(tmp_path / "team")
     assert [(d["drone"], d["segment"], d["blocked"], d["frame_id"]) for d in log["damage"]] == [("Drone2", "R01-02", True, 7)]
     assert [e["rule"] for e in log["events"]] == ["uncited_damage_report"]  # frame 7 was never recorded
+
+
+def test_check_targets_does_not_count_washed_out_photos(tmp_path, damage_run, damage_sim_config, root):
+    """A clue (or person) fog or dusk washed out (contrast below the scoring's MIN_CONTRAST) is not visible."""
+    import sys
+
+    sys.path.insert(0, str(root / "tools"))
+    import check_targets
+
+    run_dir, _, _ = _fly(tmp_path, damage_run, damage_sim_config)
+    rows = []
+    for line in (run_dir / "frames.jsonl").read_text().splitlines():
+        f = json.loads(line)
+        if "Pack1" in (f.get("clues_visible") or {}):
+            f["clues_visible"]["Pack1"]["contrast"] = 2.0
+        rows.append(json.dumps(f))
+    (run_dir / "frames.jsonl").write_text("\n".join(rows) + "\n")
+    pack = {r["id"]: r for r in check_targets.check(run_dir)}["Pack1"]
+    assert pack["max_px"] == 0 and "contrast below" in pack["problems"][0]

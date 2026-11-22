@@ -101,7 +101,8 @@ def _footprint(b: Dict[str, Any], catalog: Dict[str, Any]) -> Tuple[List[List[fl
     if not size:
         raise ValueError(f"building {b['id']}: give size_m [length, width, height] or footprint_ne + height_m, "
                          f"or measure its asset ({b.get('asset')}) into asset_catalog.json")
-    return rect_polygon(b["ne"], float(size[0]), float(size[1]), float(b.get("yaw_deg", 0.0))), float(b.get("height_m", size[2]))
+    height = b["height_m"] if "height_m" in b else size[2]  # size_m may be [length, width] when height_m is given
+    return rect_polygon(b["ne"], float(size[0]), float(size[1]), float(b.get("yaw_deg", 0.0))), float(height)
 
 
 def build_damage(layout: Dict[str, Any], post: Optional[TerrainModel] = None, pre: Optional[TerrainModel] = None,

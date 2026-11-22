@@ -1,0 +1,7 @@
+// Landslide S&R and damage mapping on the Landslide map (debris slide across a mountain road; see
+// docs/damage.md and docs/missions.md).
+{
+  "name": "landslide_v1",
+  "sim_config_dir": "../sim_config",
+  "scenarios": ["../scenarios/landslide/landslide_*.jsonc"]
+}

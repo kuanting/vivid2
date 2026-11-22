@@ -146,3 +146,19 @@ def test_view_mask_needs_the_cell_in_the_photo_sharp_and_unhidden():
     hidden = view_mask(tilted, cells, np.zeros(len(cells)), ridge)
     beyond = cells[:, 0] > 12
     assert open_[beyond].any() and not hidden[beyond].any()
+
+
+def test_a_building_placed_by_centre_and_size_takes_height_m():
+    lay = _flat_layout(buildings=[{"id": "B1", "ne": [0, 0], "size_m": [12, 8], "yaw_deg": 90, "height_m": 7, "ems98": 0}])
+    b = build_damage(lay).doc["buildings"][0]
+    fp = np.asarray(b["footprint_ne"])
+    assert b["height_m"] == 7 and np.ptp(fp[:, 0]) == pytest.approx(8) and np.ptp(fp[:, 1]) == pytest.approx(12)
+
+
+def test_the_landslide_layout_builds_its_expected_damage(root):
+    """Landslide's layout on ForestSAR's terrain: the expect block (blocked segments, grades) holds."""
+    lay = json.loads((root / "unreal/VIVID2Env/SourceData/Landslide/layout.json").read_text(encoding="utf-8"))
+    post = TerrainModel.load(lfs_file(root / "sim_config/maps/Landslide/terrain_dtm.npz"))
+    built = build_damage(lay, post)
+    assert sorted(r["id"] for r in built.doc["roads"] if r["blocked"]) == lay["expect"]["blocked"]
+    assert set(built.doc["area_classes"]) == {"scar", "debris"} and not built.doc["area_classes"]["scar"]["blocks_roads"]

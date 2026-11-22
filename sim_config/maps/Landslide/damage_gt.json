@@ -1,0 +1,408 @@
+{
+ "version": 1,
+ "map": "Landslide",
+ "area_classes": {
+  "scar": {
+   "bit": 0,
+   "about": "steep ground the slide stripped bare: soil and rock, no trees, unstable",
+   "blocks_roads": false
+  },
+  "debris": {
+   "bit": 1,
+   "about": "soil, rocks and broken trees the slide deposited, burying what was there",
+   "blocks_roads": true
+  }
+ },
+ "roads": [
+  {
+   "id": "R01-01",
+   "road": "R01",
+   "polyline_ne": [
+    [
+     39.0,
+     410.0
+    ],
+    [
+     1.0,
+     413.0
+    ],
+    [
+     -37.0,
+     410.0
+    ],
+    [
+     -55.105,
+     417.988
+    ]
+   ],
+   "width_m": 6.0,
+   "kind": "mountain road, two lanes",
+   "blocked": false,
+   "cause": []
+  },
+  {
+   "id": "R01-02",
+   "road": "R01",
+   "polyline_ne": [
+    [
+     -55.105,
+     417.988
+    ],
+    [
+     -71.0,
+     425.0
+    ],
+    [
+     -105.0,
+     438.0
+    ],
+    [
+     -142.0,
+     445.0
+    ],
+    [
+     -146.347,
+     443.51
+    ]
+   ],
+   "width_m": 6.0,
+   "kind": "mountain road, two lanes",
+   "blocked": false,
+   "cause": []
+  },
+  {
+   "id": "R01-03",
+   "road": "R01",
+   "polyline_ne": [
+    [
+     -146.347,
+     443.51
+    ],
+    [
+     -177.0,
+     433.0
+    ],
+    [
+     -195.0,
+     400.0
+    ],
+    [
+     -200.501,
+     374.557
+    ]
+   ],
+   "width_m": 6.0,
+   "kind": "mountain road, two lanes",
+   "blocked": false,
+   "cause": []
+  },
+  {
+   "id": "R01-04",
+   "road": "R01",
+   "polyline_ne": [
+    [
+     -200.501,
+     374.557
+    ],
+    [
+     -203.0,
+     363.0
+    ],
+    [
+     -213.0,
+     328.0
+    ],
+    [
+     -235.0,
+     297.0
+    ],
+    [
+     -239.997,
+     288.584
+    ]
+   ],
+   "width_m": 6.0,
+   "kind": "mountain road, two lanes",
+   "blocked": true,
+   "cause": [
+    "debris"
+   ],
+   "blocked_at_ne": [
+    [
+     -225.31,
+     310.65
+    ],
+    [
+     -238.96,
+     290.33
+    ]
+   ]
+  },
+  {
+   "id": "R01-05",
+   "road": "R01",
+   "polyline_ne": [
+    [
+     -239.997,
+     288.584
+    ],
+    [
+     -254.0,
+     265.0
+    ],
+    [
+     -281.0,
+     237.0
+    ],
+    [
+     -308.742,
+     226.393
+    ]
+   ],
+   "width_m": 6.0,
+   "kind": "mountain road, two lanes",
+   "blocked": true,
+   "cause": [
+    "debris"
+   ],
+   "blocked_at_ne": [
+    [
+     -241.02,
+     286.86
+    ],
+    [
+     -263.42,
+     255.23
+    ]
+   ]
+  },
+  {
+   "id": "R01-06",
+   "road": "R01",
+   "polyline_ne": [
+    [
+     -308.742,
+     226.393
+    ],
+    [
+     -315.0,
+     224.0
+    ],
+    [
+     -349.0,
+     240.0
+    ],
+    [
+     -384.0,
+     240.0
+    ],
+    [
+     -396.47,
+     228.82
+    ]
+   ],
+   "width_m": 6.0,
+   "kind": "mountain road, two lanes",
+   "blocked": false,
+   "cause": []
+  },
+  {
+   "id": "R01-07",
+   "road": "R01",
+   "polyline_ne": [
+    [
+     -396.47,
+     228.82
+    ],
+    [
+     -413.0,
+     214.0
+    ],
+    [
+     -445.0,
+     197.0
+    ],
+    [
+     -478.0,
+     179.0
+    ]
+   ],
+   "width_m": 6.0,
+   "kind": "mountain road, two lanes",
+   "blocked": false,
+   "cause": []
+  }
+ ],
+ "buildings": [
+  {
+   "id": "B01",
+   "footprint_ne": [
+    [
+     -125.214,
+     435.981
+    ],
+    [
+     -126.603,
+     428.103
+    ],
+    [
+     -114.786,
+     426.019
+    ],
+    [
+     -113.397,
+     433.897
+    ]
+   ],
+   "height_m": 7.0,
+   "base_down_m": -212.072,
+   "roof": "flat",
+   "use": "farmhouse",
+   "ems98": 0,
+   "grade": "none",
+   "cause": "",
+   "post_height_m": 7.0
+  },
+  {
+   "id": "B02",
+   "footprint_ne": [
+    [
+     -203.499,
+     337.335
+    ],
+    [
+     -195.809,
+     335.13
+    ],
+    [
+     -192.501,
+     346.665
+    ],
+    [
+     -200.191,
+     348.87
+    ]
+   ],
+   "height_m": 7.0,
+   "base_down_m": -209.076,
+   "roof": "flat",
+   "use": "farmhouse",
+   "ems98": 3,
+   "grade": "partial",
+   "cause": "debris piled against its west wall",
+   "post_height_m": 7.0
+  },
+  {
+   "id": "B03",
+   "footprint_ne": [
+    [
+     -259.975,
+     284.217
+    ],
+    [
+     -253.975,
+     280.612
+    ],
+    [
+     -248.825,
+     289.183
+    ],
+    [
+     -254.825,
+     292.788
+    ]
+   ],
+   "height_m": 6.0,
+   "base_down_m": -196.269,
+   "roof": "flat",
+   "use": "house",
+   "ems98": 5,
+   "grade": "collapsed",
+   "cause": "buried and crushed by the debris",
+   "spill_m": 1.8,
+   "post_height_m": 2.0
+  },
+  {
+   "id": "B04",
+   "footprint_ne": [
+    [
+     -337.947,
+     229.061
+    ],
+    [
+     -341.328,
+     221.81
+    ],
+    [
+     -330.453,
+     216.739
+    ],
+    [
+     -327.072,
+     223.99
+    ]
+   ],
+   "height_m": 7.0,
+   "base_down_m": -207.418,
+   "roof": "flat",
+   "use": "farmhouse",
+   "ems98": 0,
+   "grade": "none",
+   "cause": "",
+   "post_height_m": 7.0
+  },
+  {
+   "id": "B05",
+   "footprint_ne": [
+    [
+     -301.598,
+     338.232
+    ],
+    [
+     -303.598,
+     334.768
+    ],
+    [
+     -298.402,
+     331.768
+    ],
+    [
+     -296.402,
+     335.232
+    ]
+   ],
+   "height_m": 3.0,
+   "base_down_m": -164.105,
+   "roof": "flat",
+   "use": "orchard shed",
+   "ems98": 5,
+   "grade": "collapsed",
+   "cause": "buried by the debris",
+   "spill_m": 0.9,
+   "post_height_m": 2.0
+  }
+ ],
+ "blockers": [],
+ "water": null,
+ "grades": [
+  "none",
+  "partial",
+  "collapsed"
+ ],
+ "layout": {
+  "file": "unreal/VIVID2Env/SourceData/Landslide/layout.json",
+  "sha256": "96a710e79172d5d131cf1091fa03afcf861e9247e56355e7c55b1a93810430ba"
+ },
+ "terrain": {
+  "post_sha256": "3980f2a5156b97d901bfe8eb6e43346aeac7585a3bb2ba9b3409ffeb030bb2b7",
+  "pre_sha256": "251e234187d094f754b85dd08029b94d8966829fba392a1a5b1569e5a4e21722"
+ },
+ "raster": {
+  "file": "damage_gt.npz",
+  "sha256": "53bd57eb485059c6efd7693f917886d964b8b93a486620adef359ca64838d17a"
+ },
+ "surface": {
+  "file": "surface_dsm.npz",
+  "sha256": "c1aae9e0b6a6b381fcf5cd2384af04365fa634f535720865ed30463a610e7e4b"
+ }
+}

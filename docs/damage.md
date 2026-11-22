@@ -169,9 +169,18 @@ refuses without `--force`): rescoring checks its checksums, as it does the terra
 - Fly the oracle with `--frame-bank rgbd` and run `python tools/check_targets.py <run>`: every
   scored person must reach twice the visibility threshold in some photo from survey height
   (move it, or make it a buried victim), every clue the threshold, and nobody may float.
+  Only photos where it stands out from the ground around it count (contrast ΔE 6, the scoring's
+  rule): at dusk, fog of 0.05 already washes the ground out from survey height, so dusk
+  scenarios use haze (0.02) at most. On a terrain-following survey "survey height" is above
+  the ground under the drone. People on roofs are checked against the surface model, and
+  partly buried people (checked on debris before the run) are a note, not a failure.
   Project AirSim's depth comes in whole metres for now, so the float check uses the terrain
   model: check targets standing on meshes (rubble, boulders) by eye. For the legacy
   Blocks proxies add `--centre-pivot` (the cubes' positions are their centres).
+- On steep ground (a landslide, an avalanche path) use `"altitude_ref": "terrain"` in the
+  search area, so the survey keeps its height above the ground ([missions.md](missions.md#writing-a-scenario)).
+  The reference stacks geolocate against the pre-event DEM, which lies under a deposit: allow
+  10 m localization tolerance, as on the other maps with relief.
 - `python tools/damage_png.py <run>` draws the ground truth over the run's photos: check that
   the debris, roads and buildings in the ground truth are what the photos show.
 

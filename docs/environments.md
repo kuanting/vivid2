@@ -45,6 +45,7 @@ the packs themselves are ignored by git.
 | Lie Down Animation Pack (Fab, Ailive) | `Content/Fab/Lie_Down_Animation_Pack/` | Hiker poses: on the back, face down, on the side | Fab imports it from FBX; save it after adding it to the project |
 | Body Wave Animation Pack (Fab, Ailive) | `Content/Fab/Body_Wave_Animation_Pack/` | Hiker pose: waving both arms | As above |
 | Third Person template (engine) | `Content/Characters/` | Hiker pose: crouching (`MM_Death_Back_01`) | See [Targets](#targets-hikers) |
+| Velocity Cars Pack (Fab) | `Content/Velocity_Cars_Pack/` | The cars in LandslideBefore and Landslide | Only its static blueprints (`Blueprints/Static_Blueprints/BP_Static_Velocity_*`) are placed, so builds carry their meshes and materials, not the drivable cars' skeletal meshes |
 
 ## Targets (hikers)
 
@@ -268,7 +269,9 @@ press Play, or start any packaged build without a map.
   effects. The level's ExponentialHeightFog is only the base haze.
 - **Terrain height:** the runner snaps targets and the drone start onto
   `terrain_dtm.npz`, and the safety metrics measure height above it. The
-  reference planner still flies at a fixed altitude; terrain following is M3.4.
+  reference planner flies at a fixed altitude above the start unless the
+  scenario asks for a terrain-following survey (`search_area.altitude_ref`,
+  [missions.md](missions.md#writing-a-scenario)), as the landslide scenarios do.
 
 ## ForestFire (Phase 2)
 
@@ -352,3 +355,33 @@ at run time. The test map, TestYard, is built the same way at small scale
 Each new map goes into a build group in `unreal/VIVID2Env/package_groups.json` (the landslide
 maps join `forest`, whose trees they share) and into `MapsToCook`; `tests/unit/test_packaging.py`
 checks the two agree.
+
+### Landslide and LandslideBefore
+
+ForestSAR's site (Lishan) with a two-lane mountain road, R01, cut along the 2188 m contour
+(Unreal Z 203 m) across the south-east slope, four houses and an orchard shed beside it, and the
+forest cleared from the road, its cut and fill faces and the house yards. In **Landslide** a slab
+of the steep slope above the road failed: the scar is stripped to raw soil and rock, and the
+debris (soil, boulders, broken trunks) buried about 70 m of road (segments R01-04 and R01-05 blocked),
+crushed house B03 and the shed B05, piled against farmhouse B02 (its slope end caved in) and ran
+220 m down the slope. **LandslideBefore** is the same slope before the slide: the pre-event twin
+and a null control (nothing damaged).
+
+- **Source:** `SourceData/Landslide/layout.json` (regions, road, buildings, terrain edits, the
+  spots kept clear for people and clues, the cars). Terrains:
+  `vivid2 terrain build --map LandslideBefore|Landslide --like ForestSAR --layout ... --stage pre|post`;
+  the ground truth: `vivid2 damage build --map Landslide`.
+- **Levels:** copies of ForestSAR with their own markers and landscapes (heightmaps imported by
+  hand), built in the editor by `tools/build_landslide.py` in steps: `level`, `check` (400
+  landscape traces against the terrain model), `masks`, `forest` (a copy of ForestSAR's PCG graph
+  that drops everything on cleared ground), `ground` (asphalt, bare soil, scar and debris in the
+  landscape material), `houses` (box houses, placeholders until a building pack; damaged as
+  graded), `debris` (Forest Fire pack boulders, rocks, logs and stumps over the debris) and `cars`.
+- **Cars** (Velocity Cars Pack, no drivers or passengers, lights off): four parked by the houses
+  and one on the road before the slide; after it, B03's car lies on its side down the debris,
+  one is sunk in the debris on the road, and two have stopped either side of the blockage, the
+  east one with its driver's door open.
+- **Scenarios:** `scenarios/landslide/landslide_sar_01.jsonc` (noon) and `_02` (dusk, light
+  fog), campaign `campaigns/landslide_v1.jsonc`. The slide falls 185 m from the scar to its toe,
+  so they fly a terrain-following survey (`search_area.altitude_ref: "terrain"`, see
+  [missions.md](missions.md)).

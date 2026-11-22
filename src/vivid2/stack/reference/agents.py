@@ -13,6 +13,7 @@ from vivid2.stack.base import (Agent, Assessment, DamageMapper, Frame, MissionCo
 from vivid2.stack.reference.controllers import DESCENT_MPS
 from vivid2.cameras import GIMBAL_SETTLE_S, GIMBAL_SLEW_DPS
 from vivid2.stack.reference.lowflight import CanopyMap, Clearing, DipSettings, LookAround
+from vivid2.stack.reference.planners import FOLLOW_STEP_M, follow_down_at, follows_terrain
 from vivid2.terrain import TerrainModel
 
 DEPTH_SATURATION_M = 65.0  # 16-bit millimetre depth saturates at 65.535 m
@@ -159,12 +160,19 @@ class LowFlightMixin:
     Subclasses set ``self.low`` (DipSettings or None), ``self.frame_period_s``,
     ``self._path`` and ``self._survey_down``, call ``_lf_start`` before takeoff and
     ``_lf_observe`` on every payload frame.
+
+    On a terrain-following survey (``mission.altitude_ref`` "terrain") the survey height depends on
+    where the drone is: ``_survey_down_at`` and ``_survey_down_between`` give it (elsewhere they
+    return ``self._survey_down``).
     """
 
     low: Optional[DipSettings] = None
     frame_period_s: float = 1.0
+    _follow: Optional[tuple] = None  # (coarse terrain, altitude_m) on a terrain-following survey
 
     def _lf_start(self, mission, wh, fov: float) -> None:
+        self._follow = (mission.terrain, float(mission.altitude_m)) if follows_terrain(mission) else None
+        self._climbed_m = 0.0  # guard climbs on a terrain-following survey
         self._canopy: Optional[CanopyMap] = None
         self._dips = 0
         self._climbs = 0
@@ -197,9 +205,37 @@ class LowFlightMixin:
     def _all_found(self, ctx: MissionContext) -> bool:
         return False
 
+    def _survey_down_at(self, n: float, e: float) -> float:
+        """The survey height over (n, e) as NED down: ``self._survey_down``, or on a terrain-following
+        survey altitude_m above the highest coarse ground around (n, e), raised by any guard climbs."""
+        if self._follow is None:
+            return self._survey_down
+        terrain, altitude = self._follow
+        return follow_down_at(terrain, n, e, altitude) - self._climbed_m
+
+    def _survey_down_between(self, a, b) -> float:
+        """The highest survey height along the straight line a-b (``self._survey_down`` unless terrain-following)."""
+        if self._follow is None:
+            return self._survey_down
+        a, b = np.asarray(a[:2], float), np.asarray(b[:2], float)
+        k = max(1, int(math.ceil(float(np.linalg.norm(b - a)) / FOLLOW_STEP_M)))
+        return min(self._survey_down_at(*(a + (b - a) * (i / k))) for i in range(k + 1))
+
+    async def _climb_for_home(self, ctx: MissionContext) -> None:
+        """On a terrain-following survey, first climb to clear the ground on the straight way home
+        (the flight home keeps its height)."""
+        if self._follow is None:
+            return
+        pos, _ = ctx.pose()
+        safe = self._survey_down_between(pos, ctx.mission.start_ned)
+        if safe < float(pos[2]):
+            await ctx.controller.goto([float(pos[0]), float(pos[1]), safe], DESCENT_MPS)
+
     async def _resume(self, ctx: MissionContext, survey_down: float) -> None:
         """Climb back to the survey altitude and fly the rest of the path."""
         pos, _ = ctx.pose()
+        if self._follow is not None:
+            survey_down = self._survey_down_at(float(pos[0]), float(pos[1]))
         back = [float(pos[0]), float(pos[1]), survey_down]
         await ctx.controller.goto(back, VERIFY_DESCENT_MPS)
         rest = remaining_path(self._path, pos)
@@ -226,7 +262,11 @@ class LowFlightMixin:
         climb = self.low.guard_clearance_m - (top - pos[2]) + 2.0
         self._climbs += 1
         self._survey_down -= climb
-        self._path = [[w[0], w[1], min(w[2], self._survey_down)] for w in self._path]
+        if self._follow is not None:  # the whole terrain-following path goes up by the climb
+            self._climbed_m += climb
+            self._path = [[w[0], w[1], w[2] - climb] for w in self._path]
+        else:
+            self._path = [[w[0], w[1], min(w[2], self._survey_down)] for w in self._path]
         self._lf_event(ctx, "guard_climb", clearance_m=float(top - pos[2]), climb_m=float(climb))
         await self._resume(ctx, self._survey_down)
         return True
@@ -234,15 +274,16 @@ class LowFlightMixin:
     def _transit_down(self, a, b) -> float:
         """Survey altitude, or higher if the mapped canopy along a-b would come too close."""
         top = self._canopy.highest_in_corridor(a[:2], b[:2], self.low.guard_half_width_m)
+        survey = self._survey_down_between(a, b)
         if top is None:
-            return self._survey_down
-        return min(self._survey_down, top - self.low.guard_clearance_m)
+            return survey
+        return min(survey, top - self.low.guard_clearance_m)
 
     def _dip_cost(self, ctx: MissionContext, pos, spot: Clearing) -> Dict[str, float]:
         """Rough time (s) and path length (m) of a dip, and of the flight home after it."""
         m = ctx.mission
-        drop = max(0.0, float(m.terrain.down_at(spot.n, spot.e)) - self._dip_height(m) - self._survey_down) \
-            if m.terrain is not None else 0.0
+        drop = max(0.0, float(m.terrain.down_at(spot.n, spot.e)) - self._dip_height(m)
+                   - self._survey_down_at(spot.n, spot.e)) if m.terrain is not None else 0.0
         travel = math.hypot(spot.n - pos[0], spot.e - pos[1])
         home = math.hypot(spot.n - m.start_ned[0], spot.e - m.start_ned[1])
         look_s = self.low.dip_frames * max(self.frame_period_s, self._assess_s)
@@ -252,9 +293,12 @@ class LowFlightMixin:
                                     + max(self.frame_period_s, self._assess_s)) + 2.0 * (90.0 / GIMBAL_SLEW_DPS)
         dip_s = (travel / m.max_speed_mps + drop / DIP_DESCENT_MPS + drop / DIP_CLIMB_MPS
                  + math.ceil(drop / DIP_STEP_M) * DIP_STEP_OVERHEAD_S + look_s)
-        home_s = home / m.max_speed_mps + max(0.0, m.start_ned[2] - self._survey_down) / DESCENT_MPS + LANDING_OVERHEAD_S
+        home_down = self._survey_down_between((spot.n, spot.e), m.start_ned)  # the height of the way home
+        climb = max(0.0, self._survey_down_at(spot.n, spot.e) - home_down)  # 0 unless terrain-following
+        home_s = (home / m.max_speed_mps + max(0.0, m.start_ned[2] - home_down) / DESCENT_MPS + climb / DIP_CLIMB_MPS
+                  + LANDING_OVERHEAD_S)
         return {"dip_s": dip_s, "home_s": home_s, "dip_m": travel + 2 * drop,
-                "home_m": home + max(0.0, m.start_ned[2] - self._survey_down)}
+                "home_m": home + max(0.0, m.start_ned[2] - home_down) + climb}
 
     def _dip_affordable(self, ctx: MissionContext, pos, spot: Clearing) -> bool:
         m = ctx.mission
@@ -519,9 +563,11 @@ class SearchAgent(LowFlightMixin, Agent):
 
     async def _depart(self, ctx: MissionContext, path: List[List[float]]) -> None:
         """Take off to the survey height; the survey path starts from there."""
-        await ctx.controller.takeoff(self._survey_down)
+        start = ctx.mission.start_ned
+        await ctx.controller.takeoff(self._survey_down_at(start[0], start[1]))
 
     async def _go_home(self, ctx: MissionContext) -> None:
+        await self._climb_for_home(ctx)
         await ctx.controller.return_and_land(ctx.mission.start_ned, ctx.mission.max_speed_mps)
 
     async def _survey_step(self, ctx: MissionContext, frame: Frame) -> str:
@@ -537,7 +583,8 @@ class SearchAgent(LowFlightMixin, Agent):
                     if not self._may_descend_at(float(ned[0]), float(ned[1])):
                         return "continue"  # not this drone's to look at closer (a teammate's area)
                     self._verifications += 1
-                    report = await self._verify(ctx, frame, assessment, ned, self._survey_down)
+                    report = await self._verify(ctx, frame, assessment, ned,
+                                                self._survey_down_at(frame.cam_pos[0], frame.cam_pos[1]))
                     if report is not None:
                         self._reported.append(report.ned)
                         ctx.report_target(report)
@@ -699,7 +746,10 @@ class SearchAgent(LowFlightMixin, Agent):
                            "confidence": assessment.confidence, "height_m": ground - look_down,
                            "look_at": [float(look[0]), float(look[1]), look_down], "frame_id": frame.frame_id,
                            **({"no_fly_limited": True} if limited else {})})
-        await ctx.controller.goto([float(look[0]), float(look[1]), float(pos[2])], m.max_speed_mps)
+        level = float(pos[2])
+        if self._follow is not None:  # don't fly level into rising ground on the way
+            level = min(level, self._survey_down_between(pos, look))
+        await ctx.controller.goto([float(look[0]), float(look[1]), level], m.max_speed_mps)
         await ctx.controller.goto([float(look[0]), float(look[1]), look_down], VERIFY_DESCENT_MPS)
         need = self.verify_frames // 2 + 1  # majority of the close-ups
         yes: List[Any] = []  # (ned, assessment, frame) of confirming close-ups
@@ -787,7 +837,7 @@ class SurveyAgent(LowFlightMixin, Agent):
         path = self.planner.plan(m, fov, wh)
         self._survey_down = m.ground_down_m - m.altitude_m
         self._lf_start(m, wh, fov)
-        await ctx.controller.takeoff(self._survey_down)
+        await ctx.controller.takeoff(self._survey_down_at(m.start_ned[0], m.start_ned[1]))
         here, _ = ctx.pose()
         self._path = [[float(v) for v in here]] + [list(w) for w in path]
         await ctx.controller.fly_path(path, m.max_speed_mps)
@@ -803,6 +853,7 @@ class SurveyAgent(LowFlightMixin, Agent):
             await pace(ctx, t_loop, self.frame_period_s)
         if self.low is not None and not ctx.should_stop():
             await self._lf_tour(ctx, self._dip_record)
+        await self._climb_for_home(ctx)
         await ctx.controller.return_and_land(m.start_ned, m.max_speed_mps)
 
     async def _dip_record(self, ctx: MissionContext, spot: Clearing) -> None:

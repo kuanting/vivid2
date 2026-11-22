@@ -68,7 +68,8 @@ def mission_spec(run: Run, start_ned=None, terrain=None, camera: Optional[Dict[s
     Scenarios author heights against flat ``search_area.ground_down_m``; on a map
     with relief that plane can be hundreds of metres off, so the DUT gets the
     terrain height at its start instead (flat maps: unchanged). ``altitude_m``
-    is then height above the start's ground.
+    is then height above the start's ground, or with ``search_area.altitude_ref``
+    "terrain" above the ground under the drone (``MissionSpec.altitude_ref``).
 
     In a team, ``start_ned`` is the drone's own pad and ``datum_ned`` the centre of the pads
     (``dut_start``): every drone measures heights from the ground there.
@@ -108,6 +109,7 @@ def mission_spec(run: Run, start_ned=None, terrain=None, camera: Optional[Dict[s
         min_separation_m=float(lim.get("min_separation_m", 5.0)) if team else None,
         no_fly_zones=[dict(z) for z in lim["no_fly"]] if lim.get("no_fly") else None,
         damage=damage,
+        altitude_ref="terrain" if s["search_area"].get("altitude_ref") == "terrain" else None,
     )
 
 

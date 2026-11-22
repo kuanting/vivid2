@@ -63,6 +63,8 @@ MAP_BASES = {
     "ForestSAR_Open": "scene_forest_sar.jsonc",
     "ForestSAR_Dense": "scene_forest_sar.jsonc",
     "ForestFire": "scene_forest_sar.jsonc",
+    "LandslideBefore": "scene_forest_sar.jsonc",
+    "Landslide": "scene_forest_sar.jsonc",
 }
 
 SERVICES_PORT = 8990
