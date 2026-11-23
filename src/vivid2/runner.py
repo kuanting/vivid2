@@ -233,8 +233,10 @@ def detect_depth_scale(raw: np.ndarray, cam_height_m: float) -> Optional[float]:
 # images are sent and recorded), agents pace frames by mission (sim) time, so the frames a run takes no
 # longer depend on the machine's speed; a find is timed when it is reported; 7: gimballed search camera,
 # recorded forward camera, heading control; 8: realistic hikers (people in hiking clothes with backpacks
-# from a Fab pack, real lying poses) replace the mannequins under the same names (tools/build_hikers.py).
-SIM_VERSION = 8
+# from a Fab pack, real lying poses) replace the mannequins under the same names (tools/build_hikers.py);
+# 9: the Waving hikers wave both arms overhead with VIVID 2's own clip (tools/wave_clips_blender.py) instead
+# of a dance pose from a Fab pack; new WavingOneArm hikers.
+SIM_VERSION = 9
 
 
 RULES_VERSION = 1

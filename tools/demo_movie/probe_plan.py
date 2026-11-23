@@ -19,7 +19,7 @@ ANIM = {
     "walk_m": "/Game/Hiking_Collection/Demo/Animations/MM_Walk_InPlace",
     "walk_f": "/Game/Hiking_Collection/Demo/Animations/MF_Walk_Fwd",
     "lie_side": "/Game/Fab/Lie_Down_Animation_Pack/Lying_on_the_Side_with_One_Arm_Anim",
-    "wave": "/Game/Fab/Body_Wave_Animation_Pack/Both_Arm_Wave_Anim",
+    "wave": "/Game/VIVID2/Targets/Anims/VIVID2_Wave_TwoArms_Anim",  # VIVID 2's own (tools/wave_clips_blender.py)
 }
 
 

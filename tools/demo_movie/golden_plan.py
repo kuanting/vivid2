@@ -21,7 +21,7 @@ ANIM = {
     "walk_f": f"{pl.ANIMS}/FILM_MF_Walk_InPlace",
     "idle_f": "/Game/Hiking_Collection/Demo/Animations/MF_Idle",
     "lie_side": "/Game/Fab/Lie_Down_Animation_Pack/Lying_on_the_Side_with_One_Arm_Anim",
-    "wave": "/Game/Fab/Body_Wave_Animation_Pack/Both_Arm_Wave_Anim",
+    "wave": "/Game/VIVID2/Targets/Anims/VIVID2_Wave_TwoArms_Anim",  # VIVID 2's own (tools/wave_clips_blender.py)
 }
 ZERO = {"roll": 0.0, "pitch": 0.0, "yaw": 0.0}
 # the hiker meshes face the actor's +Y (the walk clips' root motion points along +Y): to face a

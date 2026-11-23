@@ -32,7 +32,7 @@ HIKER_BPS = ["/Game/VIVID2/Targets/VIVID2_Hiker_RedJacket_LyingSide", "/Game/VIV
 DRONE_MESHES = ["/Drone/Quadrotor1", "/Drone/PropellerRed", "/Drone/PropellerWhite"]
 FIRE_BPS = ["/Game/VIVID2/Fire/VIVID2_Fire_Large", "/Game/VIVID2/Fire/VIVID2_Fire_Smolder"]
 CLIPS = ["MM_Walk_Fwd", "MF_Walk_Fwd", "MM_Walk_InPlace", "MF_Walk_InPlace", "MM_Fall_Loop", "MM_Death_Front_01",
-         "Lying_on_the_Side_with_One_Arm_Anim", "Lying_on_the_Side_with_One_Arm", "Both_Arm_Wave_Anim", "Both_Arm_Wave",
+         "Lying_on_the_Side_with_One_Arm_Anim", "Lying_on_the_Side_with_One_Arm", "VIVID2_Wave_TwoArms_Anim",
          "MM_Idle", "MF_Idle"]
 
 

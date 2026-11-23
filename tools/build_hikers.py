@@ -5,17 +5,21 @@ Scenarios spawn hikers by blueprint name (``targets`` in a scenario). This tool 
   /Game/VIVID2/Targets/VIVID2_Hiker_<Outfit>_<Pose>     one blueprint per outfit and pose
   /Game/VIVID2/Targets/Materials/M_VIVID2_ClothTint      the clothing tint material
   /Game/VIVID2/Targets/Materials/Hiker/MI_VIVID2_Hiker_<Outfit>_<Jacket|Pants>
+  /Game/VIVID2/Targets/Anims/VIVID2_Wave_<OneArm|TwoArms>[_Anim]   the waving clips (imported once)
 
 from these Fab packs (installed locally, never committed; see docs/environments.md):
 
   Hiking_Collection (Content/Hiking_Collection)   a man and a woman in hiking clothes with a backpack,
                                                   one skeletal mesh each on a MetaHuman-style skeleton
-  Lie Down Animation Pack (Content/Fab/...)        Manny clips: on the back, face down, on the side
-  Body Wave Animation Pack (Content/Fab/...)       Manny clips: waving both arms
+  Lie Down Animation Pack (Content/Fab/...)        Manny clips: on the back, face down, on the side;
+                                                  its Manny skeleton also carries the waving clips
 
-and the engine's Third Person template (Content/Characters: the crouch). The Fab animation packs
-import from FBX into unsaved assets: save them once after adding them to the project. A pose whose
-clip is missing is skipped.
+the engine's Third Person template (Content/Characters: the crouch), and VIVID 2's own waving clips
+(unreal/VIVID2Env/SourceData/Hikers/*.fbx, keyframed by tools/wave_clips_blender.py): imported onto
+the Lie Down pack's skeleton when missing (SkeletalMeshTools.import_file, which makes a 1 cm proxy
+mesh <name> and the clip <name>_Anim; it refuses to overwrite, so to update a clip delete both
+assets, restart the editor, and run again). The Fab animation packs import from FBX into unsaved
+assets: save them once after adding them to the project. A pose whose clip is missing is skipped.
 
 How a hiker is made:
   * one skeletal mesh component holding one frame of one clip (single-node animation, not playing):
@@ -41,6 +45,7 @@ from __future__ import annotations
 import argparse
 import json
 import sys
+from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
 from _mcp import URL, Mcp
@@ -49,12 +54,15 @@ TARGETS = "/Game/VIVID2/Targets"
 MATS = f"{TARGETS}/Materials"
 TINT = f"{MATS}/M_VIVID2_ClothTint"
 HIKER_MATS = f"{MATS}/Hiker"  # the outfit instances
+ANIMS = f"{TARGETS}/Anims"    # VIVID 2's own clips
 
 PACK = "/Game/Hiking_Collection"
 SKELETON = f"{PACK}/Humans/Meshes/SK_Human_Skeleton"
 OUTFIT_TEX = f"{PACK}/Outfits/Textures"
 LIE = "/Game/Fab/Lie_Down_Animation_Pack"
-WAVE = "/Game/Fab/Body_Wave_Animation_Pack"
+MANNY_SKELETON = f"{LIE}/Sprawling_Out_on_the_Floor_Skeleton"  # the skeleton the waving clips go on
+WAVE_FBX = Path(__file__).resolve().parents[1] / "unreal" / "VIVID2Env" / "SourceData" / "Hikers"
+WAVES = ["VIVID2_Wave_OneArm", "VIVID2_Wave_TwoArms"]  # tools/wave_clips_blender.py
 
 ASSETS = "editor_toolset.toolsets.asset.AssetTools"
 OBJ = "editor_toolset.toolsets.object.ObjectTools"
@@ -101,8 +109,11 @@ POSES: Dict[str, Dict[str, Any]] = {
     "LyingFront": dict(anim=f"{LIE}/Liying_Face_Dwon_on_the_Floor_Anim", t=5.0, offset={"man": (15, -5), "woman": (15, -5)}),
     # on the side, propped on one arm
     "LyingSide": dict(anim=f"{LIE}/Lying_on_the_Side_with_One_Arm_Anim", t=6.0, offset={"man": (25, -30), "woman": (25, -30)}),
-    # both arms raised in a V (a still frame: a moving wave would differ between runs)
-    "Waving": dict(anim=f"{WAVE}/Both_Arm_Wave_Anim", t=3.5, offset={"man": (0, 0), "woman": (0, 0)}),
+    # waving for help: both arms overhead, at the open V of the wave (a still frame: a moving wave
+    # would differ between runs)
+    "Waving": dict(anim=f"{ANIMS}/VIVID2_Wave_TwoArms_Anim", t=0.0, offset={"man": (0, 0), "woman": (0, 0)}),
+    # one arm (the right) raised and waving, at the outer end of the wave; the other arm hangs
+    "WavingOneArm": dict(anim=f"{ANIMS}/VIVID2_Wave_OneArm_Anim", t=0.25, offset={"man": (0, 0), "woman": (0, 0)}),
 }
 
 # The body collides like any obstacle (drones hit hikers) and is query-enabled, so Project AirSim's
@@ -225,6 +236,21 @@ def build_instances(mcp: Mcp, outfit: str) -> Dict[str, str]:
 
 
 # -------------------------------------------------------------------------------------- the pack
+def import_wave_clips(mcp: Mcp) -> None:
+    """Import VIVID 2's waving clips (SourceData/Hikers) onto the Lie Down pack's Manny skeleton, if missing."""
+    for name in WAVES:
+        if _exists(mcp, f"{ANIMS}/{name}_Anim"):
+            continue
+        src = WAVE_FBX / f"{name}.fbx"
+        if not src.exists() or not _exists(mcp, MANNY_SKELETON):
+            print(f"{name}: not imported ({src.name} or the Lie Down pack is missing)")
+            continue
+        mcp.tool(SKM, "import_file", {"folder_path": ANIMS, "asset_name": name, "source_file": src.as_posix(),
+                                      "skeleton": ref(MANNY_SKELETON), "import_animations": True})
+        mcp.tool(ASSETS, "save_assets", {"asset_paths": [f"{ANIMS}/{name}", f"{ANIMS}/{name}_Anim"]})
+        print(f"{ANIMS}/{name}_Anim: imported from {src.name}")
+
+
 def pose_skeletons(mcp: Mcp) -> List[str]:
     """Skeletons of every clip a pose uses (the Fab clips each come with their own Manny skeleton)."""
     skels = []
@@ -246,7 +272,8 @@ def make_compatible(mcp: Mcp) -> None:
     comes apart at the elbow.
     """
     sk = ref(SKELETON)
-    have = [s["refPath"] for s in _get(mcp, sk, "compatibleSkeletons")]
+    # soft references: {"refPath": ...} for a loaded skeleton, a bare path string for one that isn't
+    have = [s["refPath"] if isinstance(s, dict) else s for s in _get(mcp, sk, "compatibleSkeletons")]
     want = sorted(set(have) | set(pose_skeletons(mcp)))
     if want != sorted(have) or not _get(mcp, sk, "bUseRetargetModesFromCompatibleSkeleton"):
         _set(mcp, sk, {"CompatibleSkeletons": want, "bUseRetargetModesFromCompatibleSkeleton": True})
@@ -354,6 +381,7 @@ def main(argv=None) -> int:
     if not mcp.tool(ASSETS, "exists", {"path": SKELETON}):
         print(f"the Hiking_Collection pack is not installed ({SKELETON})", file=sys.stderr)
         return 1
+    import_wave_clips(mcp)
     poses = available_poses(mcp)
     make_compatible(mcp)
     if not args.skip_textures:

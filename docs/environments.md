@@ -42,8 +42,7 @@ the packs themselves are ignored by git.
 |---|---|---|---|
 | Forest Fire (Fab) | `Content/ForestFire/` | ForestSAR vegetation (birch trees, shrubs, ferns, grass, stumps, logs, rocks); the flipbook textures and materials of VIVID 2's fire effects; ForestFire's burnt ground texture and the parents of its burnt material instances | Made for UE4; see [the pack in UE 5.8](#the-forest-fire-pack-in-ue-58). |
 | Hiking Collection (Fab) | `Content/Hiking_Collection/` | The hikers: a man and a woman in hiking clothes with a backpack | `tools/build_hikers.py` changes it locally: compatible skeletons, textures capped at 2048 px |
-| Lie Down Animation Pack (Fab, Ailive) | `Content/Fab/Lie_Down_Animation_Pack/` | Hiker poses: on the back, face down, on the side | Fab imports it from FBX; save it after adding it to the project |
-| Body Wave Animation Pack (Fab, Ailive) | `Content/Fab/Body_Wave_Animation_Pack/` | Hiker pose: waving both arms | As above |
+| Lie Down Animation Pack (Fab, Ailive) | `Content/Fab/Lie_Down_Animation_Pack/` | Hiker poses: on the back, face down, on the side; its Manny skeleton also carries VIVID 2's waving clips | Fab imports it from FBX; save it after adding it to the project |
 | Third Person template (engine) | `Content/Characters/` | Hiker pose: crouching (`MM_Death_Back_01`) | See [Targets](#targets-hikers) |
 | Velocity Cars Pack (Fab) | `Content/Velocity_Cars_Pack/` | The cars in LandslideBefore and Landslide | Only its static blueprints (`Blueprints/Static_Blueprints/BP_Static_Velocity_*`) are placed, so builds carry their meshes and materials, not the drivable cars' skeletal meshes |
 
@@ -53,12 +52,16 @@ Scenarios spawn targets by **asset name** through `spawn-objects`. Project
 AirSim looks names up in the asset registry: static meshes, skeletal meshes and
 blueprints.
 
-**Built (v2, 2026-11-18):** 24 blueprints in `/Game/VIVID2/Targets`, named
+**Built (v3, 2026-11-23):** 28 blueprints in `/Game/VIVID2/Targets`, named
 `VIVID2_Hiker_<Outfit>_<Pose>`: realistic people in hiking clothes (jacket,
-trousers, boots, a dark backpack with a harness), with faces and hair. They
-replaced the v1 hikers, which were UE5 mannequins in flat colours, under the
-same names, so scenarios didn't change (`SIM_VERSION` 8).
-`tools/build_hikers.py` builds them through the editor's MCP server.
+trousers, boots, a dark backpack with a harness), with faces and hair. In v2
+(2026-11-18, `SIM_VERSION` 8) they replaced the v1 hikers, which were UE5
+mannequins in flat colours, under the same names, so scenarios didn't change.
+v3 (`SIM_VERSION` 9) gave `Waving` VIVID 2's own two-arm wave and added
+`WavingOneArm`. `tools/build_hikers.py` builds them through the editor's MCP
+server. Rebuilding a blueprint doesn't change copies already saved in a map
+with the old values; scenarios spawn hikers from the blueprint, so they always
+get the current one.
 - **Outfits:** the jacket and trouser colours are those of the v1 hikers and of
   the decoys, so the decoys still match.
 
@@ -69,7 +72,8 @@ same names, so scenarios didn't change (`SIM_VERSION` 8).
   | `BlueHoodie` | teenager (the man at 94 %) | dark blue | blue |
   | `GreenJacket` | man | olive (low contrast) | khaki |
 
-- **Poses:** each is one frame of a motion-capture clip.
+- **Poses:** each is one frame of a clip: motion capture from the packs, or
+  VIVID 2's own keyframed waving clips.
 
   | Pose | Clip (pack) | Looks like |
   |---|---|---|
@@ -78,10 +82,20 @@ same names, so scenarios didn't change (`SIM_VERSION` 8).
   | `LyingBack` | `Sprawling_Out_on_the_Floor` at 5 s (Lie Down) | on the back, arms and legs spread |
   | `LyingFront` | `Liying_Face_Dwon_on_the_Floor` at 5 s (Lie Down) | face down, arms folded over the head, backpack up |
   | `LyingSide` | `Lying_on_the_Side_with_One_Arm` at 6 s (Lie Down) | on the side, propped on one arm |
-  | `Waving` | `Both_Arm_Wave` at 3.5 s (Body Wave) | standing, both arms up in a V |
+  | `Waving` | `VIVID2_Wave_TwoArms` at 0 s (VIVID 2) | waving for help: both arms overhead, open in a V, head up |
+  | `WavingOneArm` | `VIVID2_Wave_OneArm` at 0.25 s (VIVID 2) | right arm raised and waving out to the side, left arm down, head up |
 
-  `LyingSide` and `Waving` are new in v2. The hiker faces +X (north at
-  `yaw_deg` 0).
+  `LyingSide` and `Waving` are new in v2, `WavingOneArm` in v3. The hiker faces
+  +X (north at `yaw_deg` 0).
+- **Waving clips:** `tools/wave_clips_blender.py` keyframes them in Blender
+  (headless) on the Lie Down pack's Manny skeleton: the skeleton's reference
+  pose turned to face +X, a two-bone arm solve, forearm twist for a forward
+  palm, raised clavicles, open fingers and the head tilted up. They loop (one
+  arm: 4 s, a wave a second; both arms: 4.8 s, between the V and crossed over
+  the head every 1.2 s), so the demo movie can play them. Its FBX output is
+  committed in `unreal/VIVID2Env/SourceData/Hikers/`; `tools/build_hikers.py`
+  imports it into `/Game/VIVID2/Targets/Anims/`. They replace the Body Wave
+  Animation Pack's `Both_Arm_Wave`, a dance move that looked like dancing.
 - **Construction:**
   - **Mesh:** each blueprint is one skeletal mesh component, the pack's
     combined man or woman (body, head, card hair and outfit in one mesh). It
