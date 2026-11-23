@@ -144,6 +144,10 @@ def render(results: List[Dict[str, Any]], title: str) -> str:
     for r in sorted(results, key=lambda r: (r["scenario_id"], r["agent"], r["run_id"])):
         mi, sa = r["metrics"]["mission"], r["metrics"]["safety"]
         rs = r.get("reasoning_summary") or {}
+        cost = rs.get("cost_usd")
+        mapper = (r["metrics"].get("damage") or {}).get("mapper")
+        if mapper:  # the damage mapper's model calls are VLM spend too
+            cost = (cost or 0.0) + mapper["cost_usd"]
         status = '<span class="ok">success</span>' if mi["success"] else f'<span class="fail">{_fmt(mi["end_reason"])}</span>'
         run_rows.append(
             "<tr>"
@@ -153,7 +157,7 @@ def render(results: List[Dict[str, Any]], title: str) -> str:
             f"<td class='num'>{_fmt(mi['mean_time_to_find_s'])}</td><td class='num'>{_fmt(mi['mean_localization_error_m'])}</td>"
             f"<td class='num'>{mi['false_alarms']}</td><td class='num'>{sa['collisions']}</td>"
             f"<td class='num'>{_fmt(r['metrics']['planning']['coverage_pct'])}</td>"
-            f"<td class='num'>{_fmt(rs.get('cost_usd'), 3)}</td>"
+            f"<td class='num'>{_fmt(cost, 3)}</td>"
             f"<td class='num'><b>{_fmt(r['scores']['overall'])}</b></td></tr>"
         )
 
