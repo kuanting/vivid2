@@ -188,6 +188,10 @@ class AgentFactory:
             from vivid2.stack.reference.damage import GroundTruthDamageMapper
 
             return GroundTruthDamageMapper()
+        if self.kind in ("vlm", "hybrid"):
+            from vivid2.stack.reference.damage_vlm import VLMDamageMapper
+
+            return VLMDamageMapper(self._vlm)
         return None
 
     def _agent(self, run: Run, planner, cls, **team) -> Agent:

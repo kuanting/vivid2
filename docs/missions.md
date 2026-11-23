@@ -171,8 +171,9 @@ damage task, its rules and its score are in [damage.md](damage.md).
 | `earthquake_sar` | CoastQuake (a Hualien coast town) | building grades, blocked roads | Planned |
 | `tsunami_sar` | CoastTsunami (the same town, flooded) | flood extent, blocked roads, building grades | Planned |
 
-Not yet: a VLM damage mapper for the `vlm` and `hybrid` stacks (they score 0 on the damage task
-until then), a pre-event orthophoto as a mission input, and a situation-report rubric.
+The `vlm` and `hybrid` stacks map the damage with their VLM ([damage.md](damage.md#the-vlm-damage-mapper));
+`coverage_yolo` and `survey` have no damage layer yet and score 0 on the task. Not yet: a pre-event
+orthophoto as a mission input, and a situation-report rubric.
 
 ## Writing a scenario
 

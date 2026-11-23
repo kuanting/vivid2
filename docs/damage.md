@@ -116,15 +116,57 @@ All on the area of interest's 2 m cells:
 ## Reference stacks
 
 Every reference search agent can carry a damage layer (`vivid2.stack.base.DamageMapper`). It
-looks at each survey photo after the person search, and its reports go out at once (roads,
-buildings, clues) or at the end of the survey (area outlines). With a damage layer the agent
-flies the whole survey even after everyone is found.
+looks at the survey photos it picks (`wants`), after the person search or in the background, and
+its reports go out as it goes (roads, buildings, clues) or at the end of the survey (area
+outlines). With a damage layer the agent flies the whole survey even after everyone is found.
 
 | Stack | Damage layer |
 |---|---|
 | `coverage_gt` | `GroundTruthDamageMapper`: reports the ground truth its own photos observed. The upper bound for its flight; not eligible for ranking. |
-| `vlm`, `hybrid` | a VLM damage mapper (phase D1, coming) |
+| `vlm`, `hybrid` | `VLMDamageMapper`: asks the stack's VLM about labelled survey photos (below) |
 | `coverage_yolo`, `survey` | none yet: they score 0 on the damage task |
+
+### The VLM damage mapper
+
+`vivid2.stack.reference.damage_vlm.VLMDamageMapper` uses the stack's own VLM (the same model, effort
+and record/replay cache as its person search) with its own prompt, `vlm/prompts/<mission>_damage.md`.
+
+- **Which photos.** A straight-down search photo from at least 60 % of the survey height whose
+  footprint is at least half new ground (ground no earlier mapped photo showed), up to 80 per run.
+  On the landslide that is about 21 photos, so each patch of ground is seen once or twice.
+- **What is sent.** Two images of the photo, each at most 1568 px: the photo as taken, and the
+  photo with a 12 × 9 grid of labelled cells (A1 at the top left), the task's road segments drawn
+  along their centrelines and its buildings outlined, each with its id. One structured reply
+  answers every product asked for: the cells each area class covers at least half of, each
+  labelled segment open, blocked or not visible, each labelled building's grade or not visible,
+  and clues with their kind and image point.
+- **How answers become reports.** The photo's depth places a lattice of its pixels on the ground
+  (where there is no depth, the pixel's ray meets the DEM), so each answer is a vote on the 2 m
+  cells under the grid cells it names. A cell is in a class when at least half of the looks at it
+  put it there; the outlines go out at the end of the survey. A segment is blocked when its
+  "blocked" answers reach half of its "open" ones, each "open" counted by the share of the segment
+  that photo showed (the blockage may be in the part it did not show). A building takes the grade
+  most answers gave (a tie: the more severe). Roads and buildings are reported whenever that
+  changes, citing the photo that changed it. A clue placed by depth is reported at once; one placed
+  on the DEM waits for a better look and goes out at the end if none comes.
+- **Cost and timing.** One call per mapped photo, logged in `decisions` with layer `damage_mapper`
+  (the person-search reasoning metrics leave them out; `metrics.damage.mapper` counts calls, errors,
+  tokens and cost). Calls run in the background, three at once, so the person search goes on; the
+  drone waits for the last ones before it reports the outlines and flies home.
+
+Evaluate the mapper offline on a run's saved photos (a run recorded with `--frame-bank rgbd`):
+
+```
+python tools/eval_damage_mapper.py runs\landslide_v1\coverage_gt\landslide_sar_01-*                    # answers from the ground truth
+python tools/eval_damage_mapper.py runs\landslide_v1\coverage_gt\landslide_sar_01-* --answers anthropic  # Claude: asks before spending
+```
+
+`--answers truth` answers every question from the ground truth: the best this mapper can do with
+those photos (on the landslide oracle runs: damage about 91, areas IoU 0.86, the grid's resolution).
+`--save-sent` writes the images and prompt of every call; `--dry-run` writes them without asking.
+Saved depth is millimetres and saturates at 65.5 m, which on the landslide's steep slope leaves
+far parts of the photos to the DEM; live depth has no such limit, so offline scores are a little
+pessimistic.
 
 ## The ground truth
 

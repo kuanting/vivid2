@@ -1,6 +1,7 @@
 """Reference agents: a modular search agent (Perception -> Reasoner -> Planner -> Controller) and a survey agent."""
 from __future__ import annotations
 
+import asyncio
 import math
 from typing import Any, Awaitable, Callable, Dict, List, Optional
 
@@ -536,10 +537,35 @@ class SearchAgent(LowFlightMixin, Agent):
 
     # -- the damage task ----------------------------------------------------------------------
     async def _map(self, ctx: MissionContext, frame: Frame) -> None:
-        """Let the damage layer look at a survey photo and send what it reports."""
+        """Let the damage layer look at a survey photo and send what it reports.
+
+        A mapper with ``max_in_flight`` (a model) looks in the background, that many photos at
+        once, so the person search goes on meanwhile; others look before the agent flies on.
+        """
         m = ctx.mission
         if self.mapper is None or getattr(m, "damage", None) is None or not self.mapper.wants(frame, m):
             return
+        slots = int(getattr(self.mapper, "max_in_flight", 0) or 0)
+        if slots <= 0:
+            await self._map_photo(ctx, frame)
+            return
+        if getattr(self, "_map_slots", None) is None:
+            self._map_slots = asyncio.Semaphore(slots)
+            self._map_tasks: List[asyncio.Task] = []
+        self._map_tasks.append(asyncio.ensure_future(self._map_queued(ctx, frame)))
+
+    async def _map_queued(self, ctx: MissionContext, frame: Frame) -> None:
+        async with self._map_slots:
+            if ctx.should_stop():
+                return
+            try:
+                await self._map_photo(ctx, frame)
+            except Exception as e:  # a background look must never bring the search down
+                ctx.log("decisions", {"t": frame.t_ns, "frame_id": frame.frame_id, "layer": "damage_mapper",
+                                      "output": {"error": f"{type(e).__name__}: {e}"}})
+
+    async def _map_photo(self, ctx: MissionContext, frame: Frame) -> None:
+        m = ctx.mission
         t0 = ctx.elapsed_s()
         reports, usage, rec = await ctx.think(self.mapper.observe, frame, m)
         if rec:
@@ -553,6 +579,9 @@ class SearchAgent(LowFlightMixin, Agent):
     async def _map_finish(self, ctx: MissionContext) -> None:
         if self.mapper is None or getattr(ctx.mission, "damage", None) is None:
             return
+        if getattr(self, "_map_tasks", None):  # the photos still being looked at
+            await asyncio.gather(*self._map_tasks)
+            self._map_tasks = []
         for r in await ctx.think(self.mapper.finish, ctx.mission):
             ctx.report_damage(r)
 
