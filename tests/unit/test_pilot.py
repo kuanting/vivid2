@@ -3,9 +3,16 @@ import json
 
 import pytest
 
+from conftest import lfs_file
 from vivid2 import pilot
 from vivid2.cli import main
 from vivid2.scenario import load_jsonc
+
+
+@pytest.fixture
+def forest_terrain(root):
+    """ForestSAR's terrain (Git LFS): the pilot scenes put the drone and the hikers on it."""
+    return lfs_file(root / "sim_config/maps/ForestSAR/terrain_dtm.npz")
 
 
 def _settings(robot):
@@ -50,7 +57,7 @@ def test_fpv5_robot(root):
 
 
 @pytest.mark.parametrize("drone", ["fpv5", "quad"])
-def test_map_scene_lands_the_drone_at_the_clearing(root, drone):
+def test_map_scene_lands_the_drone_at_the_clearing(root, forest_terrain, drone):
     scene, info = pilot.pilot_scene(pilot.map_run("ForestSAR"), str(root / "sim_config"), drone)
     actor = scene["actors"][0]
     assert actor["start-landed"] is True
@@ -64,7 +71,7 @@ def test_map_scene_lands_the_drone_at_the_clearing(root, drone):
         pilot.map_run("Blocks")
 
 
-def test_scenario_scene_has_its_hikers(root):
+def test_scenario_scene_has_its_hikers(root, forest_terrain):
     run = pilot.scenario_run(str(root / "scenarios/forest_sar/forest_clearing_01.jsonc"), seed=1)
     scene, info = pilot.pilot_scene(run, str(root / "sim_config"), "fpv5")
     names = [o["name"] for o in scene["spawn-objects"]["sim-packaged"]]
@@ -87,7 +94,7 @@ def test_team_scenarios_fly_their_one_drone_variant(root):
         pilot.pilot_scene(team, str(root / "sim_config"), "quad")
 
 
-def test_fly_print_scene(root, capsys):
+def test_fly_print_scene(root, forest_terrain, capsys):
     assert main(["fly", "--map", "ForestSAR_Dense", "--drone", "quad", "--print-scene"]) == 0
     out = capsys.readouterr().out
     scene = json.loads(out[out.index("\n{") + 1:])
