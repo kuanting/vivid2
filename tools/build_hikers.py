@@ -85,6 +85,9 @@ OUTFITS: Dict[str, Dict[str, Any]] = {
     # a teenager; a darker blue than the mannequin's (0.02, 0.05, 0.18), which looked mid-blue on fabric
     "BlueHoodie": dict(body="man", scale=0.94, jacket=(0.015, 0.035, 0.13), pants=(0.08, 0.10, 0.16)),
     "GreenJacket": dict(body="man", scale=1.0, jacket=(0.08, 0.13, 0.05), pants=(0.20, 0.16, 0.10)),  # low contrast
+    # ski tourers on snow (Avalanche): a black shell, and a light grey one about as bright as snow in shade
+    "BlackJacket": dict(body="man", scale=1.0, jacket=(0.012, 0.012, 0.014), pants=(0.02, 0.02, 0.022)),
+    "GreyJacket": dict(body="woman", scale=1.0, jacket=(0.30, 0.31, 0.33), pants=(0.05, 0.05, 0.06)),
 }
 
 # Mean linear luminance of the pack's base-colour textures (measured from their thumbnails): the tint

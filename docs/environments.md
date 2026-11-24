@@ -63,7 +63,9 @@ server. Rebuilding a blueprint doesn't change copies already saved in a map
 with the old values; scenarios spawn hikers from the blueprint, so they always
 get the current one.
 - **Outfits:** the jacket and trouser colours are those of the v1 hikers and of
-  the decoys, so the decoys still match.
+  the decoys, so the decoys still match. `BlackJacket` and `GreyJacket` were added
+  for the avalanche: ski tourers' shells that stand out less on snow (light grey is
+  about as bright as snow in shade).
 
   | Outfit | Person | Jacket | Trousers |
   |---|---|---|---|
@@ -71,6 +73,8 @@ get the current one.
   | `YellowJacket` | woman | yellow | grey |
   | `BlueHoodie` | teenager (the man at 94 %) | dark blue | blue |
   | `GreenJacket` | man | olive (low contrast) | khaki |
+  | `BlackJacket` | man | black | black |
+  | `GreyJacket` | woman | light grey | dark grey |
 
 - **Poses:** each is one frame of a clip: motion capture from the packs, or
   VIVID 2's own keyframed waving clips.
