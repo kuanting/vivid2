@@ -1,0 +1,106 @@
+{
+  "map": "Avalanche",
+  "heightmap": "../../../unreal/VIVID2Env/SourceData/Avalanche/heightmap.png",
+  "heightmap_sha256": "59a94eff8bf150fa1cfaef4cd21ef9ed6b90c776ed8be35407d442e9e2ec9a72",
+  "terrain_dtm_sha256": "e803007c3c0f6dde76780e763a96de9d4107da7d8ed4006aad1f569372e8fe6b",
+  "landscape": {
+    "resolution": [
+      1009,
+      1009
+    ],
+    "section_size_quads": 63,
+    "sections_per_component": 2,
+    "components": [
+      8,
+      8
+    ],
+    "scale": [
+      100.0,
+      100.0,
+      88
+    ],
+    "landscape_centre_cm": [
+      0.0,
+      0.0,
+      23419
+    ],
+    "landscape_corner_cm": [
+      -50400.0,
+      -50400.0,
+      23419
+    ],
+    "home_geo_point": {
+      "latitude": 36.586,
+      "longitude": 137.6102,
+      "altitude": 2271.0
+    },
+    "ground_ue_z_m": {
+      "min": 10.601,
+      "max": 457.779,
+      "origin": 192.933
+    },
+    "height_step_cm": 0.6875
+  },
+  "dem": {
+    "name": "Copernicus GLO-30 DSM",
+    "file": "Copernicus_DSM_COG_10_N36_00_E137_00_DEM.tif",
+    "url": "https://copernicus-dem-30m.s3.amazonaws.com/Copernicus_DSM_COG_10_N36_00_E137_00_DEM/Copernicus_DSM_COG_10_N36_00_E137_00_DEM.tif",
+    "attribution": "Produced using Copernicus WorldDEM-30 (c) DLR e.V. 2010-2014 and (c) Airbus Defence and Space GmbH 2014-2018 provided under COPERNICUS by the European Union and ESA; all rights reserved.",
+    "sha256": "693d475a7b32641d09c8eb85b3620276e48669bc9e29693a3dcb12769f380550",
+    "layout": {
+      "file": "unreal/VIVID2Env/SourceData/Avalanche/layout.json",
+      "stage": "post",
+      "sha256": "f80a5b5f39736de3fba305fba92139dbb738fba340590d421dd66f451fc2b233",
+      "edits": [
+        {
+          "op": "lower",
+          "changed_vertices": 14401,
+          "cut_m3": 20494.2,
+          "fill_m3": 0.0,
+          "bbox_ne": [
+            [
+              -90.0,
+              53.0
+            ],
+            [
+              56.0,
+              173.0
+            ]
+          ]
+        },
+        {
+          "op": "lower",
+          "changed_vertices": 33476,
+          "cut_m3": 15093.0,
+          "fill_m3": 0.0,
+          "bbox_ne": [
+            [
+              -86.0,
+              -179.0
+            ],
+            [
+              104.0,
+              72.0
+            ]
+          ]
+        },
+        {
+          "op": "raise",
+          "changed_vertices": 40840,
+          "cut_m3": 26.9,
+          "fill_m3": 48349.1,
+          "bbox_ne": [
+            [
+              -73.0,
+              -399.0
+            ],
+            [
+              141.0,
+              -157.0
+            ]
+          ]
+        }
+      ]
+    }
+  }
+}

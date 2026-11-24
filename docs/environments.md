@@ -17,7 +17,7 @@ packaged builds. See [unreal_versions.md](unreal_versions.md).
    `http://127.0.0.1:8000/mcp`. Only one editor can use the port, so close other
    UE projects first. The repo's `.mcp.json` registers it as `unreal-mcp` for
    Claude Code sessions started in the VIVID2 folder.
-3. Create maps under `/Game/VIVID2/Maps/`: `ForestSAR` (and its variants), `ForestFire`, `Landslide`.
+3. Create maps under `/Game/VIVID2/Maps/`: `ForestSAR` (and its variants), `ForestFire`, `Landslide`, `Avalanche`.
    In each map, set World Settings → GameMode Override to `ProjectAirSimGameMode`.
 4. Place a marker actor named `BP_VIVID2Map_<map>` (for example
    `BP_VIVID2Map_ForestSAR`, any empty blueprint). The runner's preflight check
@@ -45,6 +45,7 @@ the packs themselves are ignored by git.
 | Lie Down Animation Pack (Fab, Ailive) | `Content/Fab/Lie_Down_Animation_Pack/` | Hiker poses: on the back, face down, on the side; its Manny skeleton also carries VIVID 2's waving clips | Fab imports it from FBX; save it after adding it to the project |
 | Third Person template (engine) | `Content/Characters/` | Hiker pose: crouching (`MM_Death_Back_01`) | See [Targets](#targets-hikers) |
 | Velocity Cars Pack (Fab) | `Content/Velocity_Cars_Pack/` | The cars in LandslideBefore and Landslide | Only its static blueprints (`Blueprints/Static_Blueprints/BP_Static_Velocity_*`) are placed, so builds carry their meshes and materials, not the drivable cars' skeletal meshes |
+| Megascans snow surfaces (Fab, free) | `Content/Megascans/AvalancheSnow/` | Avalanche's ground and snow blocks: Fresh Windswept Snow, Snow Cliff, Trampled Snow, Snowy Road (Fresh Snow is imported but unused) | Download the 8K JPG zips into `unreal/fab/` (kept out of git); `tools/build_avalanche.py --steps textures` imports their colour and normal maps at 2048 px |
 
 ## Targets (hikers)
 
@@ -371,7 +372,7 @@ at run time. The test map, TestYard, is built the same way at small scale
 (`scenarios/landslide/testyard_damage_01.jsonc`).
 
 Each new map goes into a build group in `unreal/VIVID2Env/package_groups.json` (the landslide
-maps join `forest`, whose trees they share) and into `MapsToCook`; `tests/unit/test_packaging.py`
+maps join `forest`, whose trees they share; Avalanche has its own group) and into `MapsToCook`; `tests/unit/test_packaging.py`
 checks the two agree.
 
 ### Landslide and LandslideBefore
@@ -403,3 +404,46 @@ and a null control (nothing damaged).
   fog), campaign `campaigns/landslide_v1.jsonc`. The slide falls 185 m from the scar to its toe,
   so they fly a terrain-following survey (`search_area.altitude_ref: "terrain"`, see
   [missions.md](missions.md)).
+
+### Avalanche
+
+A slab avalanche in the Raichosawa valley below Tsurugi-gozen, Tateyama, in the Northern Alps of
+Japan (Copernicus GLO-30 terrain centred on 36.5860 N, 137.6102 E, 2282-2729 m; the sun at the
+site, UTC+9), in spring snow. A 140 m wide slab broke away on the 33-39 deg west-facing slope at
+about 2490-2580 m (its crown a 1.5 m step), ran 300 m down a scoured track and spread a 4 ha lobe of
+debris (1.3 m deep on average, up to 2.8 m) onto the flat valley floor. The rescue team sets out from
+the valley floor to the north-west, towards Raichozawa Hut. There is no before twin: the stack's
+pre-event DEM comes from the same layout (`--stage post` also writes `pre_event_dtm.npz`).
+
+- **Source:** `SourceData/Avalanche/layout.json` (regions release, track and deposit; the one area
+  class, debris; terrain edits; the spots kept clear for people and clues). Terrain:
+  `vivid2 terrain build --map Avalanche --lat 36.5860 --lon 137.6102 --layout ... --stage post`;
+  the ground truth: `vivid2 damage build --map Avalanche`. Scene: `sim_config/scene_avalanche.jsonc`.
+  The site was picked from a scan of the GLO-30 tile for 1 km windows with a 30-45 deg release slope
+  whose fall line runs out onto a bench inside the window.
+- **Level:** a copy of ForestSAR without its forest, with its own marker, landscape (heightmap
+  imported by hand) and sun, built by `tools/build_avalanche.py` in steps: `level`, `check` (400
+  landscape traces against the terrain model), `textures` (the Megascans snow, see the packs above),
+  `ground` (windswept snow, an icy bed where the slab broke away, faint flow streaks down the track,
+  rough grey trampled snow over the debris with dirty patches, rock on ground steeper than about
+  48 deg, dry grass and soil where the snow has melted out on wind-scoured knolls (about 6 ha), and
+  the party's skin track zigzagging up beside the avalanche path, wiped out where it ran), `clues`,
+  `debris` (about 1,900 snow blocks over the debris, bigger towards the toe and the edges) and
+  `scatter` (rock fragments and broken branches in the debris; rock outcrops on the steepest ground,
+  rock bands on steep ridges and spurs and boulder fields melting out of the snow, the rock with
+  snow lying on its upper faces; dark dwarf pine mats, the pack's small birch flattened and tinted,
+  on the melted-out ground; and the layout's `scatter.features`, a boulder, block, branch or pine mat
+  beside some of the scenarios' people). The site is above the tree line: dwarf pine, not trees.
+  Meshes made from Forest Fire pack meshes (the snow blocks, the snowy rocks, the dwarf pine) are
+  pack content: they live in `/Game/Megascans/AvalancheSnow` (not committed) and the tool remakes them.
+- **Clues:** VIVID 2's own ski gear, modelled by `tools/ski_gear_blender.py` (headless Blender):
+  `VIVID2_Clue_Skis_Orange`/`_Yellow` (a pair, 1.8 m), `VIVID2_Clue_Snowboard_Blue` (1.56 m) and
+  `VIVID2_Clue_Backpack_Red`/`_Orange` (a 35 l touring pack) in `/Game/VIVID2/Clues`, coloured with
+  the decoys' materials. A pole, a glove or a helmet would be a few pixels from survey height (the
+  Payload camera's pixel is about 4.4 cm at 50 m; a clue counts from 80 px), so none is made.
+- **Scenarios:** `scenarios/avalanche/avalanche_sar_01.jsonc` (late April, late morning, clear) and
+  `_02` (afternoon, light snowfall and haze), campaign `campaigns/avalanche_v1.jsonc`: four people
+  a camera can see (one buried to the chest with one arm up; black and light grey jackets as well as
+  bright ones; some beside rocks, blocks or dwarf pine), two buried out of sight, two or three pieces
+  of gear.
+  The debris and the lower track fall 140 m, so they fly a terrain-following survey.

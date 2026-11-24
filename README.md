@@ -26,7 +26,7 @@ Microsoft AirSim, ACM MM Best Open Source Software Award).
 |---|---|
 | Forest S&R: find missing hikers under canopy | **Phase 0**: runs on Blocks (proxy targets); ForestSAR map in progress |
 | Wildfire S&R: find trapped people near a fire front, keep out of the fire's no-fly area | **Started**: ForestFire map with static fires (`scenarios/wildfire`); fire spread is Phase 2 |
-| Disaster S&R (landslide, avalanche, earthquake, tsunami): find visible people and map the damage (debris, blocked roads, building grades, clues) | **Started**: damage task framework ([docs/damage.md](docs/damage.md)); Landslide map with before/after twins and two scenarios (`scenarios/landslide`) |
+| Disaster S&R (landslide, avalanche, earthquake, tsunami): find visible people and map the damage (debris, blocked roads, building grades, clues) | **Started**: damage task framework ([docs/damage.md](docs/damage.md)); Landslide map with before/after twins and two scenarios (`scenarios/landslide`); Avalanche map (Tateyama) with two scenarios (`scenarios/avalanche`) |
 
 ## Layout
 

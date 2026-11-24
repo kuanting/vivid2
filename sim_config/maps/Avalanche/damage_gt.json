@@ -1,0 +1,36 @@
+{
+ "version": 1,
+ "map": "Avalanche",
+ "area_classes": {
+  "debris": {
+   "bit": 0,
+   "about": "avalanche debris: lumpy, broken snow and ice blocks the avalanche deposited on top of the snow cover",
+   "blocks_roads": false
+  }
+ },
+ "roads": [],
+ "buildings": [],
+ "blockers": [],
+ "water": null,
+ "grades": [
+  "none",
+  "partial",
+  "collapsed"
+ ],
+ "layout": {
+  "file": "unreal/VIVID2Env/SourceData/Avalanche/layout.json",
+  "sha256": "f80a5b5f39736de3fba305fba92139dbb738fba340590d421dd66f451fc2b233"
+ },
+ "terrain": {
+  "post_sha256": "e803007c3c0f6dde76780e763a96de9d4107da7d8ed4006aad1f569372e8fe6b",
+  "pre_sha256": "e458b96ef9427545c414907d092e802a020428b48c435cc8dbc5e1aeaae14129"
+ },
+ "raster": {
+  "file": "damage_gt.npz",
+  "sha256": "eb87c113be6b3cb13fec0b5a214ffba0512d07f2c3d8aab651920560e0b88ea0"
+ },
+ "surface": {
+  "file": "surface_dsm.npz",
+  "sha256": "27f249cc9fba0474235801eb1ba6846fbac5daab3994d42072a6a1e8b3f07d75"
+ }
+}

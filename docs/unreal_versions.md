@@ -96,6 +96,7 @@ powershell -ExecutionPolicy Bypass -File tools\package_env.ps1 -Engine 5.8 -Grou
   | Group | Maps |
   |---|---|
   | `forest` | ForestSAR, ForestSAR_Open, ForestSAR_Dense, ForestFire, LandslideBefore, Landslide |
+  | `avalanche` | Avalanche |
 
   Every build also has `TestYard`, the test map, and opens it when started
   without a map. Without `-Group` the script builds one build with every map

@@ -1,0 +1,44 @@
+{
+  "map": "Avalanche",
+  "about": "A slab avalanche in the Raichosawa valley below Tsurugi-gozen, Tateyama (Northern Alps, Japan), in spring snow: a 140 m wide slab broke away on the 33-39 deg west-facing slope at about 2490-2580 m (the crown is a 1.5 m step), ran 300 m down the slope and spread a 4 ha lobe of debris onto the flat valley floor, its toe at 2295 m. The map is centred on the slope's foot; the valley floor fills its west half, where the rescue team sets out from near Raichozawa Hut.",
+  "frame": "NED metres from the Unreal origin (north = Unreal X, east = Unreal Y); terrain from Copernicus GLO-30 at 36.5860 N, 137.6102 E.",
+  "mask": {"size_px": 2048, "extent_m": 1008.0},
+  "regions": {
+    "release": {"polygon_ne": [[50, 55], [55, 105], [45, 140], [15, 155], [-20, 168], [-55, 175], [-80, 158], [-88, 110], [-85, 55]],
+                "edge": {"noise_m": 2.0, "noise_scale_m": 6.0, "soft_m": 1.0, "seed": 11}},
+    "track": {"polygon_ne": [[50, 62], [75, -20], [95, -100], [100, -165], [-35, -175], [-55, -100], [-75, -20], [-82, 62]],
+              "edge": {"noise_m": 4.0, "noise_scale_m": 14.0, "soft_m": 4.0, "seed": 12}},
+    "deposit": {"polygon_ne": [[100, -160], [135, -215], [150, -285], [130, -350], [85, -390], [20, -395], [-40, -370],
+                               [-70, -310], [-65, -240], [-35, -180]],
+                "edge": {"noise_m": 5.0, "noise_scale_m": 10.0, "soft_m": 2.0, "seed": 13}}
+  },
+  "area_classes": {
+    "debris": {"regions": ["deposit"], "blocks_roads": false,
+               "about": "avalanche debris: lumpy, broken snow and ice blocks the avalanche deposited on top of the snow cover"}
+  },
+  "terrain": {
+    "pre": [],
+    "post": [
+      {"op": "lower", "region": "release", "amount_m": 1.5, "taper_m": 1.5, "noise_m": 0.15, "noise_scale_m": 8, "seed": 11},
+      {"op": "lower", "region": "track", "amount_m": 0.5, "taper_m": 10, "noise_m": 0.1, "noise_scale_m": 6, "seed": 12},
+      {"op": "raise", "region": "deposit", "amount_m": 1.3, "taper_m": 8, "noise_m": 0.45, "noise_scale_m": 5, "seed": 13}
+    ]
+  },
+  "scatter": {"about": "snow blocks scattered on the debris by tools/build_avalanche.py (step debris); nothing is placed within keep_clear_m of these spots, which the avalanche scenarios use for people and clues on the debris",
+              "keep_clear_ne": [[45, -295], [-30, -340], [15, -205], [90, -325], [105, -235], [30, -370], [-45, -265],
+                                [-15, -250], [120, -280], [45, -370], [165, -250], [120, -130], [-95, -300]],
+              "keep_clear_m": 4.0, "seed": 31,
+              "features": [
+                {"near": [-30, -340], "kind": "block", "size_m": 2.2, "offset_m": [0.0, 2.8], "about": "a big block beside Injured1's spot"},
+                {"near": [45, -295], "kind": "rock", "size_m": 1.3, "offset_m": [2.6, -1.2], "about": "a rock carried down, beside Trapped1's spot"},
+                {"near": [-45, -265], "kind": "branch", "size_m": 2.6, "offset_m": [-2.4, 1.6], "about": "a broken dwarf pine branch near Walker2's spot"},
+                {"near": [120, -130], "kind": "pine", "size_m": 4.0, "offset_m": [0.0, 3.8], "about": "a dwarf pine mat beside Slope1's spot"},
+                {"near": [-95, -300], "kind": "rock", "size_m": 1.8, "offset_m": [2.6, 2.2], "about": "a boulder beside Survivor2's spot"},
+                {"near": [-95, -300], "kind": "pine", "size_m": 3.5, "offset_m": [-3.6, -1.5], "about": "a dwarf pine mat beside Survivor2's spot"},
+                {"near": [165, -250], "kind": "pine", "size_m": 3.0, "offset_m": [3.2, 2.4], "about": "a dwarf pine mat beside Survivor1's spot"}
+              ]},
+  "tracks": {"about": "the party's skin track (uptrack) from the valley floor, zigzagging up the slope north of the avalanche path to the top of the slab; the avalanche wiped it out where it ran (ground mask, tools/build_avalanche.py)",
+             "width_m": 1.0,
+             "polylines_ne": [[[178, -420], [168, -360], [158, -290], [150, -220], [142, -160], [150, -110], [100, -80], [140, -40],
+                               [88, -5], [122, 30], [70, 62], [100, 95], [52, 120], [40, 150]]]}
+}

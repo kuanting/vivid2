@@ -1,0 +1,53 @@
+// Avalanche map (the Raichosawa valley below Tsurugi-gozen, Tateyama; see docs/environments.md): a
+// 140 m wide slab broke away on the 35 deg west-facing slope at about 2500-2580 m, ran 300 m down
+// it and spread a 4 ha lobe of snow debris onto the valley floor (unreal/VIVID2Env/SourceData/
+// Avalanche/layout.json). People and clues on the debris stand on the spots the debris step kept
+// clear of snow blocks ("scatter.keep_clear_ne").
+// Late April, mid-morning, clear: a party of four ski tourers was caught. Four people a camera can
+// see: one who got out to the edge of the debris and is waving (beside a dwarf pine mat), one in a
+// black jacket buried to the chest in the debris with one arm up (beside a rock the avalanche
+// carried down), one lying injured on it lower down (beside a big block), and one in a grey jacket
+// crouching on the slope beside the track above it (beside a dwarf pine mat). Two are buried out of
+// sight: they are not targets; the damage map should send rescuers (with probes and transceivers)
+// to them. Gear torn off in the slide lies on the debris. The features beside the people are the
+// layout's ("scatter.features").
+// The debris falls 38 m from its top to its toe and the track another 100 m above it, so the survey
+// follows the ground (altitude_ref).
+{
+  "id": "avalanche_sar_01",
+  "mission": "avalanche_sar",
+  "description": "Slab avalanche onto a valley floor: a survivor at the edge of the debris, one buried to the chest, one injured on the debris, one in grey beside the track; two buried victims; map the debris and the gear on it.",
+  "scene": {"base": "scene_avalanche.jsonc", "robot_config": "robot_vivid_quad.jsonc", "camera": "Payload", "map": "Avalanche"},
+  // on the valley floor north-west of the debris, where the rescue team sets out from Raichozawa Hut
+  "dut_start": {"ned": [175, -425, -1], "yaw_deg": 135},
+  // 380 m x 320 m: the whole debris, the lower track and the snow around them (ground from 60 m below
+  // the area's top on the slope to the floor). altitude_m is above the ground under the drone.
+  "search_area": {"polygon_ne": [[190, -440], [190, -60], [-130, -60], [-130, -440]], "altitude_m": 50,
+                  "altitude_ref": "terrain", "ground_down_m": 0},
+  "targets": [
+    {"id": "Survivor1", "asset": "VIVID2_Hiker_YellowJacket_Waving", "ned": [165, -250, 0], "yaw_deg": 200, "jitter_m": 1.5,
+     "description": "ski tourer in a yellow jacket who got out to the north edge of the debris, waving"},
+    {"id": "Trapped1", "asset": "VIVID2_Hiker_BlackJacket_WavingOneArm", "ned": [45, -295, 1.0], "yaw_deg": 250, "jitter_m": 1.5,
+     "description": "person in a black jacket buried to the chest in the debris, one arm raised"},
+    {"id": "Injured1", "asset": "VIVID2_Hiker_GreenJacket_LyingSide", "ned": [-30, -340, 0], "yaw_deg": 300, "jitter_m": 1.5,
+     "description": "injured person in a green jacket lying on the lower debris"},
+    {"id": "Slope1", "asset": "VIVID2_Hiker_GreyJacket_Crouching", "ned": [120, -130, 0], "yaw_deg": 220, "jitter_m": 1.5,
+     "description": "person in a light grey jacket crouching beside a dwarf pine mat on the slope beside the avalanche track"}
+  ],
+  "clues": [
+    {"id": "Skis1", "asset": "VIVID2_Clue_Skis_Orange", "ned": [15, -205, 0], "yaw_deg": 260, "kind": "ski",
+     "description": "a pair of orange skis on the upper debris"},
+    {"id": "Pack1", "asset": "VIVID2_Clue_Backpack_Red", "ned": [90, -325, 0], "yaw_deg": 40, "kind": "backpack",
+     "description": "a red touring backpack on the debris"}
+  ],
+  "damage": {
+    "products": ["areas", "clues"],
+    "buried": [{"id": "Buried1", "ned": [60, -280, 1.4], "description": "buried 1.4 m deep in the middle of the debris"},
+               {"id": "Buried2", "ned": [-15, -310, 1.8], "description": "buried 1.8 m deep in the southern lobe of the debris"}]
+  },
+  "brief": "An avalanche has caught a party of four ski tourers on the slope above the Raichosawa valley. Find the people (some may be partly buried, with only a head, an arm or a jacket showing), map the avalanche debris, and report gear on it (skis, snowboards, backpacks) that could show where someone is buried.",
+  "environment": {"time_of_day": "2026-04-25 10:00:00", "weather": {}, "wind_ned": [0, 0, 0]},
+  "limits": {"timeout_s": 1800, "max_speed_mps": 6, "min_agl_m": 0.5, "geofence_margin_m": 20, "energy_budget_m": 9000},
+  "success": {"localization_tolerance_m": 10, "require_all_targets": true},
+  "sweep": {"seeds": 2}
+}

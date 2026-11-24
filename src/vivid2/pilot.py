@@ -57,7 +57,8 @@ DRONES: Dict[str, Dict[str, Any]] = {
     },
 }
 
-# Every VIVID 2 forest map uses the same base scene (sim_config/scene_forest_sar.jsonc).
+# Every VIVID 2 forest map uses the same base scene (sim_config/scene_forest_sar.jsonc); the
+# avalanche map, on its own terrain in the Northern Alps, has its own.
 MAP_BASES = {
     "ForestSAR": "scene_forest_sar.jsonc",
     "ForestSAR_Open": "scene_forest_sar.jsonc",
@@ -65,6 +66,7 @@ MAP_BASES = {
     "ForestFire": "scene_forest_sar.jsonc",
     "LandslideBefore": "scene_forest_sar.jsonc",
     "Landslide": "scene_forest_sar.jsonc",
+    "Avalanche": "scene_avalanche.jsonc",
 }
 
 SERVICES_PORT = 8990

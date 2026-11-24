@@ -1,0 +1,28 @@
+// VIVID 2 base scene for the Avalanche map in unreal/VIVID2Env. Home point: the foot of the slope
+// south of Tsurugi-gozen above the Raichosawa valley, Tateyama, Toyama, Japan; altitude = real
+// elevation of Unreal Z = 0, from sim_config/maps/Avalanche/terrain.json (vivid2 terrain build --map
+// Avalanche --lat 36.5860 --lon 137.6102 --layout unreal/VIVID2Env/SourceData/Avalanche/layout.json
+// --stage post). The scene builder overrides the robot actor's origin and robot-config and adds the
+// scenario's targets under "spawn-objects".
+{
+  "id": "VIVID2Avalanche",
+  "actors": [
+    {
+      "type": "robot",
+      "name": "Drone1",
+      // Map centre, 1 m above the ground (ground at the origin is Unreal Z 192.9 m, on the avalanche
+      // track). Runs override this with dut_start snapped to the terrain model.
+      "origin": {"xyz": "0.0 0.0 -193.9", "rpy-deg": "0 0 0"},
+      "robot-config": "robot_vivid_quad.jsonc"
+    }
+  ],
+  "clock": {
+    "type": "steppable",
+    "step-ns": 3000000,
+    "real-time-update-rate": 3000000,
+    "pause-on-start": false
+  },
+  "home-geo-point": {"latitude": 36.586, "longitude": 137.6102, "altitude": 2271.0},
+  "segmentation": {"initialize-ids": true, "ignore-existing": false, "use-owner-name": true},
+  "scene-type": "UnrealNative"
+}

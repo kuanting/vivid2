@@ -129,7 +129,9 @@ outlines). With a damage layer the agent flies the whole survey even after every
 ### The VLM damage mapper
 
 `vivid2.stack.reference.damage_vlm.VLMDamageMapper` uses the stack's own VLM (the same model, effort
-and record/replay cache as its person search) with its own prompt, `vlm/prompts/<mission>_damage.md`.
+and record/replay cache as its person search) with its own prompt, `vlm/prompts/<mission>_damage.md`
+(an intro and one `@@` section per product; a mission needs sections only for the products its
+scenarios ask for: the avalanche's prompt has areas and clues, no roads or buildings).
 
 - **Which photos.** A straight-down search photo from at least 60 % of the survey height whose
   footprint is at least half new ground (ground no earlier mapped photo showed), up to 80 per run.

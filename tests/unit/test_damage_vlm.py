@@ -132,12 +132,15 @@ def test_the_schema_and_prompt_follow_the_task():
 
 
 def test_every_damage_mission_with_scenarios_has_a_damage_prompt(root):
-    missions = {s.spec["mission"] for s in (Scenario.load(p) for p in (root / "scenarios").rglob("*.jsonc"))
-                if s.spec.get("damage")}
-    assert missions and missions <= set(DAMAGE_MISSIONS)
-    for mission in sorted(missions):
+    products = {}  # mission -> the products its scenarios ask for
+    for s in (Scenario.load(p) for p in (root / "scenarios").rglob("*.jsonc")):
+        if s.spec.get("damage"):
+            products.setdefault(s.spec["mission"], set()).update(s.spec["damage"]["products"])
+    assert products and set(products) <= set(DAMAGE_MISSIONS)
+    for mission, wanted in sorted(products.items()):
         intro, sections = load_damage_prompt(mission)
-        assert intro and {"areas", "roads", "roads_none", "buildings", "buildings_none", "clues", "end"} <= set(sections)
+        need = wanted | {"end"} | {f"{p}_none" for p in wanted & {"roads", "buildings"}}
+        assert intro and need <= set(sections), (mission, need - set(sections))
 
 
 def test_answers_become_votes_and_reports():

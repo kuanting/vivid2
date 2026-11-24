@@ -1,0 +1,44 @@
+// Avalanche map, the same avalanche as avalanche_sar_01 (see there) in the afternoon with light
+// snowfall and haze (flat light: the debris and the snow around it are hard to tell apart), with
+// other people: one in a light grey jacket buried to the chest near the top of the debris with one
+// arm up, one lying near its toe, one in a black jacket standing on it (by a broken branch), and one
+// who got out to its south edge, waving (between a boulder and a dwarf pine mat). Buried out of
+// sight: two more, in the thickest debris. A blue snowboard, a pair of yellow skis and an orange
+// backpack lie on it.
+{
+  "id": "avalanche_sar_02",
+  "mission": "avalanche_sar",
+  "description": "Slab avalanche onto a valley floor in light snowfall: one in grey buried to the chest, one lying near the toe, one in black standing on the debris, a survivor at its edge; two buried victims; map the debris and the gear on it.",
+  "scene": {"base": "scene_avalanche.jsonc", "robot_config": "robot_vivid_quad.jsonc", "camera": "Payload", "map": "Avalanche"},
+  "dut_start": {"ned": [175, -425, -1], "yaw_deg": 135},
+  "search_area": {"polygon_ne": [[190, -440], [190, -60], [-130, -60], [-130, -440]], "altitude_m": 50,
+                  "altitude_ref": "terrain", "ground_down_m": 0},
+  "targets": [
+    {"id": "Trapped2", "asset": "VIVID2_Hiker_GreyJacket_WavingOneArm", "ned": [105, -235, 0.9], "yaw_deg": 290, "jitter_m": 1.5,
+     "description": "person in a light grey jacket buried to the chest near the top of the debris, one arm raised"},
+    {"id": "Lying2", "asset": "VIVID2_Hiker_RedJacket_LyingBack", "ned": [30, -370, 0], "yaw_deg": 120, "jitter_m": 1.5,
+     "description": "person in a red jacket lying on their back near the toe of the debris"},
+    {"id": "Walker2", "asset": "VIVID2_Hiker_BlackJacket_Standing", "ned": [-45, -265, 0], "yaw_deg": 30, "jitter_m": 1.5,
+     "description": "person in a black jacket standing on the debris, searching for their partner"},
+    {"id": "Survivor2", "asset": "VIVID2_Hiker_BlueHoodie_Waving", "ned": [-95, -300, 0], "yaw_deg": 0, "jitter_m": 1.5,
+     "description": "person in a blue top who got out to the south edge of the debris, waving"}
+  ],
+  "clues": [
+    {"id": "Board1", "asset": "VIVID2_Clue_Snowboard_Blue", "ned": [-15, -250, 0], "yaw_deg": 75, "kind": "other",
+     "description": "a blue snowboard on the debris"},
+    {"id": "Skis2", "asset": "VIVID2_Clue_Skis_Yellow", "ned": [120, -280, 0], "yaw_deg": 200, "kind": "ski",
+     "description": "a pair of yellow skis at the north edge of the debris"},
+    {"id": "Pack2", "asset": "VIVID2_Clue_Backpack_Orange", "ned": [45, -370, 0], "yaw_deg": 310, "kind": "backpack",
+     "description": "an orange touring backpack near the toe of the debris"}
+  ],
+  "damage": {
+    "products": ["areas", "clues"],
+    "buried": [{"id": "Buried3", "ned": [75, -265, 1.5], "description": "buried 1.5 m deep in the northern part of the debris"},
+               {"id": "Buried4", "ned": [0, -235, 1.8], "description": "buried 1.8 m deep in the upper debris"}]
+  },
+  "brief": "An avalanche has caught a party of ski tourers and a snowboarder on the slope above the Raichosawa valley; it is snowing lightly. Find the people (some may be partly buried, with only a head, an arm or a jacket showing), map the avalanche debris, and report gear on it (skis, snowboards, backpacks) that could show where someone is buried.",
+  "environment": {"time_of_day": "2026-04-26 15:30:00", "weather": {"snow": 0.3, "fog": 0.02}, "wind_ned": [2, 1, 0]},
+  "limits": {"timeout_s": 1800, "max_speed_mps": 6, "min_agl_m": 0.5, "geofence_margin_m": 20, "energy_budget_m": 9000},
+  "success": {"localization_tolerance_m": 10, "require_all_targets": true},
+  "sweep": {"seeds": 2}
+}

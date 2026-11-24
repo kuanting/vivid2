@@ -1,0 +1,7 @@
+// Avalanche S&R and damage mapping on the Avalanche map (a slab avalanche in the Raichosawa valley,
+// Tateyama; see docs/damage.md and docs/missions.md).
+{
+  "name": "avalanche_v1",
+  "sim_config_dir": "../sim_config",
+  "scenarios": ["../scenarios/avalanche/avalanche_*.jsonc"]
+}

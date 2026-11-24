@@ -167,7 +167,7 @@ damage task, its rules and its score are in [damage.md](damage.md).
 | Mission | Map | Damage products | Status |
 |---|---|---|---|
 | `landslide_sar` | Landslide (ForestSAR's slope with a road; LandslideBefore is the map before the slide) | debris areas, blocked roads, buried buildings, clues | **Started**: `scenarios/landslide/landslide_sar_01.jsonc` (noon) and `_02` (dusk, fog), campaign `landslide_v1`; also the test map TestYard (`testyard_damage_01`) |
-| `avalanche_sar` | Avalanche (Japanese Northern Alps) | debris extent, clues (skis, poles, a glove, a backpack) | Planned |
+| `avalanche_sar` | Avalanche (the Raichosawa valley, Tateyama, Japanese Northern Alps) | debris areas, clues (skis, a snowboard, backpacks) | **Started**: `scenarios/avalanche/avalanche_sar_01.jsonc` (clear) and `_02` (light snowfall), campaign `avalanche_v1` |
 | `earthquake_sar` | CoastQuake (a Hualien coast town) | building grades, blocked roads | Planned |
 | `tsunami_sar` | CoastTsunami (the same town, flooded) | flood extent, blocked roads, building grades | Planned |
 
