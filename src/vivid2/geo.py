@@ -43,6 +43,12 @@ def yaw_deg_of(q_wxyz: Sequence[float]) -> float:
     return math.degrees(math.atan2(2.0 * (w * z + x * y), 1.0 - 2.0 * (y * y + z * z)))
 
 
+def tilt_deg_of(q_wxyz: Sequence[float]) -> float:
+    """Angle between an attitude's body down axis and the world's, degrees: 0 level, 180 upside down."""
+    _, x, y, _ = q_wxyz
+    return math.degrees(math.acos(max(-1.0, min(1.0, 1.0 - 2.0 * (x * x + y * y)))))
+
+
 def focal_px(width: int, fov_deg: float) -> float:
     return (width / 2.0) / math.tan(math.radians(fov_deg) / 2.0)
 

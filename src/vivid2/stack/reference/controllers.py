@@ -16,7 +16,8 @@ import math
 from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
 
 from vivid2.cameras import wrap_deg
-from vivid2.geo import yaw_deg_of
+from vivid2.crash import UPRIGHT_DEG
+from vivid2.geo import tilt_deg_of, yaw_deg_of
 from vivid2.stack.base import Controller
 
 DESCENT_MPS = 3.0
@@ -25,6 +26,22 @@ VERTICAL_LEG_M = 1.0  # a path leg shorter than this horizontally is flown holdi
 TURN_LIMIT_DEG = 174.0  # Project AirSim's yaw handling does not wrap at +-180 degrees
 TURN_MARGIN_DEG = 5.0
 TURN_TIMEOUT_S = 20.0
+CLIMB_MPS = 3.0  # the climb to the requested height after takeoff
+CLIMB_MARGIN_S = 30.0  # the climb's time limit: twice its time at CLIMB_MPS plus this (simulator time)
+AIRBORNE_TOL_M = 5.0  # after the climb the drone must be this close to the requested height, and upright
+
+
+class TakeoffError(RuntimeError):
+    """The drone did not reach its height after takeoff: it crashed (e.g. rolled over and fell back).
+
+    The run ends as an error at once (running the campaign again re-runs it) rather than waiting out the
+    hard time limit.
+    """
+
+
+def tilt_deg(q: Dict[str, float]) -> float:
+    """Tilt of a pose's rotation dict (see vivid2.geo.tilt_deg_of): 0 level, 180 upside down."""
+    return tilt_deg_of((q["w"], q["x"], q["y"], q["z"]))
 
 
 def safe_heading(deg: float) -> float:
@@ -65,6 +82,7 @@ class AirSimController(Controller):
         self._log = log
         self._task: Optional[asyncio.Task] = None
         self._stopped = False
+        self.took_off = False  # the takeoff climb is done (a crash before then is the simulator's: vivid2.crash)
 
     def _event(self, kind: str, **kw) -> None:
         self._log("events", {"t": self._clock(), "kind": kind, **kw})
@@ -80,13 +98,30 @@ class AirSimController(Controller):
         self._task = None
 
     async def takeoff(self, altitude_down_m: float) -> None:
+        """Take off, then climb straight up to ``altitude_down_m``; raises TakeoffError if that failed.
+
+        Project AirSim's takeoff (2 m) has a time limit of its own, and the climb gets one here, both in
+        simulator time. A drone that crashed on the way up never finishes its climb, so without the limit
+        the run would wait out its hard time limit (over an hour for a 30-minute scenario).
+        """
         self._drone.enable_api_control()
         self._drone.arm()
         self._event("takeoff")
         await (await self._drone.takeoff_async())
         pose = self._drone.get_ground_truth_pose()
         t = pose["translation"]
-        await (await self._drone.move_to_position_async(t["x"], t["y"], altitude_down_m, velocity=3.0))
+        limit_s = 2.0 * abs(t["z"] - altitude_down_m) / CLIMB_MPS + CLIMB_MARGIN_S
+        await (await self._drone.move_to_position_async(t["x"], t["y"], altitude_down_m, velocity=CLIMB_MPS,
+                                                         timeout_sec=limit_s))
+        pose = self._drone.get_ground_truth_pose()
+        off = abs(pose["translation"]["z"] - altitude_down_m)
+        tilt = tilt_deg(pose["rotation"])
+        if off > AIRBORNE_TOL_M or tilt > UPRIGHT_DEG:
+            self._event("takeoff_failed", down=round(pose["translation"]["z"], 2), target_down=round(altitude_down_m, 2),
+                        tilt_deg=round(tilt, 1))
+            raise TakeoffError(f"takeoff failed: after the climb ({limit_s:.0f} s limit) the drone is {off:.1f} m from "
+                               f"its height and tilted {tilt:.0f} degrees; it probably crashed")
+        self.took_off = True
 
     async def fly_path(self, waypoints: List[List[float]], speed_mps: float, heading: Any = "hold") -> None:
         if not (heading in ("hold", "travel") or isinstance(heading, (int, float))):

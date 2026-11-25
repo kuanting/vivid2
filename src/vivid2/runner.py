@@ -22,6 +22,7 @@ from vivid2 import metrics as vmetrics
 from vivid2.metrics.rules import check as rule_check
 from vivid2.metrics.rules import eligible as rules_eligible
 from vivid2.metrics.rules import rules_active
+from vivid2.crash import CrashWatch
 from vivid2.cameras import (SEARCH, CameraInfo, GimbalState, camera_infos, capture_step_ns, clamp_gimbal,
                             detect_depth_scale_rays, is_nadir, mount_pose, slew_time_s)
 from vivid2.preflight import PreflightError, run_preflight, scenario_map
@@ -832,8 +833,10 @@ def _decode(msg: Dict[str, Any], dtype, channels: int) -> np.ndarray:
     return arr.reshape(shape)
 
 
-async def run_agent(agent: Agent, ctx: MissionContext, hard_s: float) -> bool:
-    """Run the agent; stop it if it overruns ``hard_s`` of mission time. True if it was stopped.
+async def run_agent(agent: Agent, ctx: MissionContext, hard_s: float,
+                    crashed: Callable[[], bool] = lambda: False) -> bool:
+    """Run the agent; stop it if it overruns ``hard_s`` of mission time or the drone ``crashed()``.
+    True if it was stopped.
 
     Mission time, because the simulator is paused while frames are recorded. A wall-clock limit
     (HARD_TIMEOUT_WALL_FACTOR x) still catches a simulator that stops answering. The agent's own
@@ -847,7 +850,7 @@ async def run_agent(agent: Agent, ctx: MissionContext, hard_s: float) -> bool:
             if done:
                 task.result()
                 return False
-            if ctx.elapsed_s() > hard_s or time.monotonic() > wall_end:
+            if crashed() or ctx.elapsed_s() > hard_s or time.monotonic() > wall_end:
                 task.cancel()
                 with contextlib.suppress(asyncio.CancelledError, Exception):
                     await task
@@ -857,7 +860,7 @@ async def run_agent(agent: Agent, ctx: MissionContext, hard_s: float) -> bool:
             task.cancel()
 
 
-async def _poll_trajectory(ctx: SimMissionContext, stop: asyncio.Event) -> None:
+async def _poll_trajectory(ctx: SimMissionContext, stop: asyncio.Event, watch: Optional[CrashWatch] = None) -> None:
     lock = getattr(ctx._world.client, "request_lock", None) or contextlib.nullcontext()
 
     def pose_and_time():
@@ -876,6 +879,8 @@ async def _poll_trajectory(ctx: SimMissionContext, stop: asyncio.Event) -> None:
                 continue
             last = t
             ctx._recorder.log("trajectory", {"t": t, "pos": _xyz(p["translation"]), "q": list(_wxyz(p["rotation"]))})
+            if watch is not None:
+                watch.pose(t, _xyz(p["translation"]), _wxyz(p["rotation"]))
             if ctx._viewer is not None and ctx._viewer.live:
                 ctx._viewer.set_progress(ctx.mission.ground_down_m - p["translation"]["z"], (t - ctx.t0_ns) / 1e9)
         except Exception:
@@ -1002,11 +1007,14 @@ async def execute_run(
 
     rec = Recorder(run_dir)
     drone = Drone(client, world, sc.get("drone_name", "Drone1"))
-    client.subscribe(
-        drone.robot_info["collision_info"],
-        lambda _, msg: rec.log("collisions", {"t": msg.get("time_stamp"), "object_name": msg.get("object_name"),
-                                              "impact_point": msg.get("impact_point")}),
-    )
+    watch = CrashWatch([start_ned], terrain, rec.log, took_off=lambda _: getattr(controller, "took_off", True))
+
+    def on_collision(_, msg):
+        record = {"t": msg.get("time_stamp"), "object_name": msg.get("object_name"), "impact_point": msg.get("impact_point")}
+        rec.log("collisions", record)
+        watch.collision(record)
+
+    client.subscribe(drone.robot_info["collision_info"], on_collision)
     apply_environment(world, run.spec.get("environment", {}))
     preview = None
     if viewer is not None:
@@ -1066,13 +1074,14 @@ async def execute_run(
     rec.write_json("meta.json", meta)
 
     stop = asyncio.Event()
-    poller = asyncio.create_task(_poll_trajectory(ctx, stop))
+    poller = asyncio.create_task(_poll_trajectory(ctx, stop, watch))
     end_reason = "completed"
     try:
-        if await run_agent(agent, ctx, run.spec["limits"]["timeout_s"] * 2 + RTL_GRACE_S):
+        if await run_agent(agent, ctx, run.spec["limits"]["timeout_s"] * 2 + RTL_GRACE_S, crashed=watch.crashed):
             end_reason = "hard_timeout"
         elif ctx.elapsed_s() >= ctx.mission.timeout_s:
             end_reason = "timeout"
+        end_reason = watch.end_reason() or end_reason
     except Exception as e:
         end_reason = "error"
         rec.log("events", {"t": ctx.sim_time_or_last(), "kind": "error", "error": repr(e), "trace": traceback.format_exc()})
@@ -1140,12 +1149,16 @@ async def execute_team_run(client, run: Run, agent, sim_config_dir: str, out_dir
 
     rec = Recorder(run_dir)
     drones = {i: Drone(client, world, i) for i in ids}
+    # Any drone's crash ends the team's mission.
+    watch = CrashWatch([d["ned"] for d in fleet], terrain, rec.log,
+                       took_off=lambda i: getattr(ctxs[i].controller, "took_off", True))
     for name, drone in drones.items():
         def on_collision(_, msg, name=name):  # the name bound now: each drone's own callback
             other = msg.get("object_name")
-            rec.log("collisions", {"t": msg.get("time_stamp"), "object_name": other,
-                                   "impact_point": msg.get("impact_point"), "drone": name,
-                                   **({"other_drone": other} if other in drones else {})})
+            record = {"t": msg.get("time_stamp"), "object_name": other, "impact_point": msg.get("impact_point"),
+                      "drone": name, **({"other_drone": other} if other in drones else {})}
+            rec.log("collisions", record)
+            watch.collision(record)
         client.subscribe(drone.robot_info["collision_info"], on_collision)
     apply_environment(world, run.spec.get("environment", {}))
     lead = drones[ids[0]]
@@ -1239,14 +1252,15 @@ async def execute_team_run(client, run: Run, agent, sim_config_dir: str, out_dir
         rec.write_json("meta.json", meta)
         named = {i: a.run(ctxs[i]) for i, a in zip(ids, agent.agents)}
     stop = asyncio.Event()
-    poller = asyncio.create_task(_poll_team_trajectory(team, ctxs, stop))
+    poller = asyncio.create_task(_poll_team_trajectory(team, ctxs, stop, watch))
     end_reason = "completed"
     try:
         if await run_tasks(named, lead_ctx.elapsed_s, run.spec["limits"]["timeout_s"] * 2 + RTL_GRACE_S,
-                           HARD_TIMEOUT_WALL_FACTOR):
+                           HARD_TIMEOUT_WALL_FACTOR, crashed=watch.crashed):
             end_reason = "hard_timeout"
         elif lead_ctx.elapsed_s() >= lead_ctx.mission.timeout_s:
             end_reason = "timeout"
+        end_reason = watch.end_reason() or end_reason
     except Exception as e:
         end_reason = "error"
         who = e.who if isinstance(e, TeamAgentError) else None
@@ -1267,7 +1281,8 @@ async def execute_team_run(client, run: Run, agent, sim_config_dir: str, out_dir
     return score_run_dir(run_dir, weights)
 
 
-async def _poll_team_trajectory(team: TeamRuntime, ctxs: Dict[str, "SimMissionContext"], stop: asyncio.Event) -> None:
+async def _poll_team_trajectory(team: TeamRuntime, ctxs: Dict[str, "SimMissionContext"], stop: asyncio.Event,
+                                watch: Optional[CrashWatch] = None) -> None:
     """Every drone's pose at one sim time, 10 Hz (one ``trajectory`` record per drone)."""
     world = team.world
     lock = getattr(world.client, "request_lock", None) or contextlib.nullcontext()
@@ -1290,6 +1305,8 @@ async def _poll_team_trajectory(team: TeamRuntime, ctxs: Dict[str, "SimMissionCo
                 team.recorder.log("trajectory", {"t": t, "pos": _xyz(p["translation"]), "q": list(_wxyz(p["rotation"])),
                                                  "drone": i})
                 team.last_pos[i] = _xyz(p["translation"])
+                if watch is not None:
+                    watch.pose(t, _xyz(p["translation"]), _wxyz(p["rotation"]), drone=i)
             if lead._viewer is not None:
                 lead._viewer.set_team_progress({i: lead.mission.ground_down_m - p["translation"]["z"] for i, p in poses},
                                               (t - team.t0_ns) / 1e9)

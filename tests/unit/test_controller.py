@@ -9,7 +9,8 @@ from conftest import FakeWorld
 from vivid2.geo import yaw_deg_of
 from vivid2.metrics.control import _tracking
 from vivid2.recorder import Recorder, RunLog
-from vivid2.stack.reference.controllers import TURN_LIMIT_DEG, AirSimController, travel_legs
+from vivid2.stack.reference.controllers import (TURN_LIMIT_DEG, AirSimController, TakeoffError, tilt_deg,
+                                                travel_legs)
 
 pytestmark = pytest.mark.usefixtures("airsim_types")
 
@@ -117,6 +118,64 @@ def test_a_new_command_stops_a_path_flown_in_pieces():
 
     asyncio.run(go())
     assert [call[0] for call in d.calls] == ["goto", "cancel", "goto"]
+
+
+class _TakeoffDrone(_Drone):
+    """Takes off to 2 m; after the climb it is at ``end_z`` with rotation ``end_q`` (w, x, y, z)."""
+
+    def __init__(self, end_z=-50.0, end_q=(1.0, 0.0, 0.0, 0.0)):
+        super().__init__()
+        self.end = {"translation": {"x": 0.0, "y": 0.0, "z": end_z}, "rotation": dict(zip("wxyz", end_q))}
+        self.climbed = False
+
+    def enable_api_control(self):
+        self.calls.append(("api",))
+
+    def arm(self):
+        self.calls.append(("arm",))
+
+    async def takeoff_async(self):
+        return await self._task("takeoff")
+
+    async def move_to_position_async(self, n, e, d, velocity, **kw):
+        self.climbed = True
+        return await self._task("goto", [n, e, d], velocity, kw)
+
+    def get_ground_truth_pose(self):
+        if self.climbed:
+            return self.end
+        return {"translation": {"x": 3.0, "y": 4.0, "z": -2.0}, "rotation": {"w": 1.0, "x": 0.0, "y": 0.0, "z": 0.0}}
+
+
+def test_the_climb_after_takeoff_has_a_time_limit():
+    d = _TakeoffDrone()
+    events = []
+    asyncio.run(AirSimController(d, lambda: 7, lambda s, r: events.append(r)).takeoff(-50.0))
+    assert [call[0] for call in d.calls] == ["api", "arm", "takeoff", "goto"]
+    _, ned, speed, kw = d.calls[-1]
+    assert ned == [3.0, 4.0, -50.0] and speed == 3.0
+    assert kw == {"timeout_sec": pytest.approx(2 * 48.0 / 3.0 + 30.0)}  # twice the 16 s climb, plus 30 s
+    assert [e["kind"] for e in events] == ["takeoff"]
+
+
+@pytest.mark.parametrize("end_z, end_q", [
+    (-1.0, (math.cos(math.pi / 4), math.sin(math.pi / 4), 0.0, 0.0)),  # rolled over onto its side on the ground
+    (-30.0, (1.0, 0.0, 0.0, 0.0)),  # upright, but the climb ran out of time 20 m short
+])
+def test_a_crash_at_takeoff_ends_the_run_at_once(end_z, end_q):
+    events = []
+    c = AirSimController(_TakeoffDrone(end_z, end_q), lambda: 7, lambda s, r: events.append(r))
+    with pytest.raises(TakeoffError, match="takeoff failed"):
+        asyncio.run(c.takeoff(-50.0))
+    assert events[-1]["kind"] == "takeoff_failed" and events[-1]["down"] == end_z and events[-1]["target_down"] == -50.0
+
+
+def test_tilt_from_a_rotation():
+    s = math.sin(math.pi / 4)
+    assert tilt_deg({"w": 1.0, "x": 0.0, "y": 0.0, "z": 0.0}) == pytest.approx(0.0)
+    assert tilt_deg({"w": s, "x": 0.0, "y": 0.0, "z": s}) == pytest.approx(0.0)  # a turn is not a tilt
+    assert tilt_deg({"w": s, "x": 0.0, "y": s, "z": 0.0}) == pytest.approx(90.0)
+    assert tilt_deg({"w": 0.0, "x": 1.0, "y": 0.0, "z": 0.0}) == pytest.approx(180.0)
 
 
 def test_turns_near_south_stop_short_of_the_wrap():

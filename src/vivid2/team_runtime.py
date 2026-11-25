@@ -396,8 +396,9 @@ class TeamAgentError(RuntimeError):
 
 
 async def run_tasks(named: Dict[str, Awaitable[Any]], elapsed_s: Callable[[], float], hard_s: float,
-                    wall_factor: float) -> bool:
-    """Run every agent coroutine (one per drone, or one for the team); True if stopped at ``hard_s``.
+                    wall_factor: float, crashed: Callable[[], bool] = lambda: False) -> bool:
+    """Run every agent coroutine (one per drone, or one for the team); True if stopped at ``hard_s``
+    or because a drone ``crashed()``.
 
     Mission time, like ``runner.run_agent``; a wall-clock limit (``wall_factor`` x) still catches a
     simulator that stops answering. The first agent error cancels the others and is raised as a
@@ -412,7 +413,7 @@ async def run_tasks(named: Dict[str, Awaitable[Any]], elapsed_s: Callable[[], fl
                 who = tasks.pop(t)
                 if not t.cancelled() and t.exception() is not None:
                     raise TeamAgentError(who, t.exception()) from t.exception()
-            if tasks and (elapsed_s() > hard_s or time.monotonic() > wall_end):
+            if tasks and (crashed() or elapsed_s() > hard_s or time.monotonic() > wall_end):
                 return True
         return False
     finally:

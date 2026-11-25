@@ -69,6 +69,27 @@
   `ctx.elapsed_s()`. The reference agents take a frame every `frame_period_s`
   of mission time. The hard time limit (twice the timeout plus 180 s) is
   mission time as well.
+- **A crash ends the mission** (`vivid2/crash.py`), in every scenario.
+  - **What counts as a crash:** the drone hits something away from its
+    launch pad, or stays tipped past 60 degrees for 1 s of mission time.
+    Contacts within 5 m of a pad and below 2 m are the takeoff and the
+    landing, as in the safety metrics.
+  - **What happens:** the runner stops the agents at once, logs a `crash`
+    event (cause, object or tilt, position, drone), and ends the run as
+    `crashed`. In a team, any drone's crash ends the mission.
+  - **Scoring:** finds reported before the crash still count. A collision
+    caps the score at 25, as before.
+  - **During takeoff:** a crash before the takeoff climb is done ends the run
+    as an `error` instead. The takeoff is the runner's own controller, so the
+    simulator failed, not the stack. The campaign goes on to its next run,
+    and running the campaign again re-runs errored runs.
+  - **The climb's own check:** the reference controller gives the climb to
+    survey height a limit (twice its time at 3 m/s, plus 30 s of mission
+    time). After it, the drone must be within 5 m of that height and upright,
+    or the controller logs `takeoff_failed`. That catches a drone stuck
+    upright on the ground.
+  - **Why:** before this, a crashed drone never finished its move, so the
+    run waited out the hard limit.
 - **Missing layers are not zero.** If a stack doesn't expose separate
   detections, its perception score is `n/a` and the layer is left out of the
   weighted overall score.
