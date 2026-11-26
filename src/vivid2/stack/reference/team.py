@@ -182,8 +182,8 @@ class TeamSearchAgent(SearchAgent):
         await ctx.controller.goto(start, VERIFY_DESCENT_MPS)  # down to the survey height
 
     async def _go_home(self, ctx) -> None:
-        if self._geo is None:
-            return await super()._go_home(ctx)
+        if self._geo is None or getattr(ctx.mission, "control_link", None):
+            return await super()._go_home(ctx)  # (with a link to the control team: no flight home)
         g = self._geo
         pos, _ = ctx.pose()
         await self._clear_below(ctx, pos[:2])

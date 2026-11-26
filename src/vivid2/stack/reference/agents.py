@@ -596,6 +596,9 @@ class SearchAgent(LowFlightMixin, Agent):
         await ctx.controller.takeoff(self._survey_down_at(start[0], start[1]))
 
     async def _go_home(self, ctx: MissionContext) -> None:
+        """Fly home and land, unless the drone has a link to the control team: then the mission ends here."""
+        if getattr(ctx.mission, "control_link", None):
+            return
         await self._climb_for_home(ctx)
         await ctx.controller.return_and_land(ctx.mission.start_ned, ctx.mission.max_speed_mps)
 
@@ -882,6 +885,8 @@ class SurveyAgent(LowFlightMixin, Agent):
             await pace(ctx, t_loop, self.frame_period_s)
         if self.low is not None and not ctx.should_stop():
             await self._lf_tour(ctx, self._dip_record)
+        if getattr(m, "control_link", None):
+            return  # the mission ends here (a link to the control team: no flight home)
         await self._climb_for_home(ctx)
         await ctx.controller.return_and_land(m.start_ned, m.max_speed_mps)
 

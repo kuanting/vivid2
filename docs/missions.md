@@ -3,7 +3,13 @@
 ## Forest S&R: missing hiker (`mission: forest_sar`)
 
 The drone gets a text brief and a search polygon. It must find every missing
-person and report each one's position, then return home.
+person and report each one's position.
+- **With a link to the control team** (the default, scenario
+  `comms.control_link`): the mission is over as soon as everyone has been
+  found. The drone doesn't need to fly home
+  ([architecture.md](architecture.md#design-rules)).
+- **Without a link** (`comms.control_link: false`): the drone must also fly
+  home and land.
 
 - **Success:** every target reported within `success.localization_tolerance_m`.
 - **Mission score:** for each target, 1 − 0.5 × (time-to-find / timeout) if

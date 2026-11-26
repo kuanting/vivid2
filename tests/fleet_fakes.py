@@ -173,7 +173,7 @@ class FakeFleetContext(FleetContext):
 
 class FakeFleet:
     def __init__(self, run: Run, rec: Recorder, team_mode: str, width=320, height=240, fov=80.0, box_px=6,
-                 targets=None):
+                 targets=None, link=False):
         self.run, self.rec = run, rec
         self.W, self.H, self.fov, self.box = width, height, fov, box_px
         self.targets = targets if targets is not None else run.resolved_targets()
@@ -191,6 +191,9 @@ class FakeFleet:
         self.contexts = {d["id"]: FakeDroneContext(self, d["id"], d["ned"], mission_spec(
             run, d["ned"], None, camera, datum_ned=centre, drone_id=d["id"], team=info, team_mode=team_mode))
             for d in self.fleet}
+        # A link to the control team (vivid2.control): off unless asked for, as the team tests predate it.
+        for m in [self.team_mission] + [c.mission for c in self.contexts.values()]:
+            m.control_link = bool(link)
         self._sample()
 
     async def wait(self, dt_s: float) -> None:
@@ -240,11 +243,11 @@ class FakeFleet:
                     pass
 
 
-def fly_team(tmp_path: Path, run: Run, agent, targets=None) -> Dict[str, Any]:
+def fly_team(tmp_path: Path, run: Run, agent, targets=None, link: Optional[bool] = None) -> Dict[str, Any]:
     """Fly a FleetAgent or DistributedTeam in a FakeFleet; returns the scored result (and leaves the run dir)."""
     run_dir = Path(tmp_path) / agent.name / run.run_id
     rec = Recorder(run_dir)
-    fleet = FakeFleet(run, rec, agent.team_mode, targets=targets)
+    fleet = FakeFleet(run, rec, agent.team_mode, targets=targets, link=bool(link))
     if isinstance(agent, FleetAgent):
         coros = [agent.run(FakeFleetContext(fleet))]
     else:
@@ -265,6 +268,7 @@ def fly_team(tmp_path: Path, run: Run, agent, targets=None) -> Dict[str, Any]:
         "start_ned": fleet.fleet[0]["ned"], "t0_ns": 0, "end_ns": fleet.t_ns, "end_reason": end,
         "fleet": [{"id": d["id"], "start_ned": d["ned"], "yaw_deg": d["yaw_deg"]} for d in fleet.fleet],
         "team": {"mode": agent.team_mode, "size": len(fleet.ids)},
+        **({"control_link": link} if link is not None else {}),
         "mission_spec": fleet.team_mission.record(),
     })
     rec.close()

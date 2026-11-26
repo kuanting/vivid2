@@ -90,6 +90,38 @@
     upright on the ground.
   - **Why:** before this, a crashed drone never finished its move, so the
     run waited out the hard limit.
+- **The mission ends when everyone is found** (`vivid2/control.py`), when
+  the drones have a link to the control team. That is the default
+  (scenario `comms.control_link`): search teams set up a field network or
+  use satellite.
+  - **Why:** in real searches the drones report to a control team, and a
+    find counts the moment it is reported. Flying home only matters without
+    a link.
+  - **The control team:** `ControlStation` gets every report as it is made
+    and judges it with the scoring's rules. A report must cite one of the
+    reporting drone's own search photos, and it is matched to a person
+    within `success.localization_tolerance_m`.
+  - **The end:** once everyone has been found it logs `mission_over`, and the
+    runner stops the agents and ends the run as `all_found`. It tells the
+    stack nothing else; confirming a report would leak ground truth.
+  - **Damage runs:** finding everyone does not end a run with a damage task.
+    The stack ends it when its map is done, by returning from `run()`.
+  - **Scoring with a link:** there is no "returned home" check, so ending
+    away from home costs no safety points.
+  - **Planning, with or without a link:** a search that found everyone is
+    complete and scores 100. Otherwise planning is the share of the area
+    photographed.
+  - **Without a link** (`comms.control_link: false`): the drone flies home
+    and lands, as before, and not being home costs 10 safety points.
+  - **Old runs:** runs recorded before the link have no `control_link` in
+    `meta.json`. They keep the "bring it home" rules, so they rescore as
+    they always did.
+  - **End reasons, first match wins:**
+    - `crashed`, or `error` for a crash during takeoff or a failure;
+    - `all_found`;
+    - `hard_timeout`;
+    - `timeout`;
+    - `completed`: the agent returned from `run()`.
 - **Missing layers are not zero.** If a stack doesn't expose separate
   detections, its perception score is `n/a` and the layer is left out of the
   weighted overall score.

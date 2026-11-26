@@ -22,6 +22,7 @@ from vivid2 import metrics as vmetrics
 from vivid2.metrics.rules import check as rule_check
 from vivid2.metrics.rules import eligible as rules_eligible
 from vivid2.metrics.rules import rules_active
+from vivid2.control import ControlStation, control_link
 from vivid2.crash import CrashWatch
 from vivid2.cameras import (SEARCH, CameraInfo, GimbalState, camera_infos, capture_step_ns, clamp_gimbal,
                             detect_depth_scale_rays, is_nadir, mount_pose, slew_time_s)
@@ -111,6 +112,7 @@ def mission_spec(run: Run, start_ned=None, terrain=None, camera: Optional[Dict[s
         no_fly_zones=[dict(z) for z in lim["no_fly"]] if lim.get("no_fly") else None,
         damage=damage,
         altitude_ref="terrain" if s["search_area"].get("altitude_ref") == "terrain" else None,
+        control_link=control_link(s),
     )
 
 
@@ -467,6 +469,7 @@ class SimMissionContext(MissionContext):
         self._search_frames: set = set()  # this drone's recorded search photos: what a report may cite
         self.reports: List[TargetReport] = []
         self._stop = False
+        self._control: Optional[ControlStation] = None  # the control team the reports reach (vivid2.control); it knows the ground truth, so private
 
     # -- cameras --------------------------------------------------------------
     def _ordered(self, cameras: Sequence[str]) -> List[str]:
@@ -776,10 +779,12 @@ class SimMissionContext(MissionContext):
                                 "frame_id": report.frame_id})
         self.reports.append(report)
         # "t" is the frame the find was made on; "t_report" when the agent reported it (after thinking)
-        self._recorder.log("reports", {"t": report.t_ns, "t_report": self.sim_time_or_last(), "frame_id": report.frame_id,
-                                      **({"drone": self.drone_id} if self._team is not None else {}),
-                                      "ned": report.ned, "confidence": report.confidence, "source": report.source,
-                                      "note": report.note})
+        record = {"t": report.t_ns, "t_report": self.sim_time_or_last(), "frame_id": report.frame_id,
+                  **({"drone": self.drone_id} if self._team is not None else {}),
+                  "ned": report.ned, "confidence": report.confidence, "source": report.source, "note": report.note}
+        self._recorder.log("reports", record)
+        if self._control is not None:
+            self._control.report(record, cited=report.frame_id in self._search_frames)
         if self._viewer is not None:
             self._viewer.note("reports", {"frame_id": report.frame_id})
 
@@ -801,7 +806,8 @@ class SimMissionContext(MissionContext):
             self._viewer.note(stream, record)
 
     def should_stop(self) -> bool:
-        return self._stop or self._clock.stop or self.elapsed_s() >= self.mission.timeout_s
+        return (self._stop or self._clock.stop or self.elapsed_s() >= self.mission.timeout_s
+                or (self._control is not None and self._control.mission_over()))
 
     def elapsed_s(self) -> float:
         return (self._world.get_sim_time() - self.t0_ns) / 1e9
@@ -834,9 +840,9 @@ def _decode(msg: Dict[str, Any], dtype, channels: int) -> np.ndarray:
 
 
 async def run_agent(agent: Agent, ctx: MissionContext, hard_s: float,
-                    crashed: Callable[[], bool] = lambda: False) -> bool:
-    """Run the agent; stop it if it overruns ``hard_s`` of mission time or the drone ``crashed()``.
-    True if it was stopped.
+                    stop_when: Callable[[], bool] = lambda: False) -> bool:
+    """Run the agent; stop it if it overruns ``hard_s`` of mission time or when ``stop_when()`` (the drone
+    crashed, or the control team has everyone found). True if it was stopped.
 
     Mission time, because the simulator is paused while frames are recorded. A wall-clock limit
     (HARD_TIMEOUT_WALL_FACTOR x) still catches a simulator that stops answering. The agent's own
@@ -850,7 +856,7 @@ async def run_agent(agent: Agent, ctx: MissionContext, hard_s: float,
             if done:
                 task.result()
                 return False
-            if crashed() or ctx.elapsed_s() > hard_s or time.monotonic() > wall_end:
+            if stop_when() or ctx.elapsed_s() > hard_s or time.monotonic() > wall_end:
                 task.cancel()
                 with contextlib.suppress(asyncio.CancelledError, Exception):
                     await task
@@ -858,6 +864,13 @@ async def run_agent(agent: Agent, ctx: MissionContext, hard_s: float,
     finally:
         if not task.done():
             task.cancel()
+
+
+async def _halt(controllers, timeout_s: float = 10.0) -> None:
+    """Stop each drone's path in progress before the client disconnects (best effort, bounded)."""
+    with contextlib.suppress(Exception):
+        await asyncio.wait_for(asyncio.gather(*(c.halt() for c in controllers if hasattr(c, "halt")),
+                                              return_exceptions=True), timeout_s)
 
 
 async def _poll_trajectory(ctx: SimMissionContext, stop: asyncio.Event, watch: Optional[CrashWatch] = None) -> None:
@@ -1008,6 +1021,7 @@ async def execute_run(
     rec = Recorder(run_dir)
     drone = Drone(client, world, sc.get("drone_name", "Drone1"))
     watch = CrashWatch([start_ned], terrain, rec.log, took_off=lambda _: getattr(controller, "took_off", True))
+    control = ControlStation.for_run(run.spec, targets, dmg["task"] is not None, rec.log)
 
     def on_collision(_, msg):
         record = {"t": msg.get("time_stamp"), "object_name": msg.get("object_name"), "impact_point": msg.get("impact_point")}
@@ -1048,12 +1062,14 @@ async def execute_run(
                             damage=dmg["task"], dut_terrain=dmg["pre"])
     ctx._preview_topic = preview
     ctx.capture_step_ns = infos[payload_cam].capture_step_ns
+    ctx._control = control
     if viewer is not None:
         viewer.set_phase("mission clock started: taking off and climbing")
     meta = {
         "run_id": run.run_id, "scenario_id": run.scenario_id, "seed": run.seed, "params": run.params,
         "mission": run.spec["mission"], "agent": agent.describe(), "targets": targets,
         "search_area": run.spec["search_area"], "limits": run.spec["limits"], "success": run.spec.get("success", {}),
+        "control_link": control.link,  # the rules the run is scored by (vivid2.control); absent in older runs
         "start_ned": start_ned, "terrain": terrain_meta, "t0_ns": ctx.t0_ns, "wall_start": datetime.now().isoformat(),
         "projectairsim_commit": projectairsim_commit(airsim_root), "scenario_source": run.source,
         "unreal": unreal_status(), "host": host_info(), "sim_address": getattr(client, "address", None),
@@ -1077,15 +1093,17 @@ async def execute_run(
     poller = asyncio.create_task(_poll_trajectory(ctx, stop, watch))
     end_reason = "completed"
     try:
-        if await run_agent(agent, ctx, run.spec["limits"]["timeout_s"] * 2 + RTL_GRACE_S, crashed=watch.crashed):
+        if await run_agent(agent, ctx, run.spec["limits"]["timeout_s"] * 2 + RTL_GRACE_S,
+                           stop_when=lambda: watch.crashed() or control.mission_over()):
             end_reason = "hard_timeout"
         elif ctx.elapsed_s() >= ctx.mission.timeout_s:
             end_reason = "timeout"
-        end_reason = watch.end_reason() or end_reason
+        end_reason = watch.end_reason() or control.end_reason() or end_reason
     except Exception as e:
         end_reason = "error"
         rec.log("events", {"t": ctx.sim_time_or_last(), "kind": "error", "error": repr(e), "trace": traceback.format_exc()})
     finally:
+        await _halt([controller])  # a mission over mid-survey leaves the drone's path running
         stop.set()
         await poller
         client.unsubscribe_all()  # before closing the recorder, so no late callback writes to it
@@ -1152,6 +1170,7 @@ async def execute_team_run(client, run: Run, agent, sim_config_dir: str, out_dir
     # Any drone's crash ends the team's mission.
     watch = CrashWatch([d["ned"] for d in fleet], terrain, rec.log,
                        took_off=lambda i: getattr(ctxs[i].controller, "took_off", True))
+    control = ControlStation.for_run(run.spec, targets, dmg["task"] is not None, rec.log)  # one for the team
     for name, drone in drones.items():
         def on_collision(_, msg, name=name):  # the name bound now: each drone's own callback
             other = msg.get("object_name")
@@ -1200,6 +1219,7 @@ async def execute_team_run(client, run: Run, agent, sim_config_dir: str, out_dir
                                 fire_ids=[f["id"] for f in fires], cameras=infos[name],
                                 ground_truth_to_stack=uses_ground_truth(agent), clue_ids=[c["id"] for c in clues],
                                 damage=dmg["task"], dut_terrain=dmg["pre"])
+        ctx._control = control
         ctxs[name] = ctx
     ctxs[ids[0]]._preview_topic = preview
     team_mission = mission_spec(run, centre, terrain, camera, datum_ned=centre, team=team_info, team_mode=mode,
@@ -1215,6 +1235,7 @@ async def execute_team_run(client, run: Run, agent, sim_config_dir: str, out_dir
         "start_ned": list(fleet[0]["ned"]),  # the first drone's pad, for tools that read one start
         "fleet": [{"id": d["id"], "start_ned": list(d["ned"]), "yaw_deg": d["yaw_deg"]} for d in fleet],
         "team": {"mode": mode, "size": n, "centre_ned": list(centre)},
+        "control_link": control.link,
         "comms": run.spec.get("comms"),
         "terrain": terrain_meta, "t0_ns": team.t0_ns, "wall_start": datetime.now().isoformat(),
         "projectairsim_commit": projectairsim_commit(airsim_root), "scenario_source": run.source,
@@ -1256,11 +1277,11 @@ async def execute_team_run(client, run: Run, agent, sim_config_dir: str, out_dir
     end_reason = "completed"
     try:
         if await run_tasks(named, lead_ctx.elapsed_s, run.spec["limits"]["timeout_s"] * 2 + RTL_GRACE_S,
-                           HARD_TIMEOUT_WALL_FACTOR, crashed=watch.crashed):
+                           HARD_TIMEOUT_WALL_FACTOR, stop_when=lambda: watch.crashed() or control.mission_over()):
             end_reason = "hard_timeout"
         elif lead_ctx.elapsed_s() >= lead_ctx.mission.timeout_s:
             end_reason = "timeout"
-        end_reason = watch.end_reason() or end_reason
+        end_reason = watch.end_reason() or control.end_reason() or end_reason
     except Exception as e:
         end_reason = "error"
         who = e.who if isinstance(e, TeamAgentError) else None
@@ -1269,6 +1290,7 @@ async def execute_team_run(client, run: Run, agent, sim_config_dir: str, out_dir
                            **({"drone": who} if who and who in ctxs else {}), "trace": traceback.format_exc()})
     finally:
         team.stop = True
+        await _halt([c.controller for c in ctxs.values()])
         stop.set()
         await poller
         client.unsubscribe_all()

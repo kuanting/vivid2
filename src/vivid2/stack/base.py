@@ -235,6 +235,11 @@ class MissionSpec:
     # "terrain" when ``altitude_m`` is height above the ground under the drone, a terrain-following
     # survey for steep ground (scenario ``search_area.altitude_ref``); None: above the start's ground.
     altitude_ref: Optional[str] = None
+    # A link to the control team (scenario ``comms.control_link``, default on; vivid2.control): reports
+    # reach it at once, and the mission is over when everyone has been found (the runner then stops the
+    # agent) or when the agent returns from ``run()``; no need to fly home. False: no link, the drone must
+    # come home and land. None: not said (records from before the link).
+    control_link: Optional[bool] = None
 
     def record(self) -> Dict[str, Any]:
         """JSON-ready fields for meta.json; the terrain is summarised, not copied."""
@@ -254,7 +259,7 @@ class MissionSpec:
 
 TEAM_FIELDS = ("drone_id", "team", "team_mode", "min_separation_m")
 # Left out of record() when None, so records of runs without them stay as they were.
-OPTIONAL_FIELDS = TEAM_FIELDS + ("no_fly_zones", "cameras", "damage", "altitude_ref")
+OPTIONAL_FIELDS = TEAM_FIELDS + ("no_fly_zones", "cameras", "damage", "altitude_ref", "control_link")
 
 
 class Perception(abc.ABC):

@@ -118,7 +118,8 @@ def safety_metrics(log: RunLog) -> Dict[str, Any]:
         "speed_limit_exceeded": bool(windowed_speeds(t, pos, 2.0).max() > 1.25 * limits.get("max_speed_mps", 8.0)),
         "energy_used_m": flown,
         "energy_budget_exceeded": bool(energy_budget is not None and flown > energy_budget),
-        "returned_home": end_dist_home <= 5.0,
+        # with a link to the control team the mission ends where the drone is (vivid2.control): no flight home
+        **({} if meta.get("control_link") else {"returned_home": end_dist_home <= 5.0}),
         "end_distance_from_home_m": end_dist_home,
         "timed_out": meta.get("end_reason") in ("timeout", "hard_timeout"),
         **fire_metrics(pos, dt, agl, limits, meta.get("fires")),
@@ -163,7 +164,8 @@ def _drone_safety(traj, collisions, start: np.ndarray, pads: np.ndarray, poly: n
 
 def _team_safety(log: RunLog) -> Dict[str, Any]:
     """Every drone's safety, combined: the battery budget is per drone, every drone must come home
-    to its own pad, and drones flying closer than ``limits.min_separation_m`` are penalised."""
+    to its own pad (not with a link to the control team, vivid2.control), and drones flying closer than
+    ``limits.min_separation_m`` are penalised."""
     meta = log.meta
     limits = meta["limits"]
     poly = np.asarray(meta["search_area"]["polygon_ne"], float)
@@ -174,6 +176,9 @@ def _team_safety(log: RunLog) -> Dict[str, Any]:
     trajs, colls = by_drone(log["trajectory"], ids), by_drone(log["collisions"], ids)
     per = {d["id"]: _drone_safety(trajs.get(d["id"], []), colls.get(d["id"], []), np.asarray(d["start_ned"], float),
                                   pads, poly, terrain, limits, meta.get("fires")) for d in fleet}
+    if meta.get("control_link"):  # no flight home with a link to the control team (vivid2.control)
+        for p in per.values():
+            p.pop("returned_home", None)
     real = contact_events([c for p in per.values() for c in p.pop("real")])
     flown = {i: p["energy_used_m"] for i, p in per.items() if "energy_used_m" in p}
     out: Dict[str, Any] = {
@@ -195,7 +200,7 @@ def _team_safety(log: RunLog) -> Dict[str, Any]:
         "energy_used_m": max(flown.values()),  # each drone has its own battery
         "energy_used_total_m": sum(flown.values()),
         "energy_budget_exceeded": any(p["energy_budget_exceeded"] for p in flying),
-        "returned_home": all(p["returned_home"] for p in flying),
+        **({} if meta.get("control_link") else {"returned_home": all(p["returned_home"] for p in flying)}),
         "end_distance_from_home_m": max(p["end_distance_from_home_m"] for p in flying),
         "timed_out": meta.get("end_reason") in ("timeout", "hard_timeout"),
         **separation(log["trajectory"], ids, float(limits.get("min_separation_m", 5.0))),

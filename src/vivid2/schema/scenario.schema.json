@@ -60,9 +60,11 @@
     },
     "comms": {
       "type": "object",
-      "description": "The radio between the drones of a distributed team (see vivid2/radio.py)",
+      "description": "Communication: the link to the control team, and the radio between the drones of a distributed team (see vivid2/control.py and vivid2/radio.py)",
       "additionalProperties": false,
       "properties": {
+        "control_link": {"type": "boolean", "default": true,
+                         "description": "the drones can reach the control team (a field network or satellite): a find counts when reported and the mission is over once everyone has been found, with no flight home. false: no link, the drones must come home and land"},
         "range_m": {"type": "number", "exclusiveMinimum": 0},
         "latency_s": {"type": "number", "minimum": 0, "default": 0.1},
         "bandwidth_kbps": {"type": "number", "exclusiveMinimum": 0},

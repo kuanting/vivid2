@@ -25,6 +25,10 @@ def compute_all(log_or_dir: Union[RunLog, str, Path]) -> Dict[str, Any]:
         "control": control_metrics(log),
         "safety": safety_metrics(log),
     }
+    if "control_link" in log.meta:  # runs since the control link (vivid2.control); older runs as they were
+        # Everyone found: the search is complete, however much of the area it took.
+        mi = out["mission"]
+        out["planning"]["search_complete"] = bool(mi["targets_total"] and mi["targets_found"] == mi["targets_total"])
     if is_team(log.meta):
         out["team"] = team_metrics(log)
     if log.meta.get("damage"):  # runs with a damage task only

@@ -99,7 +99,7 @@ def test_a_crash_stops_the_agent_and_every_team_drone():
 
     async def single():
         asyncio.ensure_future(later())
-        return await run_agent(_Stuck(), _Ctx(), hard_s=3600.0, crashed=lambda: flag["crashed"])
+        return await run_agent(_Stuck(), _Ctx(), hard_s=3600.0, stop_when=lambda: flag["crashed"])
 
     assert asyncio.run(single()) is True
     flag["crashed"] = False
@@ -107,6 +107,6 @@ def test_a_crash_stops_the_agent_and_every_team_drone():
     async def team():
         asyncio.ensure_future(later())
         return await run_tasks({"Drone1": stuck(), "Drone2": stuck()}, lambda: 0.0, 3600.0, 3.0,
-                               crashed=lambda: flag["crashed"])
+                               stop_when=lambda: flag["crashed"])
 
     assert asyncio.run(team()) is True

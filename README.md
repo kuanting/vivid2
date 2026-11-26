@@ -12,9 +12,9 @@ stack separately:
 |---|---|
 | **Perception** | AP@0.5, precision/recall against simulator ground-truth boxes, first-detection range |
 | **Reasoning (VLM/VLA)** | Decision accuracy, hallucination rate, grounding accuracy, latency, tokens and cost |
-| **Planning** | Search-area coverage, coverage per km flown, revisits |
+| **Planning** | Search-area coverage (a search that found everyone is complete), coverage per km flown, revisits |
 | **Control** | Path-tracking RMSE, altitude hold, speed |
-| **Safety** | Collisions, terrain clearance, geofence/no-fly breaches, energy budget, return home |
+| **Safety** | Collisions, terrain clearance, geofence/no-fly breaches, energy budget, return home (only without a link to the control team) |
 | **Mission** | Targets found, time-to-find, localisation error, false alarms |
 
 VIVID 2 succeeds VIVID (2018, built on

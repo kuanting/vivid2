@@ -150,6 +150,11 @@ class AirSimController(Controller):
     def path_done(self) -> bool:
         return self._task is None or self._task.done()
 
+    async def halt(self) -> None:
+        """Stop the path in progress, if any (the runner, when the mission is over): the simulator's
+        task then ends before the client disconnects, which would otherwise report it as an error."""
+        await self._cancel()
+
     async def goto(self, ned: Sequence[float], speed_mps: float, yaw_deg: Optional[float] = None) -> None:
         await self._cancel()
         self._event("goto", target=list(ned), speed=speed_mps,

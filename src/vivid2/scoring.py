@@ -53,7 +53,9 @@ def layer_scores(m: Dict[str, Any]) -> Dict[str, Optional[float]]:
 
     reasoning = reasoning_score(m.get("reasoning"))
 
-    planning = m["planning"]["coverage_pct"]
+    # The share of the area photographed; a search that found everyone is complete (runs since the
+    # control link, vivid2.control): the area it did not need to fly is not counted against it.
+    planning = 100.0 if m["planning"].get("search_complete") else m["planning"]["coverage_pct"]
 
     control = None
     c = m.get("control") or {}

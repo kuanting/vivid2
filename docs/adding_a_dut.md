@@ -48,6 +48,17 @@ Subclass `vivid2.stack.base.Agent` and implement `async run(ctx)`. Use:
 - `ctx.mission`: brief, search polygon, altitude, start position, the number
   of people to find, and the limits you are scored on: speed, timeout, minimum
   height above ground, geofence margin and energy budget (no ground truth).
+- `ctx.mission.control_link`: whether the drone can reach the control team
+  (scenario `comms.control_link`, on by default; `vivid2/control.py`).
+  - **With a link**, reports reach the control team at once. The mission is
+    over when every missing person has been found: the runner then stops
+    your agent (`ctx.should_stop()` turns true, and the task is cancelled
+    within a second), wherever the drone is. Or end the mission yourself by
+    returning from `run()`. You don't need to fly home. On a run with a
+    damage task, finding everyone doesn't end it: return from `run()` when
+    your damage map is done.
+  - **Without a link** (`False`), fly home and land before you return. A
+    drone that isn't home at the end costs 10 safety points.
 - `ctx.mission.terrain`: a coarse bare-ground model, like the public DEM a
   real crew carries: 20 m cells on maps with relief, flat ground otherwise.
   `terrain.down_at(n, e)` gives the NED down of the ground. It has no trees,
@@ -82,7 +93,8 @@ Subclass `vivid2.stack.base.Agent` and implement `async run(ctx)`. Use:
   - `goto(..., yaw_deg=...)` turns on the way, and `turn_to(yaw_deg)` turns on the spot.
   - Headings are degrees: 0 north, 90 east. The default holds the drone's heading.
 - `ctx.pose()`, `ctx.elapsed_s()`, `ctx.should_stop()`: drone pose, mission
-  time, and whether the time limit is up.
+  time, and whether the mission is over (the time limit, or with a link,
+  everyone found).
 - `await ctx.think(fn, *args)`: run your model (a function, in a worker thread, or a
   coroutine function) and return its answer. Thinking takes mission time; in a team, `think`
   also charges the time the clock stood still for other drones' photos.

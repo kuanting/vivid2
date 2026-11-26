@@ -18,6 +18,7 @@ from vivid2.geo import focal_px, quat_to_rot, rpy_to_quat, world_to_pixel
 from vivid2.recorder import Recorder
 from vivid2.scenario import Run, Scenario
 from vivid2.stack.base import Controller, Frame, GTAnnotation, MissionContext, TargetReport, damage_record
+from vivid2.control import ControlStation
 from vivid2.runner import mission_spec
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -140,10 +141,13 @@ class FakeWorld(MissionContext):
 
     One camera, "Payload", on a gimbal (``point_camera``): straight down by default. The drone
     never turns, so the camera's direction is its tilt and pan.
+
+    ``link``: a link to the control team (vivid2.control). Off by default: the offline tests and
+    the goldens fly as before the link, home at the end.
     """
 
     def __init__(self, run: Run, recorder: Recorder, width=960, height=720, fov=80.0, box_px=18, targets=None,
-                 surface=None, surface_max_m=30.0, damage=None):
+                 surface=None, surface_max_m=30.0, damage=None, link=False):
         self.run = run
         self.surface = surface
         self.surface_max_m = surface_max_m
@@ -151,7 +155,10 @@ class FakeWorld(MissionContext):
         self.damage = damage  # a DamageTask (vivid2.damage.run): frames then carry its ground truth, like gt
         self.mission = mission_spec(run, camera={"width": width, "height": height, "fov_deg": fov},
                                     damage=damage.mission_view() if damage is not None else None)
+        self.mission.control_link = bool(link)
         self.targets = targets if targets is not None else run.resolved_targets()
+        self._control = ControlStation.for_run({**run.spec, "comms": {"control_link": True}}, self.targets,
+                                              damage is not None, recorder.log) if link else None
         self.pos = np.asarray(run.spec["dut_start"]["ned"], float)
         self.path: List[np.ndarray] = []
         self.speed = 5.0
@@ -264,22 +271,27 @@ class FakeWorld(MissionContext):
 
     def report_target(self, report: TargetReport) -> None:
         self.reports.append(report)
-        self.recorder.log("reports", {"t": report.t_ns, "t_report": self.t_ns, "frame_id": report.frame_id, "ned": report.ned,
-                                      "confidence": report.confidence, "source": report.source, "note": report.note})
+        record = {"t": report.t_ns, "t_report": self.t_ns, "frame_id": report.frame_id, "ned": report.ned,
+                  "confidence": report.confidence, "source": report.source, "note": report.note}
+        self.recorder.log("reports", record)
+        if self._control is not None:
+            self._control.report(record, cited=0 < report.frame_id <= self.frame_id)
 
     def report_damage(self, report) -> None:
         self.recorder.log("damage", {"t": report.t_ns, "t_report": self.t_ns, **damage_record(report)})
 
     def should_stop(self) -> bool:
-        return self.elapsed_s() >= self.mission.timeout_s
+        return self.elapsed_s() >= self.mission.timeout_s or (self._control is not None and self._control.mission_over())
 
     def elapsed_s(self) -> float:
         return self.t_ns / 1e9
 
 
 def write_meta(recorder: Recorder, run: Run, agent_desc: Dict[str, Any], targets, end_ns: int, end_reason="completed",
-               extra: Optional[Dict[str, Any]] = None):
+               extra: Optional[Dict[str, Any]] = None, control_link: Optional[bool] = None):
+    """``control_link``: recorded as the runner records it (None: left out, a run from before the link)."""
     recorder.write_json("meta.json", {**(extra or {}),
+        **({"control_link": control_link} if control_link is not None else {}),
         "run_id": run.run_id, "scenario_id": run.scenario_id, "seed": run.seed, "params": run.params,
         "mission": run.spec["mission"], "agent": agent_desc, "targets": targets,
         "search_area": run.spec["search_area"], "limits": run.spec["limits"], "success": run.spec.get("success", {}),
